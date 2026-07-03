@@ -105,11 +105,13 @@ class SparseLUDecomposition implements LUDecomposition {
     @Override
     public void solve(DenseMatrix b) {
         solve2(id, b.getRowCount(), b.getColumnCount(), b.getBuffer(), false);
+        b.syncFromBuffer();
     }
 
     @Override
     public void solveTransposed(DenseMatrix b) {
         solve2(id, b.getRowCount(), b.getColumnCount(), b.getBuffer(), true);
+        b.syncFromBuffer();
     }
 
     @Override
