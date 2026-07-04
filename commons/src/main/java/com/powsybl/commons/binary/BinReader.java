@@ -15,7 +15,6 @@ import com.powsybl.commons.io.TreeDataHeader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static com.powsybl.commons.binary.BinUtil.*;
@@ -181,7 +180,7 @@ public class BinReader extends AbstractTreeDataReader {
         if (len == NULL_STRING_SENTINEL) {
             return null;
         }
-        return new String(in.readNBytes(len), StandardCharsets.UTF_8);
+        return in.readString(len);
     }
 
     @Override
