@@ -516,6 +516,17 @@ class ThreeWindingsTransformerImpl extends AbstractConnectable<ThreeWindingsTran
     }
 
     @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        leg1.getOptionalRatioTapChanger().ifPresent(rtc -> ((RatioTapChangerImpl) rtc).reHomeVariantStores(targetNetwork));
+        leg1.getOptionalPhaseTapChanger().ifPresent(ptc -> ((PhaseTapChangerImpl) ptc).reHomeVariantStores(targetNetwork));
+        leg2.getOptionalRatioTapChanger().ifPresent(rtc -> ((RatioTapChangerImpl) rtc).reHomeVariantStores(targetNetwork));
+        leg2.getOptionalPhaseTapChanger().ifPresent(ptc -> ((PhaseTapChangerImpl) ptc).reHomeVariantStores(targetNetwork));
+        leg3.getOptionalRatioTapChanger().ifPresent(rtc -> ((RatioTapChangerImpl) rtc).reHomeVariantStores(targetNetwork));
+        leg3.getOptionalPhaseTapChanger().ifPresent(ptc -> ((PhaseTapChangerImpl) ptc).reHomeVariantStores(targetNetwork));
+    }
+
+    @Override
     protected String getTypeDescription() {
         return "3 windings transformer";
     }

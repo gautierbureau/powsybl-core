@@ -12,7 +12,8 @@ import com.powsybl.iidm.network.HvdcConverterStation;
 import com.powsybl.iidm.network.HvdcLine;
 import com.powsybl.iidm.network.extensions.HvdcOperatorActivePowerRange;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
-import gnu.trove.list.array.TFloatArrayList;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 
 import java.util.Objects;
 
@@ -22,48 +23,48 @@ import java.util.Objects;
  */
 public class HvdcOperatorActivePowerRangeImpl extends AbstractMultiVariantIdentifiableExtension<HvdcLine> implements HvdcOperatorActivePowerRange {
 
-    /**
-     * Operator active power range from the converter station 1 to the converter station 2 in MW.
-     */
-    private TFloatArrayList oprFromCS1toCS2;
+    // Operator active power ranges (MW) from CS1 to CS2 and from CS2 to CS1 are held columnarly in a
+    // network-level NumericVariantStore (structure-of-arrays), so a variant clone copies them all at once.
+    private static final String STORE_KEY = "HvdcOperatorActivePowerRange";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_OPR_CS1_TO_CS2 = 0;
+    private static final int COL_OPR_CS2_TO_CS1 = 1;
 
-    /**
-     * Operator active power range from the converter station 2 to the converter station 1 in MW.
-     */
-    private TFloatArrayList oprFromCS2toCS1;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     public HvdcOperatorActivePowerRangeImpl(HvdcLine hvdcLine, float oprFromCS1toCS2, float oprFromCS2toCS1) {
         super(hvdcLine);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.oprFromCS1toCS2 = new TFloatArrayList(variantArraySize);
-        this.oprFromCS2toCS1 = new TFloatArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.oprFromCS1toCS2.add(checkOPR(oprFromCS1toCS2, hvdcLine.getConverterStation1(), hvdcLine.getConverterStation2()));
-            this.oprFromCS2toCS1.add(checkOPR(oprFromCS2toCS1, hvdcLine.getConverterStation2(), hvdcLine.getConverterStation1()));
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {
+            checkOPR(oprFromCS1toCS2, hvdcLine.getConverterStation1(), hvdcLine.getConverterStation2()),
+            checkOPR(oprFromCS2toCS1, hvdcLine.getConverterStation2(), hvdcLine.getConverterStation1())
+        }, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
     public float getOprFromCS1toCS2() {
-        return oprFromCS1toCS2.get(getVariantIndex());
+        return (float) variantStore.getDouble(getVariantIndex(), COL_OPR_CS1_TO_CS2, variantStoreRow);
     }
 
     @Override
     public HvdcOperatorActivePowerRangeImpl setOprFromCS1toCS2(float oprFromCS1toCS2) {
-        this.oprFromCS1toCS2.set(getVariantIndex(), checkOPR(oprFromCS1toCS2, getExtendable().getConverterStation1(),
-                getExtendable().getConverterStation2()));
+        variantStore.setDouble(getVariantIndex(), COL_OPR_CS1_TO_CS2, variantStoreRow,
+                checkOPR(oprFromCS1toCS2, getExtendable().getConverterStation1(), getExtendable().getConverterStation2()));
         return this;
     }
 
     @Override
     public float getOprFromCS2toCS1() {
-        return oprFromCS2toCS1.get(getVariantIndex());
+        return (float) variantStore.getDouble(getVariantIndex(), COL_OPR_CS2_TO_CS1, variantStoreRow);
     }
 
     @Override
     public HvdcOperatorActivePowerRangeImpl setOprFromCS2toCS1(float oprFromCS2toCS1) {
-        this.oprFromCS2toCS1.set(getVariantIndex(), checkOPR(oprFromCS2toCS1, getExtendable().getConverterStation1(),
-                getExtendable().getConverterStation2()));
+        variantStore.setDouble(getVariantIndex(), COL_OPR_CS2_TO_CS1, variantStoreRow,
+                checkOPR(oprFromCS2toCS1, getExtendable().getConverterStation1(), getExtendable().getConverterStation2()));
         return this;
     }
 
@@ -95,18 +96,12 @@ public class HvdcOperatorActivePowerRangeImpl extends AbstractMultiVariantIdenti
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        oprFromCS1toCS2.ensureCapacity(oprFromCS1toCS2.size() + number);
-        oprFromCS2toCS1.ensureCapacity(oprFromCS2toCS1.size() + number);
-        for (int i = 0; i < number; ++i) {
-            oprFromCS1toCS2.add(oprFromCS1toCS2.get(sourceIndex));
-            oprFromCS2toCS1.add(oprFromCS2toCS1.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        oprFromCS1toCS2.remove(oprFromCS1toCS2.size() - number, number);
-        oprFromCS2toCS1.remove(oprFromCS2toCS1.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -116,9 +111,14 @@ public class HvdcOperatorActivePowerRangeImpl extends AbstractMultiVariantIdenti
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            oprFromCS1toCS2.set(index, oprFromCS1toCS2.get(sourceIndex));
-            oprFromCS2toCS1.set(index, oprFromCS2toCS1.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        double opr12 = variantStore.getDouble(0, COL_OPR_CS1_TO_CS2, variantStoreRow);
+        double opr21 = variantStore.getDouble(0, COL_OPR_CS2_TO_CS1, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {opr12, opr21}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 }

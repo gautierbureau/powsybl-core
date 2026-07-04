@@ -48,7 +48,7 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         this.variantStore = getNetwork().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {reactivePowerSetpoint, voltageSetpoint}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.reactiveLimits = new ReactiveLimitsHolderImpl(this, new MinMaxReactiveLimitsImpl(-Double.MAX_VALUE, Double.MAX_VALUE));
-        regulatingPoint = new RegulatingPoint(id, () -> null, variantArraySize, voltageRegulatorOn, true);
+        regulatingPoint = new RegulatingPoint(id, () -> null, ref, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(pccTerminal);
     }
 
@@ -183,6 +183,7 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         double vs0 = variantStore.getDouble(0, COL_VOLTAGE_SETPOINT, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {rps0, vs0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

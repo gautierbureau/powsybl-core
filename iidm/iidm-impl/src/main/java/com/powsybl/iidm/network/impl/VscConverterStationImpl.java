@@ -41,7 +41,7 @@ class VscConverterStationImpl extends AbstractHvdcConverterStation<VscConverterS
         this.variantStoreRow = variantStore.allocateRow(
                 new double[] {reactivePowerSetpoint, voltageSetpoint}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.reactiveLimits = new ReactiveLimitsHolderImpl(this, new MinMaxReactiveLimitsImpl(-Double.MAX_VALUE, Double.MAX_VALUE));
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, voltageRegulatorOn, true);
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, ref, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
     }
 
@@ -166,6 +166,7 @@ class VscConverterStationImpl extends AbstractHvdcConverterStation<VscConverterS
         double voltageSetpoint0 = variantStore.getDouble(0, COL_VOLTAGE_SETPOINT, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {reactivePowerSetpoint0, voltageSetpoint0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

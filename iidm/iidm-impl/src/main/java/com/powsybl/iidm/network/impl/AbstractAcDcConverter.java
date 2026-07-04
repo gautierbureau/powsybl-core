@@ -67,7 +67,7 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
         int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
         this.variantStore = getNetwork().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {targetP, targetVdc}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        pccRegulatingPoint = new RegulatingPoint(id, () -> (TerminalExt) getTerminal1(), variantArraySize, controlMode.ordinal(), ControlMode.V_DC.ordinal(), false);
+        pccRegulatingPoint = new RegulatingPoint(id, () -> (TerminalExt) getTerminal1(), ref, controlMode.ordinal(), ControlMode.V_DC.ordinal(), false);
         pccRegulatingPoint.setRegulatingTerminal(pccTerminal);
 
     }
@@ -390,6 +390,7 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
         for (DcTerminalImpl t : dcTerminals) {
             t.reHomeVariantStores(targetNetwork);
         }
+        pccRegulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

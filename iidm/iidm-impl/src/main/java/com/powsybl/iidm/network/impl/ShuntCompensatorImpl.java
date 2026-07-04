@@ -55,7 +55,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         super(network, id, name, fictitious);
         this.network = network;
         int variantArraySize = this.network.get().getVariantManager().getVariantArraySize();
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, voltageRegulatorOn, true);
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, network, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
         this.sectionCount = new ArrayList<>(variantArraySize);
         this.solvedSectionCount = new ArrayList<>(variantArraySize);
@@ -312,6 +312,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0, targetDeadband0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

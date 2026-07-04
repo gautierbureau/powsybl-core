@@ -58,7 +58,7 @@ class GeneratorImpl extends AbstractConnectable<Generator> implements Generator,
         this.reactiveLimits = new ReactiveLimitsHolderImpl(this, new MinMaxReactiveLimitsImpl(-Double.MAX_VALUE, Double.MAX_VALUE));
         this.ratedS = ratedS;
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, voltageRegulatorOn, true);
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, network, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
         this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(
@@ -305,6 +305,7 @@ class GeneratorImpl extends AbstractConnectable<Generator> implements Generator,
         double eq0 = variantStore.getDouble(0, COL_EQ_TARGET_V, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {p0, q0, v0, eq0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

@@ -161,6 +161,22 @@ public class NumericVariantStore implements VariantColumnStore {
         return old;
     }
 
+    /** Set an int column of a row to the same value in every live variant band. */
+    public void fillInt(int col, int row, int value) {
+        int[] data = ints;
+        for (int v = 0; v < variantSize; v++) {
+            data[intIndex(v, col, row)] = value;
+        }
+    }
+
+    /** Set a boolean column of a row to the same value in every live variant band. */
+    public void fillBoolean(int col, int row, boolean value) {
+        boolean[] data = booleans;
+        for (int v = 0; v < variantSize; v++) {
+            data[booleanIndex(v, col, row)] = value;
+        }
+    }
+
     public boolean getBoolean(int variant, int col, int row) {
         return booleans[booleanIndex(variant, col, row)];
     }

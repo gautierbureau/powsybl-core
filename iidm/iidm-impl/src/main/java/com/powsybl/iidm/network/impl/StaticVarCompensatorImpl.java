@@ -42,7 +42,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         this.bMin = bMin;
         this.bMax = bMax;
         int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, regulationMode != null ? regulationMode.ordinal() : -1,
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, ref, regulationMode != null ? regulationMode.ordinal() : -1,
             regulating, RegulationMode.VOLTAGE.ordinal(), regulationMode == RegulationMode.VOLTAGE);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
         this.variantStore = ref.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
@@ -195,6 +195,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         double reactivePowerSetpoint0 = variantStore.getDouble(0, COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(new double[] {voltageSetpoint0, reactivePowerSetpoint0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

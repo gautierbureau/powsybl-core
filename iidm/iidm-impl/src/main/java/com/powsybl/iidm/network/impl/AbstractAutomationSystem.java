@@ -8,7 +8,6 @@
 package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.AutomationSystem;
 
 import java.util.Objects;
@@ -17,40 +16,45 @@ import java.util.Objects;
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
 abstract class AbstractAutomationSystem<I extends AutomationSystem<I>> extends AbstractIdentifiable<I> implements AutomationSystem<I> {
-    private final TBooleanArrayList enabled;
+
+    // enabled is held columnarly in a network-level NumericVariantStore (structure-of-arrays) shared by all
+    // automation systems, so a variant clone copies it at once with a bulk array copy instead of per object.
+    private static final String STORE_KEY = "AutomationSystem";
+    private static final double[] DOUBLE_DEFAULTS = {};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_ENABLED = 0;
+
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     AbstractAutomationSystem(Ref<NetworkImpl> networkRef, String id, String name, boolean enabled) {
         super(id, name);
         Objects.requireNonNull(networkRef);
-
-        int variantArraySize = networkRef.get().getVariantManager().getVariantArraySize();
-        this.enabled = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.enabled.add(enabled);
-        }
+        this.variantStore = networkRef.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {enabled});
     }
 
     @Override
     public boolean isEnabled() {
-        return enabled.get(getNetwork().getVariantIndex());
+        return variantStore.getBoolean(getNetwork().getVariantIndex(), COL_ENABLED, variantStoreRow);
     }
 
     @Override
     public void setEnabled(boolean enabled) {
-        this.enabled.set(getNetwork().getVariantIndex(), enabled);
+        variantStore.setBoolean(getNetwork().getVariantIndex(), COL_ENABLED, variantStoreRow, enabled);
     }
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        enabled.ensureCapacity(enabled.size() + number);
-        enabled.fill(initVariantArraySize, initVariantArraySize + number, enabled.get(sourceIndex));
+        // enabled handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        enabled.remove(enabled.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -62,8 +66,14 @@ abstract class AbstractAutomationSystem<I extends AutomationSystem<I>> extends A
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            enabled.set(index, enabled.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        boolean enabled0 = variantStore.getBoolean(0, COL_ENABLED, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {enabled0});
     }
 }
