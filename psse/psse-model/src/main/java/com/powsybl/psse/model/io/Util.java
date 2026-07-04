@@ -12,10 +12,13 @@ import org.apache.commons.lang3.ArrayUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
@@ -29,6 +32,20 @@ import java.util.stream.Collectors;
 public final class Util {
 
     private static final BinaryOperator<String> DEFAULT_SUFFIX_ADDER = (header, suffix) -> header + suffix;
+
+    // The suffixed field map depends only on the field-definition map and the suffix, both constant across
+    // a record group; cache it (keyed by the identity of the static FIELDS map, then by suffix) instead of
+    // rebuilding it - a stream plus a suffixAdder call per field - for every parsed/written record.
+    private static final Map<Object, Map<String, Object>> SUFFIXED_FIELDS_CACHE = Collections.synchronizedMap(new IdentityHashMap<>());
+
+    @SuppressWarnings("unchecked")
+    private static <T> Map<String, PsseFieldDefinition<T, ?>> fieldsWithSuffix(Map<String, PsseFieldDefinition<T, ?>> fields, String headerSuffix) {
+        Map<String, Object> bySuffix = SUFFIXED_FIELDS_CACHE.computeIfAbsent(fields, k -> new ConcurrentHashMap<>());
+        return (Map<String, PsseFieldDefinition<T, ?>>) bySuffix.computeIfAbsent(headerSuffix, suffix ->
+            fields.entrySet().stream().collect(Collectors.toMap(
+                entry -> entry.getValue().suffixAdder().apply(entry.getKey(), suffix),
+                Map.Entry::getValue)));
+    }
 
     private Util() {
     }
@@ -135,10 +152,7 @@ public final class Util {
         try {
             T obj = instanceSupplier.get();
 
-            Map<String, PsseFieldDefinition<T, ?>> fieldsWithSuffix = fields.entrySet().stream()
-                .collect(Collectors.toMap(
-                    entry -> entry.getValue().suffixAdder().apply(entry.getKey(), headerSuffix),
-                    Map.Entry::getValue));
+            Map<String, PsseFieldDefinition<T, ?>> fieldsWithSuffix = fieldsWithSuffix(fields, headerSuffix);
 
             for (String header : headers) {
                 PsseFieldDefinition<T, ?> fieldDefinition = fieldsWithSuffix.get(header);
@@ -227,10 +241,7 @@ public final class Util {
 
     public static <T> void toRecord(T obj, String[] headers, Map<String, PsseFieldDefinition<T, ?>> fields,
                                         String[] row, Set<String> unexpectedHeaders, String headerSuffix) {
-        Map<String, PsseFieldDefinition<T, ?>> fieldsWithSuffix = fields.entrySet().stream()
-            .collect(Collectors.toMap(
-                entry -> entry.getValue().suffixAdder().apply(entry.getKey(), headerSuffix),
-                Map.Entry::getValue));
+        Map<String, PsseFieldDefinition<T, ?>> fieldsWithSuffix = fieldsWithSuffix(fields, headerSuffix);
 
         for (int i = 0; i < headers.length; i++) {
             String header = headers[i];
