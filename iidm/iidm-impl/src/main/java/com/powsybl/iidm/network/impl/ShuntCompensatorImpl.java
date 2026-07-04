@@ -9,7 +9,6 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,11 +37,16 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     /* the solved number of section switched on */
     private final ArrayList<Integer> solvedSectionCount;
 
-    /* the target voltage value */
-    private final TDoubleArrayList targetV;
+    // variant-dependent targetV / targetDeadband held columnarly (see NumericVariantStore)
+    private static final String STORE_KEY = "ShuntCompensator";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_TARGET_V = 0;
+    private static final int COL_TARGET_DEADBAND = 1;
 
-    /* the target deadband */
-    private final TDoubleArrayList targetDeadband;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     ShuntCompensatorImpl(Ref<NetworkImpl> network,
                          String id, String name, boolean fictitious, ShuntCompensatorModelExt model,
@@ -55,14 +59,13 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
         this.sectionCount = new ArrayList<>(variantArraySize);
         this.solvedSectionCount = new ArrayList<>(variantArraySize);
-        this.targetV = new TDoubleArrayList(variantArraySize);
-        this.targetDeadband = new TDoubleArrayList(variantArraySize);
         for (int i = 0; i < variantArraySize; i++) {
             this.sectionCount.add(sectionCount);
             this.solvedSectionCount.add(checkSolvedSectionCount(solvedSectionCount, model.getMaximumSectionCount()));
-            this.targetV.add(targetV);
-            this.targetDeadband.add(targetDeadband);
         }
+        this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {targetV, targetDeadband}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.model = Objects.requireNonNull(model).attach(this);
     }
 
@@ -209,9 +212,9 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensatorImpl setVoltageRegulatorOn(boolean voltageRegulatorOn) {
         NetworkImpl n = getNetwork();
         int variantIndex = network.get().getVariantIndex();
-        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn, targetV.get(variantIndex),
+        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn, variantStore.getDouble(variantIndex, COL_TARGET_V, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, voltageRegulatorOn, targetDeadband.get(variantIndex),
+        ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, voltageRegulatorOn, variantStore.getDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         boolean oldValue = regulatingPoint.setRegulating(variantIndex, voltageRegulatorOn);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
@@ -222,7 +225,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public double getTargetV() {
-        return targetV.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_TARGET_V, variantStoreRow);
     }
 
     @Override
@@ -231,7 +234,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         int variantIndex = network.get().getVariantIndex();
         ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), targetV,
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.targetV.set(variantIndex, targetV);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_V, variantStoreRow, targetV);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("targetV", variantId, oldValue, targetV);
@@ -240,7 +243,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public double getTargetDeadband() {
-        return targetDeadband.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_TARGET_DEADBAND, variantStoreRow);
     }
 
     @Override
@@ -249,7 +252,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         int variantIndex = network.get().getVariantIndex();
         ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, regulatingPoint.isRegulating(variantIndex), targetDeadband,
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.targetDeadband.set(variantIndex, targetDeadband);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow, targetDeadband);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("targetDeadband", variantId, oldValue, targetDeadband);
@@ -267,13 +270,9 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         sectionCount.ensureCapacity(sectionCount.size() + number);
         solvedSectionCount.ensureCapacity(solvedSectionCount.size() + number);
-        targetV.ensureCapacity(targetV.size() + number);
-        targetDeadband.ensureCapacity(targetDeadband.size() + number);
         for (int i = 0; i < number; i++) {
             sectionCount.add(sectionCount.get(sourceIndex));
             solvedSectionCount.add(solvedSectionCount.get(sourceIndex));
-            targetV.add(targetV.get(sourceIndex));
-            targetDeadband.add(targetDeadband.get(sourceIndex));
         }
         regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
     }
@@ -287,8 +286,6 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         List<Integer> solvedSectionCountTmp = new ArrayList<>(solvedSectionCount.subList(0, solvedSectionCount.size() - number));
         solvedSectionCount.clear();
         solvedSectionCount.addAll(solvedSectionCountTmp);
-        targetV.remove(targetV.size() - number, number);
-        targetDeadband.remove(targetDeadband.size() - number, number);
         regulatingPoint.reduceVariantArraySize(number);
     }
 
@@ -304,10 +301,17 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         for (int index : indexes) {
             sectionCount.set(index, sectionCount.get(sourceIndex));
             solvedSectionCount.set(index, solvedSectionCount.get(sourceIndex));
-            targetV.set(index, targetV.get(sourceIndex));
-            targetDeadband.set(index, targetDeadband.get(sourceIndex));
         }
         regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        double targetV0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
+        double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0, targetDeadband0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override

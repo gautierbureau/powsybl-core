@@ -30,7 +30,7 @@ import java.util.Deque;
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
-class NumericVariantStore implements VariantColumnStore {
+public class NumericVariantStore implements VariantColumnStore {
 
     private static final int DEFAULT_ROW_CAPACITY = 16;
 
@@ -81,7 +81,7 @@ class NumericVariantStore implements VariantColumnStore {
     }
 
     /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
-    int allocateRow() {
+    public int allocateRow() {
         int row;
         if (!freeRows.isEmpty()) {
             row = freeRows.pop();
@@ -113,7 +113,7 @@ class NumericVariantStore implements VariantColumnStore {
      * per-object constructor did, filling every variant with the object's initial values). The array lengths
      * must match the store's column counts.
      */
-    int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
+    public int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
         int row = allocateRow();
         double[] dd = doubles;
         int[] id = ints;
@@ -133,15 +133,15 @@ class NumericVariantStore implements VariantColumnStore {
     }
 
     /** Release the row of a removed object for reuse. */
-    void freeRow(int row) {
+    public void freeRow(int row) {
         freeRows.push(row);
     }
 
-    double getDouble(int variant, int col, int row) {
+    public double getDouble(int variant, int col, int row) {
         return doubles[doubleIndex(variant, col, row)];
     }
 
-    double setDouble(int variant, int col, int row, double value) {
+    public double setDouble(int variant, int col, int row, double value) {
         double[] data = doubles;
         int i = doubleIndex(variant, col, row);
         double old = data[i];
@@ -149,11 +149,11 @@ class NumericVariantStore implements VariantColumnStore {
         return old;
     }
 
-    int getInt(int variant, int col, int row) {
+    public int getInt(int variant, int col, int row) {
         return ints[intIndex(variant, col, row)];
     }
 
-    int setInt(int variant, int col, int row, int value) {
+    public int setInt(int variant, int col, int row, int value) {
         int[] data = ints;
         int i = intIndex(variant, col, row);
         int old = data[i];
@@ -161,11 +161,11 @@ class NumericVariantStore implements VariantColumnStore {
         return old;
     }
 
-    boolean getBoolean(int variant, int col, int row) {
+    public boolean getBoolean(int variant, int col, int row) {
         return booleans[booleanIndex(variant, col, row)];
     }
 
-    boolean setBoolean(int variant, int col, int row, boolean value) {
+    public boolean setBoolean(int variant, int col, int row, boolean value) {
         boolean[] data = booleans;
         int i = booleanIndex(variant, col, row);
         boolean old = data[i];

@@ -11,7 +11,6 @@ import com.google.common.collect.Iterables;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -30,9 +29,15 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
 
     protected boolean removed = false;
 
-    // attributes depending on the variant
+    // attributes depending on the variant, held columnarly (see NumericVariantStore)
+    private static final String STORE_KEY = "Area";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_INTERCHANGE_TARGET = 0;
 
-    private final TDoubleArrayList interchangeTarget;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private final Referrer<Terminal> terminalReferrer = new Referrer<>() {
         @Override
@@ -69,11 +74,8 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
         this.voltageLevels = new LinkedHashSet<>();
         this.areaBoundaries = new ArrayList<>();
 
-        int variantArraySize = networkRef.get().getVariantManager().getVariantArraySize();
-        this.interchangeTarget = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.interchangeTarget.add(interchangeTarget);
-        }
+        this.variantStore = networkRef.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {interchangeTarget}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
@@ -114,7 +116,7 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
     @Override
     public OptionalDouble getInterchangeTarget() {
         throwIfRemoved("interchange target");
-        double target = interchangeTarget.get(getNetwork().getVariantIndex());
+        double target = variantStore.getDouble(getNetwork().getVariantIndex(), COL_INTERCHANGE_TARGET, variantStoreRow);
         if (Double.isNaN(target)) {
             return OptionalDouble.empty();
         }
@@ -125,7 +127,7 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
     public Area setInterchangeTarget(double interchangeTarget) {
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        double oldValue = this.interchangeTarget.set(variantIndex, interchangeTarget);
+        double oldValue = variantStore.setDouble(variantIndex, COL_INTERCHANGE_TARGET, variantStoreRow, interchangeTarget);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("interchangeTarget", variantId, oldValue, interchangeTarget);
         return this;
@@ -270,19 +272,16 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
         getNetwork().getListeners().notifyUpdate(this, attribute, variantId, oldValue, newValue);
     }
 
+    // interchangeTarget is maintained columnarly by the network-level store,
+    // driven once per variant operation by NetworkImpl; these hooks only cascade to super.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        interchangeTarget.ensureCapacity(interchangeTarget.size() + number);
-        for (int i = 0; i < number; i++) {
-            interchangeTarget.add(interchangeTarget.get(sourceIndex));
-        }
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        interchangeTarget.remove(interchangeTarget.size() - number, number);
     }
 
     @Override
@@ -294,9 +293,14 @@ public class AreaImpl extends AbstractIdentifiable<Area> implements Area {
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            interchangeTarget.set(index, interchangeTarget.get(sourceIndex));
-        }
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // extensions
+        double it0 = variantStore.getDouble(0, COL_INTERCHANGE_TARGET, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {it0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
 }
