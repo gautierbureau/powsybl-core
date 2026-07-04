@@ -31,7 +31,7 @@ Median wall-clock per operation, PEGASE 13 659:
 
 | Operation | before (ms) | after (ms) | Δ | Δ% | Read |
 |---|---:|---:|---:|---:|---|
-| `cgmes-import`             | 7388 | 7198 | −190  |  −3% | hot path #1, mostly untouched |
+| `cgmes-import`             | 7388 | 7198 | −190  |  −3% | hot path #1; further −9.5% with the query cache, see §6 |
 | `variant-clone-remove` ×50 | 6393 | 6334 | −59   |  −1% | hot path #2, mostly untouched |
 | `cgmes-export`            | 3447 | 3201 | −246  |  −7% | modest win |
 | `regex-criterion` ×20     | 2456 | 1389 | −1067 | **−43%** | clear win |
@@ -55,8 +55,10 @@ survive that noise:
 - **`cgmes-export` −7 %** — from `isValidCimMasterRID` length-dispatch, the
   naming-strategy fixes and the hoisted lookups. Larger absolute base, so less
   noise-prone.
-- **`variant-clone-remove` and `cgmes-import` essentially flat** — this is the
-  key profiling result, see §4.
+- **`variant-clone-remove` and `cgmes-import` essentially flat in the initial
+  batch** — this is the key profiling result (§4). `cgmes-import` was then
+  addressed directly with a query cache (**−9.5 %**, §6); `variant-clone` remains
+  open (§7.B/C).
 
 ## 3. Where the hot paths are
 
@@ -86,7 +88,9 @@ The cost is dominated by the triplestore SPARQL evaluation and the conversion
 walk, not by the O(n²) map scans fixed in `NodeContainerMapping` (those helped,
 but they are a small fraction of the 7.4 s here — this case has few merged
 containers). The `NodeContainerMapping` inverse-index fix is real but only pays
-off on models with large substation/voltage-level merge sets.
+off on models with large substation/voltage-level merge sets. The SPARQL
+evaluation cost itself is the lever, and it was subsequently reduced by caching
+the repeated structural queries (**−9.5 %**, §6).
 
 ### Variant clone/remove (6.4 s for 50×)
 The `VariantManagerImpl` change removes *redundant* full-network scans, but this
@@ -130,18 +134,54 @@ Algorithmic fixes that help on other shapes than this case:
   transformer id/name, map-keyed DC converter units, single EI-terminal-id
   computation.
 
-## 6. Remaining opportunities (not implemented), ranked by the benchmark
+## 6. Query-cache follow-up on CGMES import (implemented — opportunity A)
+
+Opportunity A below was the highest-leverage remaining item, so it was
+implemented and measured in isolation.
+
+**Profiling first.** Instrumenting `CgmesModelTripleStore.namedQuery` (per-name
+call count + cumulative time) during a single PEGASE import confirmed the
+structural queries are re-run several times on the *same, unchanged* triple
+store. The costly repeats:
+
+| query | calls | total ms | redundant ms (≈) |
+|---|---:|---:|---:|
+| `terminals`        | 3 | 1195 | ~800 |
+| `acLineSegments`   | 2 |  442 | ~220 |
+| `modelProfiles`    | 3 |   93 | ~60 |
+| `shuntCompensators`| 2 |   61 | ~30 |
+| `transformers`     | 2 |   39 | ~20 |
+| `energyConsumers`  | 2 |   40 | ~20 |
+| `regulatingControls`| 2 |  34 | ~17 |
+| `switches`         | 3 |   14 | ~9 |
+| others (×2–4)      | — |   — | ~40 |
+
+**Fix.** Cache the result of parameterless named queries in
+`CgmesModelTripleStore` and return the cached `PropertyBags` — mirroring the
+existing `connectivityNodes()`/`topologicalNodes()` caching, which already
+returns its cached instance directly. The cache is invalidated on **every**
+triple-store mutation (`read(is)`, `update`, `add`, `clear`) and via
+`invalidateCaches()`/`setQueryCatalog`, so the update/write flows can never see
+stale data. Parameterized queries are not cached (their result depends on the
+injected parameters).
+
+**Isolated measurement** (same JVM session, back-to-back, 2 warmup + 8 runs,
+median; only the `CgmesModelTripleStore` change differs between the two):
+
+| | median | runs |
+|---|---:|---|
+| before (no cache) | 7567 ms | 7380–7864 |
+| after (cache)     | 6850 ms | 6712–7138 |
+
+**−717 ms, −9.5 %** on the #1 hot path. This is unambiguous: the after run's
+*slowest* iteration (7138 ms) is below the before run's *fastest* (7380 ms), so
+the two distributions do not overlap — it is not cross-run noise. All 522
+cgmes-model + cgmes-conversion tests pass with the cache in place, exercising the
+import + update + export paths that a stale-cache bug would break.
+
+## 7. Remaining opportunities (not implemented), ranked by the benchmark
 
 These are ordered by where the time actually is on this case.
-
-### A. Cache parameterless structural SPARQL queries in `CgmesModelTripleStore` — *highest leverage*
-`switches()`, `terminals()`, `acLineSegments()`, `transformers()`,
-`transformerEnds()` each run a full-table SPARQL evaluation and are invoked
-2–3× per import (the source even carries "consider caching…" hints). CGMES import
-is the #1 hot path (7.4 s); memoizing these results (cleared on
-`read`/`invalidateCaches`/`setQueryCatalog`) is the single most promising change.
-**Risk:** must not serve stale data to the update/write flows — cache only the
-read-during-import queries, with explicit invalidation.
 
 ### B. Reduce per-object variant-array cost — *addresses hot path #2*
 Variant clone/remove is O(stateful objects) per operation because each
@@ -174,7 +214,7 @@ indexed concrete type (`getGenerators()` etc. use O(1) buckets). Delegating to
 `index.getAll(clazz)` when the class is indexed avoids the full scan. **Risk:**
 low; only affects generic-typed callers.
 
-## 7. Caveats / how to reproduce
+## 8. Caveats / how to reproduce
 
 - The before/after numbers are **separate JVM runs**; treat sub-20 % deltas on
   the fast stages as inside the noise. For publication-grade numbers, run BEFORE
