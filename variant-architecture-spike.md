@@ -219,6 +219,53 @@ heterogeneous per-variant *objects*, not primitives, so the columnar arraycopy
 technique does not apply. After the primitive sweep, this is what remains of the clone
 cost, and it is a genuine architectural boundary rather than more of the same work.
 
+## Full replacement (toward a dedicated PR)
+
+The prototype was carried through to a near-complete replacement of the per-object
+trove variant storage. Infrastructure added to make it scale:
+
+- **`NumericVariantStore`** now holds `double` + `int` + `boolean` columns with
+  per-column defaults, per-instance-init `allocateRow`, and row recycling — a single
+  generic store type for any object.
+- **Lazy keyed registry** on `NetworkImpl`
+  (`getOrCreateNumericVariantStore(key, …)`): a new columnar object type needs no
+  `NetworkImpl` change, just a store key and a cached reference in the object.
+- **Generic re-home cascade**: `reHomeVariantStores(NetworkImpl)` is a
+  `MultiVariantObject` method cascading exactly like `extendVariantArraySize`
+  (`AbstractIdentifiable` → extensions, `AbstractConnectable` → terminals,
+  `AbstractDcConnectable` → DC terminals), so each converted class overrides only a
+  local re-home of its own rows. Merge/detach iterate identifiables and cascade.
+
+**Converted (≈24 classes / all high- and mid-cardinality primitive per-variant state):**
+terminal p/q, switch open/retained, node-terminal v/angle/CC/SC, configured-bus
+numerics; injection equipment (generator, load, battery, shunt, SVC, VSC, HVDC line,
+boundary line + generation, area); bus-terminal `connected`; the whole DC subsystem
+(DC switch, DC node, DC terminal, AC/DC + voltage-source converters); and 9
+extensions (active-power control, standby automaton, load detail, voltage regulation,
+remote reactive power, coordinated reactive control, HVDC angle-droop, control unit,
+pilot point).
+
+**Deliberately left on trove (a small, clean boundary):**
+- **Tap changers and `RegulatingPoint`** — low-cardinality sub-objects that also carry
+  *object-valued* per-variant state (the regulating terminal reference), which is not
+  columnar-friendly. Being self-contained trove, they survive merge/detach with no
+  re-home and coexist safely.
+- Object-valued per-variant state everywhere (bus-terminal `connectableBusId` string
+  list, configured-bus terminal lists, shunt section-count lists, regulating
+  terminals) and the object-based `VariantArray<Variant>` topology/bus-view caches —
+  not primitive, so out of scope for columnar storage.
+
+**Correctness:** iidm-impl 997/997, iidm-serde golden-file 303/303,
+cgmes-conversion 486/486 (assembled/merged microgrid round trips),
+iidm-modification + security-analysis-api 532/532 — all byte-identical.
+
+**A bug the wide test surface caught:** a cached-store-reference class must update
+*both* its row **and** its store reference on re-home. `NodeTerminal` initially updated
+only the row, so after a merge/detach it read a foreign store with a stale row —
+an `ArrayIndexOutOfBounds` that only surfaced in the CGMES merged/assembled cases,
+not the basic merge test. Fixed; the pattern is now uniform across all converted
+classes.
+
 ## Recommendation
 
 1. **Do not pursue copy-on-write** — it breaks the concurrency contract.
