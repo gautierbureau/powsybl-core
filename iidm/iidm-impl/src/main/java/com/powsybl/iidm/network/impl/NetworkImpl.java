@@ -63,6 +63,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     private final VariantManagerImpl variantManager;
 
+    private final TerminalVariantStore terminalVariantStore;
+
     private AbstractReportNodeContext reportNodeContext;
 
     private final NetworkListenerList listeners = new NetworkListenerList();
@@ -130,6 +132,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
+        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
         variants = new VariantArray<>(ref, VariantImpl::new);
         // add the network the object list as it is a multi variant object
         // and it needs to be notified when and extension or a reduction of
@@ -231,6 +234,11 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     @Override
     public VariantManagerImpl getVariantManager() {
         return variantManager;
+    }
+
+    @Override
+    public TerminalVariantStore getTerminalVariantStore() {
+        return terminalVariantStore;
     }
 
     @Override
@@ -1202,6 +1210,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
+        // columnar terminal p/q: extended once for the whole network instead of once per terminal
+        terminalVariantStore.extend(number, sourceIndex);
+
         variants.push(number, () -> variants.copy(sourceIndex));
     }
 
@@ -1210,6 +1221,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         super.reduceVariantArraySize(number);
         dcTopologyModel.reduceVariantArraySize(number);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().reduceVariantArraySize(number));
+
+        terminalVariantStore.reduce(number);
 
         variants.pop(number);
     }
@@ -1220,6 +1233,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.deleteVariantArrayElement(index);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().deleteVariantArrayElement(index));
 
+        terminalVariantStore.delete(index);
+
         variants.delete(index);
     }
 
@@ -1228,6 +1243,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         super.allocateVariantArrayElement(indexes, sourceIndex);
         dcTopologyModel.allocateVariantArrayElement(indexes, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
+
+        terminalVariantStore.allocate(indexes, sourceIndex);
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
     }
@@ -1268,6 +1285,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         }
         for (BoundaryLine dl2 : findCandidateBoundaryLines(other, dl1byPairingKey::containsKey)) {
             findAndAssociateBoundaryLines(dl2, dl1byPairingKey::get, (dll1, dll2) -> pairBoundaryLines(lines, dll1, dll2, dl1byPairingKey));
+        }
+
+        // re-home the merged network's terminal p/q into this (root) columnar store, before createSubnetwork
+        // redirects the merged elements' network references
+        TerminalVariantStore rootStore = getTerminalVariantStore();
+        for (Identifiable<?> i : otherNetwork.getIdentifiables()) {
+            if (i instanceof AbstractConnectable<?> connectable) {
+                for (TerminalExt t : connectable.getTerminals()) {
+                    ((AbstractTerminal) t).reHomeVariantStore(rootStore);
+                }
+            }
         }
 
         // create a subnetwork for the other network

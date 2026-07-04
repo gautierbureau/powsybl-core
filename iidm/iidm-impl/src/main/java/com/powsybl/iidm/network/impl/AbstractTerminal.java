@@ -11,7 +11,6 @@ import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
 import com.powsybl.iidm.network.util.SwitchPredicates;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -38,9 +37,10 @@ abstract class AbstractTerminal implements TerminalExt {
 
     // attributes depending on the variant
 
-    protected final TDoubleArrayList p;
-
-    protected final TDoubleArrayList q;
+    // p/q are held columnarly in the network-level TerminalVariantStore (structure-of-arrays), so a
+    // variant clone extends all terminals at once with a bulk array copy instead of once per terminal.
+    // This terminal owns a single row in that store (re-homed if the terminal moves network on merge/detach).
+    protected int variantStoreRow;
 
     protected boolean removed = false;
 
@@ -51,13 +51,7 @@ abstract class AbstractTerminal implements TerminalExt {
         this.side = side;
         this.terminalNumber = terminalNumber;
         this.network = network;
-        int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        p = new TDoubleArrayList(variantArraySize);
-        q = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            p.add(Double.NaN);
-            q.add(Double.NaN);
-        }
+        this.variantStoreRow = network.get().getTerminalVariantStore().allocateRow();
     }
 
     @Override
@@ -109,7 +103,8 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access p of removed equipment " + connectable.id);
         }
-        return p.get(network.get().getVariantIndex());
+        VariantManagerHolder holder = network.get();
+        return holder.getTerminalVariantStore().getP(holder.getVariantIndex(), variantStoreRow);
     }
 
     @Override
@@ -121,7 +116,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new ValidationException(connectable, "cannot set active power on a busbar section");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.p.set(variantIndex, p);
+        double oldValue = network.get().getTerminalVariantStore().setP(variantIndex, variantStoreRow, p);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         getConnectable().notifyUpdate(() -> "p" + getAttributeSideOrNumberSuffix(), variantId, oldValue, p);
         return this;
@@ -132,7 +127,8 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access q of removed equipment " + connectable.id);
         }
-        return q.get(network.get().getVariantIndex());
+        VariantManagerHolder holder = network.get();
+        return holder.getTerminalVariantStore().getQ(holder.getVariantIndex(), variantStoreRow);
     }
 
     @Override
@@ -144,7 +140,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new ValidationException(connectable, "cannot set reactive power on a busbar section");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.q.set(variantIndex, q);
+        double oldValue = network.get().getTerminalVariantStore().setQ(variantIndex, variantStoreRow, q);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         getConnectable().notifyUpdate(() -> "q" + getAttributeSideOrNumberSuffix(), variantId, oldValue, q);
         return this;
@@ -160,8 +156,10 @@ abstract class AbstractTerminal implements TerminalExt {
         if (connectable.getType() == IdentifiableType.BUSBAR_SECTION) {
             return 0;
         }
-        int variantIndex = network.get().getVariantIndex();
-        return Math.hypot(p.get(variantIndex), q.get(variantIndex))
+        VariantManagerHolder holder = network.get();
+        int variantIndex = holder.getVariantIndex();
+        TerminalVariantStore store = holder.getTerminalVariantStore();
+        return Math.hypot(store.getP(variantIndex, variantStoreRow), store.getQ(variantIndex, variantStoreRow))
                 / (Math.sqrt(3.) * getV() / 1000);
     }
 
@@ -209,20 +207,17 @@ abstract class AbstractTerminal implements TerminalExt {
         return disconnected;
     }
 
+    // The variant-dependent p/q are maintained columnarly by the network-level TerminalVariantStore, which
+    // the root network extends/reduces/allocates once per variant operation (see NetworkImpl). These
+    // per-terminal hooks therefore have nothing to do for p/q; subclasses still handle their own arrays.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        p.ensureCapacity(p.size() + number);
-        q.ensureCapacity(q.size() + number);
-        for (int i = 0; i < number; i++) {
-            p.add(p.get(sourceIndex));
-            q.add(q.get(sourceIndex));
-        }
+        // p/q handled by TerminalVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        p.remove(p.size() - number, number);
-        q.remove(q.size() - number, number);
+        // p/q handled by TerminalVariantStore
     }
 
     @Override
@@ -232,10 +227,20 @@ abstract class AbstractTerminal implements TerminalExt {
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            p.set(index, p.get(sourceIndex));
-            q.set(index, q.get(sourceIndex));
-        }
+        // p/q handled by TerminalVariantStore
+    }
+
+    /**
+     * Move this terminal's p/q into {@code newStore}, allocating a fresh row there. Called when the terminal
+     * changes network (merge/detach), before the network reference is redirected, so {@code network.get()}
+     * still resolves to the current owner. Only single-variant networks can be merged/detached, so only the
+     * initial variant is transferred.
+     */
+    void reHomeVariantStore(TerminalVariantStore newStore) {
+        TerminalVariantStore oldStore = network.get().getTerminalVariantStore();
+        double p0 = oldStore.getP(0, variantStoreRow);
+        double q0 = oldStore.getQ(0, variantStoreRow);
+        this.variantStoreRow = newStore.importRow(p0, q0);
     }
 
     @Override

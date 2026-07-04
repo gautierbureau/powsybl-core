@@ -17,4 +17,10 @@ public interface VariantManagerHolder {
 
     int getVariantIndex();
 
+    /**
+     * Network-level columnar store for the variant-dependent terminal {@code p}/{@code q}. Shared by every
+     * terminal (including those in subnetworks), it is owned and structurally maintained by the root network.
+     */
+    TerminalVariantStore getTerminalVariantStore();
+
 }

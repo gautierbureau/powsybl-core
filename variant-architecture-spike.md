@@ -88,6 +88,40 @@ types × 55 000 receivers.
 
 This is a multi-week, high-risk rewrite.
 
+### Working vertical slice — terminal p/q columnarized in-situ
+
+A real end-to-end slice was built on this branch: terminal `p`/`q` moved from the
+per-terminal `TDoubleArrayList` to a network-level flat columnar store
+(`TerminalVariantStore`), driven once per clone by `NetworkImpl`, with terminal-row
+re-homing across `merge`/`detach`.
+
+- **Correctness: fully green** — iidm-impl 997/997, iidm-serde golden-file 303/303,
+  byte-identical. Merge/detach lifecycle handled by re-homing rows between stores
+  (both operations are single-variant by contract, so only band 0 is transferred).
+- **A key implementation lesson:** the store must be a **flat pre-grown `double[]`**
+  (`p[variant*stride + row]`) copied with `System.arraycopy` into existing space. A
+  first `double[][]` version that allocated a fresh band per clone *regressed* the
+  benchmark — the per-clone garbage swamped the arraycopy win. Flat layout = no
+  per-clone allocation.
+- **In-situ measurement** (same container, this session's machine ~2× slower than
+  the earlier runs, so compare only within this block):
+
+  | Layout | variant-clone-remove ×50 (median) |
+  |---|---:|
+  | Baseline (IIDM-G, per-object trove) | ~5740 ms |
+  | Columnar terminal p/q (flat store) | ~4400–5150 ms |
+
+  → roughly **−10 % to −20 %** from columnarizing **one field-pair**.
+
+- **Why only ~15 %, not 22×:** the 22× ceiling is the cost of the p/q *extend alone*.
+  In the full operation, terminal p/q is just one of many per-variant fields —
+  `NodeTerminal` still carries v / angle / connectedComponentNumber /
+  synchronousComponentNumber, `ConfiguredBusImpl` its own set, plus connectables,
+  tap changers, etc., all still array-of-structures. The slice removes only p/q's
+  share. **This is the decisive extrapolation datum:** the big win requires
+  columnarizing *every* primitive per-variant field, i.e. the full rewrite; each
+  field converted buys a slice of the total like this one did.
+
 ### Real-workload relevance (the honest caveat)
 
 `variant-clone-remove ×50` is a **synthetic** stress test. In real workloads:
@@ -101,12 +135,41 @@ So even a perfect columnar rewrite (saving order ~1–2 s on the ×50 microbench
 moves real end-to-end times little. The biggest real lever remains PROF-2 (the
 rdf4j/Xerces CGMES-import wall), not variant storage.
 
+## Candidate 3 — Columnar variant *topology*, not just characteristics
+
+`p`/`q` are computed *characteristics*. The same array-of-structures-per-variant
+pattern also holds the variant-dependent **topology**, which is more interesting for
+the workloads that actually clone variants:
+
+- **`SwitchImpl.open` and `SwitchImpl.retained`** are per-variant `TBooleanArrayList`
+  — one boolean per (switch, variant). Every clone copies every switch's open/retained
+  state. This is the *same* AoS pattern as terminal p/q, so the *same* columnar
+  treatment applies — and booleans bit-pack: a whole variant's switch states become a
+  `long[]` bitset, so a clone is a single `System.arraycopy` of one bitset and reads
+  are a bit test. Extremely compact and cache-friendly.
+- **Why it matters more:** security-analysis contingencies *change topology* per
+  variant (open a switch / trip a line), and node-breaker networks (CGMES, UCTE) have
+  very many switches. So switch-state variant handling is on the path of the real
+  variant-cloning workload, unlike computed p/q which is mostly overwritten by the
+  flow anyway. A `SwitchVariantStore` (bitset-per-variant) is the natural next slice
+  and likely a better bang-for-buck than p/q.
+- **Not columnar-friendly:** the calculated bus-view/connectivity caches in
+  `NodeBreakerTopologyModel`/`BusBreakerTopologyModel` use the object-based
+  `VariantArray<VariantImpl>` (heterogeneous cached objects), which stay per-object —
+  the primitive `open`/`retained` bits are the columnar target, not the cache.
+
 ## Recommendation
 
 1. **Do not pursue copy-on-write** — it breaks the concurrency contract.
-2. **Columnar SoA is the only safe architecture that attacks the cost**, and its
-   ceiling is real (22×+ on the extend). But it is a large, high-risk rewrite whose
-   payoff lands on a workload pattern that is not the real bottleneck.
-3. Practical stance: keep the shipped, low-risk wins (IIDM-F −45 %, IIDM-G −9–19 %);
-   treat the columnar rewrite as a deliberate, separately-scoped project to greenlight
-   only if variant-heavy workloads (not CGMES import) become a measured priority.
+2. **Columnar SoA is the only safe architecture that attacks the cost.** The terminal
+   p/q slice proves it works end-to-end (997/997 + 303/303 green, byte-identical) for
+   ~−10–20 %; the ceiling per field is large (22× on extend). The full win needs every
+   primitive per-variant field converted — a multi-week, high-risk rewrite.
+3. **If pursuing it, start with switch `open`/`retained` (Candidate 3), not p/q** — a
+   bitset-per-variant `SwitchVariantStore` is compact, and switch state is on the real
+   topology-changing (security-analysis) path, whereas p/q is largely overwritten by
+   the flow.
+4. Practical stance: keep the shipped, low-risk wins (IIDM-F −45 %, IIDM-G −9–19 %);
+   treat the full columnar rewrite as a deliberate, separately-scoped project, greenlit
+   only if variant-heavy / node-breaker workloads become a measured priority. The
+   biggest real lever overall remains PROF-2 (the rdf4j/Xerces CGMES-import wall).

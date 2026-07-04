@@ -1008,6 +1008,17 @@ public class SubnetworkImpl extends AbstractNetwork {
         Collection<Identifiable<?>> identifiables = getIdentifiables();
         Iterable<VoltageAngleLimit> vals = getVoltageAngleLimits();
 
+        // Re-home the terminal p/q of the detached elements into the detached network's columnar store,
+        // while the network reference still resolves to the current (root) owner.
+        TerminalVariantStore detachedStore = detachedNetwork.getTerminalVariantStore();
+        for (Identifiable<?> i : identifiables) {
+            if (i instanceof AbstractConnectable<?> connectable) {
+                for (TerminalExt t : connectable.getTerminals()) {
+                    ((AbstractTerminal) t).reHomeVariantStore(detachedStore);
+                }
+            }
+        }
+
         // Move the substations and voltageLevels to the new network
         ref.setRef(detachedNetwork.getSubnetworkRef());
 
