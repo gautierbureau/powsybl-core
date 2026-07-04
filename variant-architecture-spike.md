@@ -291,3 +291,62 @@ classes.
    deliberate project, greenlit if variant-heavy / node-breaker workloads become a
    priority. The biggest real lever overall still remains PROF-2 (the rdf4j/Xerces
    CGMES-import wall), which no variant work touches.
+
+## JMH benchmark results (powsybl-benchmark, case6515rte, 6515-bus RTE grid)
+
+Measured with the JMH suite (`gautierbureau/powsybl-benchmark`) built against this branch
+(`powsybl-core 7.4.0-SNAPSHOT`). Clean A/B by swapping only the differing artifacts in the
+local `.m2` between three points, everything else identical:
+
+- **STOCK** = `5a3e7cc` (merge-base with main, none of our work);
+- **PERF** = `6a356ab` (all earlier perf work, trove variant storage);
+- **COLUMNAR** = branch HEAD (PERF + columnar variant storage).
+
+### Variant clone + remove (new `VariantCloneBenchmark`, added to the suite)
+
+| config | clone+remove µs/op | vs STOCK |
+|---|---|---|
+| STOCK | 23485.6 ± 832 | — |
+| PERF (IIDM-F/G + lock-free VariantArray, trove) | 13419.7 ± 436 | −43 % |
+| COLUMNAR (this branch) | 9236.7 ± 433 | **−61 % (2.5×)** |
+
+Columnar's incremental contribution over PERF is **−31 %**, on non-overlapping CIs. The
+absolute ~9 ms shows `VariantManager.cloneVariant` is now dominated by the O(N-objects)
+traversal (it still visits every `MultiVariantObject`), not the array copy — a future lever.
+
+### IIDM read / write / round-trip (`NetworkSerializationBenchmark`, STOCK vs branch), ms/op
+
+| op | XIIDM | JIIDM | BIIDM |
+|---|---|---|---|
+| read | 164.7 → 165.0 (~0) | 99.8 → 95.4 (−4 %) | 77.1 → 72.6 (−6 %) |
+| write (stream) | 174.6 → 147.7 (−15 %) | 172.6 → 153.9 (−11 %) | 150.9 → 124.5 (−17 %) |
+| write (file) | 314.2 → 156.3 (−50 %) | 176.0 → 157.9 (−10 %) | 138.3 → 122.2 (−12 %) |
+| round-trip copy | **7196.1 → 220.3 (−97 %, 32.7×)** | 216.8 → 197.6 (−9 %) | 232.2 → 201.3 (−13 %) |
+
+The XIIDM copy 32× is real (not an artifact): `NetworkSerDe.copy` streams through an
+unbuffered nio `Pipe`, so at STOCK every tiny StAX write was its own pipe syscall — a
+stack profile showed 55 % of time in `UnixFileDispatcherImpl.read0`/`write0` and 0.2 % in
+the actual XML encoding. PROF-1's 8 KB write buffering collapses millions of pipe writes
+into a handful. The gradient (null-stream −15 %, jimfs-file −50 %, pipe-copy −97 %) tracks
+exactly how badly each sink handles unbuffered tiny writes.
+
+### CGMES export / import (`CgmesSerializationBenchmark`, STOCK vs branch), ms/op
+
+| op | CGMES |
+|---|---|
+| export (write) | 1008.2 → 345.4 (**−66 %, 2.9×**) |
+| import (read) | 2555.3 → 2325.2 (~−9 %, within noise) |
+
+CGMES is RDF/XML, so PROF-1's StAX buffering lands hard on export (matches the −58 %
+measured earlier). Import needs a CGMES-native case to show the query-cache wins.
+
+### Next non-XML levers (profiler leads, not yet actioned)
+
+Once the XML lock is gone, the top format-agnostic frames on the JSON/binary read+write
+paths are: `RefChain.get` / `ref.get()` call volume (~3–7 %, top read frame — trivial body,
+so it is call count from resolving the network ref per element/attribute during
+construction), `NetworkIndex` HashMap resize (~2.6–3.5 %, pre-sizable on import), the
+exporter's per-element iteration (`isElementWrittenInsideNetwork` 4.6 % + Guava concatenated
+iterators / stream pipeline ~12 %), plus format-specific JSON `parseDouble` and binary Zstd
+compression. These lift XML/JSON/BIN together and are the natural follow-up to the
+XML-focused PROF-1 work.
