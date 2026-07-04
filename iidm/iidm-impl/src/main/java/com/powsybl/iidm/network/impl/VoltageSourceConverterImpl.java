@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.ReactiveLimits;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.ValidationUtil;
 import com.powsybl.iidm.network.VoltageSourceConverter;
-import gnu.trove.list.array.TDoubleArrayList;
 
 /**
  * @author Damien Jeandemange {@literal <damien.jeandemange at artelys.com>}
@@ -25,9 +24,16 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
 
     private final ReactiveLimitsHolderImpl reactiveLimits;
 
-    private final TDoubleArrayList reactivePowerSetpoint;
+    // reactivePowerSetpoint, voltageSetpoint held columnarly
+    private static final String STORE_KEY = "VoltageSourceConverter";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_REACTIVE_POWER_SETPOINT = 0;
+    private static final int COL_VOLTAGE_SETPOINT = 1;
 
-    private final TDoubleArrayList voltageSetpoint;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private final RegulatingPoint regulatingPoint;
 
@@ -39,10 +45,8 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         super(ref, id, name, fictitious, minP, maxP, idleLoss, switchingLoss, resistiveLoss,
                 pccTerminal, controlMode, targetP, targetVdc);
         int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
-        this.reactivePowerSetpoint = new TDoubleArrayList(variantArraySize);
-        this.voltageSetpoint = new TDoubleArrayList(variantArraySize);
-        this.reactivePowerSetpoint.fill(0, variantArraySize, reactivePowerSetpoint);
-        this.voltageSetpoint.fill(0, variantArraySize, voltageSetpoint);
+        this.variantStore = getNetwork().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {reactivePowerSetpoint, voltageSetpoint}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.reactiveLimits = new ReactiveLimitsHolderImpl(this, new MinMaxReactiveLimitsImpl(-Double.MAX_VALUE, Double.MAX_VALUE));
         regulatingPoint = new RegulatingPoint(id, () -> null, variantArraySize, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(pccTerminal);
@@ -71,7 +75,9 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         ValidationUtil.checkModifyOfRemovedEquipment(this.id, this.removed, VOLTAGE_REGULATOR_ON_ATTRIBUTE);
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn, voltageSetpoint.get(variantIndex), reactivePowerSetpoint.get(variantIndex),
+        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn,
+                variantStore.getDouble(variantIndex, COL_VOLTAGE_SETPOINT, variantStoreRow),
+                variantStore.getDouble(variantIndex, COL_REACTIVE_POWER_SETPOINT, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         boolean oldValue = this.regulatingPoint.isRegulating(variantIndex);
         this.regulatingPoint.setRegulating(variantIndex, voltageRegulatorOn);
@@ -84,7 +90,7 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
     @Override
     public double getVoltageSetpoint() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, VOLTAGE_SETPOINT_ATTRIBUTE);
-        return this.voltageSetpoint.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_VOLTAGE_SETPOINT, variantStoreRow);
     }
 
     @Override
@@ -92,9 +98,9 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         ValidationUtil.checkModifyOfRemovedEquipment(this.id, this.removed, VOLTAGE_SETPOINT_ATTRIBUTE);
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), voltageSetpoint, reactivePowerSetpoint.get(variantIndex),
+        ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), voltageSetpoint, variantStore.getDouble(variantIndex, COL_REACTIVE_POWER_SETPOINT, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.voltageSetpoint.set(variantIndex, voltageSetpoint);
+        double oldValue = variantStore.setDouble(variantIndex, COL_VOLTAGE_SETPOINT, variantStoreRow, voltageSetpoint);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate(VOLTAGE_SETPOINT_ATTRIBUTE, variantId, oldValue, voltageSetpoint);
@@ -104,7 +110,7 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
     @Override
     public double getReactivePowerSetpoint() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, REACTIVE_POWER_SETPOINT_ATTRIBUTE);
-        return this.reactivePowerSetpoint.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
     }
 
     @Override
@@ -112,9 +118,9 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
         ValidationUtil.checkModifyOfRemovedEquipment(this.id, this.removed, REACTIVE_POWER_SETPOINT_ATTRIBUTE);
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), voltageSetpoint.get(variantIndex), reactivePowerSetpoint,
+        ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), variantStore.getDouble(variantIndex, COL_VOLTAGE_SETPOINT, variantStoreRow), reactivePowerSetpoint,
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.reactivePowerSetpoint.set(variantIndex, reactivePowerSetpoint);
+        double oldValue = variantStore.setDouble(variantIndex, COL_REACTIVE_POWER_SETPOINT, variantStoreRow, reactivePowerSetpoint);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate(REACTIVE_POWER_SETPOINT_ATTRIBUTE, variantId, oldValue, reactivePowerSetpoint);
@@ -154,31 +160,29 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-
-        reactivePowerSetpoint.ensureCapacity(reactivePowerSetpoint.size() + number);
-        reactivePowerSetpoint.fill(initVariantArraySize, initVariantArraySize + number, reactivePowerSetpoint.get(sourceIndex));
-
-        voltageSetpoint.ensureCapacity(voltageSetpoint.size() + number);
-        voltageSetpoint.fill(initVariantArraySize, initVariantArraySize + number, voltageSetpoint.get(sourceIndex));
+        // reactivePowerSetpoint/voltageSetpoint handled by NumericVariantStore
         regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        reactivePowerSetpoint.remove(reactivePowerSetpoint.size() - number, number);
-        voltageSetpoint.remove(voltageSetpoint.size() - number, number);
         regulatingPoint.reduceVariantArraySize(number);
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            reactivePowerSetpoint.set(index, reactivePowerSetpoint.get(sourceIndex));
-            voltageSetpoint.set(index, voltageSetpoint.get(sourceIndex));
-        }
         regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // AcDcConverter (own doubles + dc terminals) + AC terminals + extensions
+        double rps0 = variantStore.getDouble(0, COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
+        double vs0 = variantStore.getDouble(0, COL_VOLTAGE_SETPOINT, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {rps0, vs0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
