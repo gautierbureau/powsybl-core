@@ -321,14 +321,23 @@ traversal (it still visits every `MultiVariantObject`), not the array copy — a
 | read | 164.7 → 165.0 (~0) | 99.8 → 95.4 (−4 %) | 77.1 → 72.6 (−6 %) |
 | write (stream) | 174.6 → 147.7 (−15 %) | 172.6 → 153.9 (−11 %) | 150.9 → 124.5 (−17 %) |
 | write (file) | 314.2 → 156.3 (−50 %) | 176.0 → 157.9 (−10 %) | 138.3 → 122.2 (−12 %) |
-| round-trip copy | **7196.1 → 220.3 (−97 %, 32.7×)** | 216.8 → 197.6 (−9 %) | 232.2 → 201.3 (−13 %) |
+| round-trip copy | 7196.1 → 220.3 (see caveat) | 216.8 → 197.6 (−9 %) | 232.2 → 201.3 (−13 %) |
 
-The XIIDM copy 32× is real (not an artifact): `NetworkSerDe.copy` streams through an
-unbuffered nio `Pipe`, so at STOCK every tiny StAX write was its own pipe syscall — a
-stack profile showed 55 % of time in `UnixFileDispatcherImpl.read0`/`write0` and 0.2 % in
-the actual XML encoding. PROF-1's 8 KB write buffering collapses millions of pipe writes
-into a handful. The gradient (null-stream −15 %, jimfs-file −50 %, pipe-copy −97 %) tracks
-exactly how badly each sink handles unbuffered tiny writes.
+**Caveat — the XIIDM-copy 32× is an environment artifact, not a real speedup.** The
+upstream README (v2026.0.0, normal machine) reports XIIDM copy = 277.6 ms for this network,
+and our NEW (220 ms) matches it; it is the STOCK 7196 ms that is anomalous — 26× the README.
+`NetworkSerDe.copy` streams through an *unbuffered* nio `Pipe`, so pre-PROF-1 XML export
+(~1M+ tiny StAX writes) does ~1M+ pipe syscalls. This sandbox's pipe syscalls cost ~1.5 µs
+each (measured) vs ~0.1–0.2 µs on normal hardware, so that path is ~10× inflated *here only*;
+a stack profile showed 55 % of STOCK's time in `UnixFileDispatcherImpl.read0`/`write0`. Only
+XIIDM copy explodes (JSON/binary make far fewer, larger writes). PROF-1's 8 KB buffering
+removes the syscall dependency, so NEW is env-independent. Real-world copy gain is therefore
+small (~README 277 → ~220, i.e. the modest CPU part). The representative, container-neutral
+PROF-1 wins are the CPU/in-memory ratios below.
+
+The trustworthy serialization ratios (CPU- or jimfs-bound, both sides equally inflated by the
+~1.5–2× slower container, so the ratio holds): XIIDM stream write −15 %, XIIDM file write
+−50 %, JSON/binary writes −10–17 %, reads −4–6 %.
 
 ### CGMES export / import (`CgmesSerializationBenchmark`, STOCK vs branch), ms/op
 
@@ -337,8 +346,15 @@ exactly how badly each sink handles unbuffered tiny writes.
 | export (write) | 1008.2 → 345.4 (**−66 %, 2.9×**) |
 | import (read) | 2555.3 → 2325.2 (~−9 %, within noise) |
 
-CGMES is RDF/XML, so PROF-1's StAX buffering lands hard on export (matches the −58 %
-measured earlier). Import needs a CGMES-native case to show the query-cache wins.
+CGMES export writes to an in-memory (jimfs) file system, so this ratio is CPU-bound and
+container-neutral. CGMES is RDF/XML, so PROF-1's StAX buffering lands hard on export
+(consistent with the −58 % measured earlier; the README's pre-PROF-1 CGMES file write is
+713.9 ms, our env-scaled STOCK 1008 ms → NEW 345 ms). Import needs a CGMES-native case to
+show the query-cache wins.
+
+All absolute numbers here run on a container ~1.5–2× slower than the README's machine (our
+NEW serialization figures track the README at that factor); the A/B *ratios* above are what
+to trust, except the XIIDM-copy one noted as an artifact.
 
 ### Next non-XML levers (profiler leads, not yet actioned)
 
