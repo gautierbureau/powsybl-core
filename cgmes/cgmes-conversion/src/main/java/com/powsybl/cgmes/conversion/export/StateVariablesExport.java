@@ -406,10 +406,10 @@ public final class StateVariablesExport {
                 writeIdentifiableTerminalPowerFlow(bl, ALIAS_TERMINAL_BOUNDARY, bl.getBoundary().getP(), bl.getBoundary().getQ(), cimNamespace, writer, context);
             }
             writeTerminalPowerFlow(bl.getTerminal(), cimNamespace, writer, context);
-            equivalentInjectionTerminalP.compute(context.getNamingStrategy().getCgmesIdFromProperty(bl, PROPERTY_EQUIVALENT_INJECTION_TERMINAL),
-                (k, v) -> v == null ? -bl.getBoundary().getP() : v - bl.getBoundary().getP());
-            equivalentInjectionTerminalQ.compute(context.getNamingStrategy().getCgmesIdFromProperty(bl, PROPERTY_EQUIVALENT_INJECTION_TERMINAL),
-                (k, v) -> v == null ? -bl.getBoundary().getQ() : v - bl.getBoundary().getQ());
+            String equivalentInjectionTerminalId = context.getNamingStrategy().getCgmesIdFromProperty(bl, PROPERTY_EQUIVALENT_INJECTION_TERMINAL);
+            Boundary boundary = bl.getBoundary();
+            equivalentInjectionTerminalP.compute(equivalentInjectionTerminalId, (k, v) -> v == null ? -boundary.getP() : v - boundary.getP());
+            equivalentInjectionTerminalQ.compute(equivalentInjectionTerminalId, (k, v) -> v == null ? -boundary.getQ() : v - boundary.getQ());
         });
         equivalentInjectionTerminalP.keySet().forEach(eiId -> writePowerFlow(eiId, equivalentInjectionTerminalP.get(eiId), equivalentInjectionTerminalQ.get(eiId), cimNamespace, writer, context));
 

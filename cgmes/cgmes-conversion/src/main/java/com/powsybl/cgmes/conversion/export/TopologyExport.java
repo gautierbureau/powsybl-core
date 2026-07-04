@@ -145,7 +145,7 @@ public final class TopologyExport {
     }
 
     private static void writeBoundaryTerminals(Network network, String cimNamespace, XMLStreamWriter writer, CgmesExportContext context) throws XMLStreamException {
-        List<String> exported = new ArrayList<>();
+        Set<String> exported = new HashSet<>();
         for (BoundaryLine bl : network.getBoundaryLines(BoundaryLineFilter.ALL)) {
             writeBoundaryTerminal(bl, exported, cimNamespace, writer, context);
         }
@@ -171,10 +171,10 @@ public final class TopologyExport {
             if (vl.getTopologyKind().equals(TopologyKind.BUS_BREAKER)) {
                 bus1 = vl.getBusBreakerView().getBus1(sw.getId());
                 tn1 = context.getNamingStrategy().getCgmesId(bus1);
-                tname1 = vl.getBusBreakerView().getBus1(sw.getId()).getNameOrId();
+                tname1 = bus1.getNameOrId();
                 bus2 = vl.getBusBreakerView().getBus2(sw.getId());
                 tn2 = context.getNamingStrategy().getCgmesId(bus2);
-                tname2 = vl.getBusBreakerView().getBus2(sw.getId()).getNameOrId();
+                tname2 = bus2.getNameOrId();
             } else {
                 int node1 = vl.getNodeBreakerView().getNode1(sw.getId());
                 bus1 = getBusForBusBreakerViewBus(vl, node1);
@@ -313,7 +313,7 @@ public final class TopologyExport {
         writer.writeEndElement();
     }
 
-    private static void writeBoundaryTerminal(BoundaryLine bl, List<String> exported, String cimNamespace, XMLStreamWriter writer, CgmesExportContext context) throws XMLStreamException {
+    private static void writeBoundaryTerminal(BoundaryLine bl, Set<String> exported, String cimNamespace, XMLStreamWriter writer, CgmesExportContext context) throws XMLStreamException {
         String boundaryId = CgmesExportUtil.getBoundaryLineBoundaryTerminalId(bl, context);
         String equivalentInjectionTerminalId = context.getNamingStrategy().getCgmesIdFromProperty(bl, PROPERTY_EQUIVALENT_INJECTION_TERMINAL);
         String topologicalNode = getTopologicalNodeId(bl, context);
@@ -325,9 +325,8 @@ public final class TopologyExport {
             writeTerminal(boundaryId, topologicalNode, cimNamespace, writer, context);
         }
         // check if the equivalent injection terminal has already been written (if several boundary lines linked to same X-node)
-        if (equivalentInjectionTerminalId != null && !exported.contains(equivalentInjectionTerminalId)) {
+        if (equivalentInjectionTerminalId != null && exported.add(equivalentInjectionTerminalId)) {
             writeTerminal(equivalentInjectionTerminalId, topologicalNode, cimNamespace, writer, context);
-            exported.add(equivalentInjectionTerminalId);
         }
     }
 

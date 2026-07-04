@@ -84,6 +84,8 @@ public class NodeContainerMapping {
         this.context = context;
         this.substationMapping = new HashMap<>();
         this.voltageLevelMapping = new HashMap<>();
+        this.substationMappingInverse = new HashMap<>();
+        this.voltageLevelMappingInverse = new HashMap<>();
         this.fictitiousVoltageLevels = new HashMap<>();
         this.referenceVoltageLevels = new HashMap<>();
     }
@@ -104,8 +106,7 @@ public class NodeContainerMapping {
     // All the keys for a given value, all the merged substations that have cgmesIdentifier as representative
     public Set<String> mergedSubstations(String cgmesIdentifier) {
         String sid = context.namingStrategy().getIidmId(CgmesNames.SUBSTATION, cgmesIdentifier);
-        return substationMapping.entrySet().stream().filter(r -> r.getValue().equals(sid))
-            .map(Map.Entry::getKey).collect(Collectors.toSet());
+        return substationMappingInverse.getOrDefault(sid, Collections.emptySet());
     }
 
     public boolean voltageLevelIsMapped(String cgmesIdentifier) {
@@ -124,8 +125,7 @@ public class NodeContainerMapping {
     // All the keys for a given value, all the merged voltageLevels that have cgmesIdentifier as representative
     public Set<String> mergedVoltageLevels(String cgmesIdentifier) {
         String vlid = context.namingStrategy().getIidmId(CgmesNames.VOLTAGE_LEVEL, cgmesIdentifier);
-        return voltageLevelMapping.entrySet().stream().filter(r -> r.getValue().equals(vlid))
-            .map(Map.Entry::getKey).collect(Collectors.toSet());
+        return voltageLevelMappingInverse.getOrDefault(vlid, Collections.emptySet());
     }
 
     public void build() {
@@ -136,6 +136,7 @@ public class NodeContainerMapping {
         buildAdjacency(voltageLevelAdjacency, substationAdjacency, fictitiousVoltageLevelAdjacency);
         buildVoltageLevelMapping(voltageLevelAdjacency);
         buildSubstationMapping(substationAdjacency);
+        buildInverseMappings();
         buildReferenceVoltageLevels(fictitiousVoltageLevelAdjacency);
 
         // substation containers including connectivityNodes must be connected using switches to other containers (voltageLevel, Line)
@@ -292,6 +293,17 @@ public class NodeContainerMapping {
             LOG.warn("Original {} Substation container(s) connected by transformers have been merged in IIDM. Map of original Substation to IIDM: {}",
                 substationMapping.size(), substationMapping);
         }
+    }
+
+    // Index the merged containers by representative once and for all,
+    // so that mergedSubstations / mergedVoltageLevels do not scan the whole mapping at each call
+    private void buildInverseMappings() {
+        substationMappingInverse.clear();
+        substationMapping.forEach((merged, representative) ->
+                substationMappingInverse.computeIfAbsent(representative, k -> new HashSet<>()).add(merged));
+        voltageLevelMappingInverse.clear();
+        voltageLevelMapping.forEach((merged, representative) ->
+                voltageLevelMappingInverse.computeIfAbsent(representative, k -> new HashSet<>()).add(merged));
     }
 
     private void buildReferenceVoltageLevels(Map<String, Set<String>> fictitiousVoltageLevelAdjacency) {
@@ -466,6 +478,8 @@ public class NodeContainerMapping {
     private final Context context;
     private final Map<String, String> substationMapping;
     private final Map<String, String> voltageLevelMapping;
+    private final Map<String, Set<String>> substationMappingInverse;
+    private final Map<String, Set<String>> voltageLevelMappingInverse;
     private final Map<String, ContainerR> fictitiousVoltageLevels;
     private final Map<String, String> referenceVoltageLevels;
 

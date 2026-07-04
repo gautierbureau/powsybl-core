@@ -95,6 +95,7 @@ public final class NetworkSerDe {
     private static final String SOURCE_FORMAT = "sourceFormat";
     private static final String ID = "id";
     private static final String MINIMUM_VALIDATION_LEVEL = "minimumValidationLevel";
+    private static final DateTimeFormatter CASE_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 
     /** Magic number for binary iidm files ("Binary IIDM" in ASCII) */
     static final byte[] BIIDM_MAGIC_NUMBER = {0x42, 0x69, 0x6E, 0x61, 0x72, 0x79, 0x20, 0x49, 0x49, 0x44, 0x4D};
@@ -392,9 +393,8 @@ public final class NetworkSerDe {
         }
     }
 
-    private static void writeExtension(Extension<? extends Identifiable<?>> extension, NetworkSerializerContext context, ExtensionsSupplier extensionsSupplier) {
+    private static void writeExtension(Extension<? extends Identifiable<?>> extension, ExtensionSerDe extensionSerDe, NetworkSerializerContext context) {
         TreeDataWriter writer = context.getWriter();
-        ExtensionSerDe extensionSerDe = getExtensionSerializer(context.getOptions(), extension, extensionsSupplier);
         if (extensionSerDe == null) {
             throw new IllegalStateException("Extension Serializer of " + extension.getName() + " should not be null");
         }
@@ -440,16 +440,23 @@ public final class NetworkSerDe {
 
     private static void writeExtensions(Network n, NetworkSerializerContext context, ExtensionsSupplier extensionsSupplier) {
         context.getWriter().writeStartNodes();
+        // remember the serializer resolved for each writable extension, to avoid resolving it a second time when writing
+        Map<Extension<? extends Identifiable<?>>, ExtensionSerDe> serializers = new IdentityHashMap<>();
         for (Identifiable<?> identifiable : IidmSerDeUtil.sorted(n.getIdentifiables(), context.getOptions())) {
             if (ignoreEquipmentAtExport(identifiable, context) || !isElementWrittenInsideNetwork(identifiable, n, context)) {
                 continue;
             }
+            serializers.clear();
             Collection<? extends Extension<? extends Identifiable<?>>> extensions = identifiable.getExtensions().stream()
                     .filter(e -> {
                         ExtensionSerDe extensionSerDe = getExtensionSerializer(context.getOptions(), e, extensionsSupplier);
-                        return isExtensionIncluded(extensionSerDe, context.getOptions())
+                        boolean written = isExtensionIncluded(extensionSerDe, context.getOptions())
                             && canTheExtensionBeWritten(extensionSerDe, context.getVersion(), context.getOptions())
                             && extensionSerDe.isSerializable(e, context);
+                        if (written) {
+                            serializers.put(e, extensionSerDe);
+                        }
+                        return written;
                     })
                     .toList();
 
@@ -457,7 +464,7 @@ public final class NetworkSerDe {
                 context.getWriter().writeStartNode(context.getNamespaceURI(), EXTENSION_ROOT_ELEMENT_NAME);
                 context.getWriter().writeStringAttribute(ID, context.getAnonymizer().anonymizeString(identifiable.getId()));
                 for (Extension<? extends Identifiable<?>> extension : IidmSerDeUtil.sortedExtensions(extensions, context.getOptions())) {
-                    writeExtension(extension, context, extensionsSupplier);
+                    writeExtension(extension, serializers.get(extension), context);
                 }
                 context.getWriter().writeEndNode();
             }
@@ -495,18 +502,17 @@ public final class NetworkSerDe {
 
     private static void writeMainAttributes(Network n, NetworkSerializerContext context) {
         context.getWriter().writeStringAttribute(ID, context.getAnonymizer().anonymizeString(n.getId()));
-        context.getWriter().writeStringAttribute(CASE_DATE, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX").format(n.getCaseDate()));
+        context.getWriter().writeStringAttribute(CASE_DATE, CASE_DATE_FORMATTER.format(n.getCaseDate()));
         context.getWriter().writeIntAttribute(FORECAST_DISTANCE, n.getForecastDistance());
         context.getWriter().writeStringAttribute(SOURCE_FORMAT, n.getSourceFormat());
     }
 
-    private static XmlWriter createXmlWriter(Network n, OutputStream os, ExportOptions options, ExtensionsSupplier extensionsSupplier) {
+    private static XmlWriter createXmlWriter(Network n, OutputStream os, ExportOptions options, Set<ExtensionSerDe<?, ?>> serializers) {
         try {
             String iidmNamespace = options.getVersion().getNamespaceURI(n.getValidationLevel() == ValidationLevel.STEADY_STATE_HYPOTHESIS);
             String indent = options.isIndent() ? INDENT : null;
             XmlWriter xmlWriter = new XmlWriter(os, indent, options.getCharset(), iidmNamespace, IIDM_PREFIX);
 
-            Set<ExtensionSerDe<?, ?>> serializers = getExtensionSerializers(n, options, extensionsSupplier);
             Set<String> extensionUris = new HashSet<>();
             Set<String> extensionPrefixes = new HashSet<>();
             for (ExtensionSerDe<?, ?> extensionSerDe : serializers) {
@@ -562,9 +568,9 @@ public final class NetworkSerDe {
         writeMainAttributes(n, context);
     }
 
-    private static Map<String, String> getExtensionVersions(Network n, ExportOptions options, ExtensionsSupplier extensionsSupplier) {
+    private static Map<String, String> getExtensionVersions(Set<ExtensionSerDe<?, ?>> serializers, ExportOptions options) {
         Map<String, String> extensionVersionsMap = new LinkedHashMap<>();
-        for (ExtensionSerDe<?, ?> extensionSerDe : getExtensionSerializers(n, options, extensionsSupplier)) {
+        for (ExtensionSerDe<?, ?> extensionSerDe : serializers) {
             String version = getExtensionVersion(extensionSerDe, options);
             extensionVersionsMap.put(extensionSerDe.getExtensionName(), version);
         }
@@ -755,9 +761,10 @@ public final class NetworkSerDe {
         context.getWriter().writeEndNodes();
     }
 
-    private static TreeDataWriter createTreeDataWriter(Network n, ExportOptions options, OutputStream os, ExtensionsSupplier extensionsSupplier) {
+    private static TreeDataWriter createTreeDataWriter(Network n, ExportOptions options, OutputStream os, ExtensionsSupplier extensionsSupplier,
+                                                       Set<ExtensionSerDe<?, ?>> serializers) {
         return switch (options.getFormat()) {
-            case XML -> createXmlWriter(n, os, options, extensionsSupplier);
+            case XML -> createXmlWriter(n, os, options, serializers);
             case JSON -> createJsonWriter(os, options, extensionsSupplier);
             case BIN -> createBinWriter(os, options);
         };
@@ -779,8 +786,11 @@ public final class NetworkSerDe {
     }
 
     public static Anonymizer write(Network n, ExportOptions options, OutputStream os, ExtensionsSupplier extensionsSupplier) {
-        try (TreeDataWriter writer = createTreeDataWriter(n, options, os, extensionsSupplier)) {
-            return write(n, options, writer, extensionsSupplier);
+        // compute the extension serializers once for both the writer creation and the versions map,
+        // as each computation requires a scan of all the network extensions
+        Set<ExtensionSerDe<?, ?>> serializers = getExtensionSerializers(n, options, extensionsSupplier);
+        try (TreeDataWriter writer = createTreeDataWriter(n, options, os, extensionsSupplier, serializers)) {
+            return write(n, options, writer, extensionsSupplier, serializers);
         }
     }
 
@@ -790,8 +800,13 @@ public final class NetworkSerDe {
     }
 
     public static Anonymizer write(Network n, ExportOptions options, TreeDataWriter writer, ExtensionsSupplier extensionsSupplier) {
+        return write(n, options, writer, extensionsSupplier, getExtensionSerializers(n, options, extensionsSupplier));
+    }
+
+    private static Anonymizer write(Network n, ExportOptions options, TreeDataWriter writer, ExtensionsSupplier extensionsSupplier,
+                                    Set<ExtensionSerDe<?, ?>> serializers) {
         NetworkSerializerContext context = createContext(n, options, writer);
-        writer.setVersions(getExtensionVersions(n, options, extensionsSupplier));
+        writer.setVersions(getExtensionVersions(serializers, options));
         write(n, context, extensionsSupplier);
         return context.getAnonymizer();
     }
