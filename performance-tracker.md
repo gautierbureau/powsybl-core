@@ -28,6 +28,7 @@ Isolated before/after, PEGASE `case13659pegase` (13 659 buses), median of
 | **XML export: bypass StAX per-write lock** (PROF-1) | cgmes-export | 3231 ms | 1359 ms | **−58 %** | clear win — found by profiling |
 | **XML export: bypass StAX per-write lock** (PROF-1) | xiidm-write | 639 ms | 375 ms | **−42 %** | clear win |
 | **Variant methods: loop not stream** (IIDM-F) | variant-clone-remove ×50 | 5900 ms | 3223 ms | **−45 %** | clear win, non-overlapping — found by profiling |
+| **Stateful-objects list cached in index** (IIDM-G) | variant-clone-remove ×50 (repeated single ops) | 3240 ms | 2612–2937 ms | **~−9 to −19 %** | clear win — found by re-profiling after PROF-1 |
 | `RegexCriterion` precompile | criteria eval ×20 | 2456 ms | 1389 ms | **−43 %** | clear win, outside noise |
 | CGMES query cache | cgmes-import | 7567 ms | 6850 ms | **−9.5 %** | clear win, non-overlapping |
 | Triplestore materialization | cgmes-import | 6996 ms | 6926 ms | −1 % | within noise (cache already removed redundant runs) |
@@ -66,6 +67,25 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 (IIDM-B), but profiling also found a per-object *stream pipeline* (`wrapSink`
 ~7 %) that was **not** intrinsic — fixed in IIDM-F (−45 %).
 
+### Re-profile after PROF-1 + IIDM-F (`roundtrip-postprof1.jfr`)
+
+With the two biggest CPU consumers removed, the round trip was re-profiled to see
+the new landscape. Leaf-frame attribution over the whole round trip (9 483 samples):
+JDK 30.5 %, rdf4j 24.0 %, powsybl.iidm 19.9 %, re2j 8.6 % (**inflated** by the
+synthetic `regex-criterion ×20` bench op — not a real workload weight), xml 5.1 %
+(already optimized by PROF-1), trove 3.9 %, powsybl.commons 2.5 %, powsybl.cgmes
+1.3 %. Two conclusions:
+
+- **CGMES import is still the #1 real cost and is still the rdf4j/Xerces wall**
+  (`MemStatementIterator`, `ParsedIRI.parsePctEncoded`, `MemIRI.toString`).
+  Confirmed architectural — PROF-2. TS-7 scoped below and found not worth it.
+- **Variant clone/remove is now the top *addressable* powsybl code.** Top frames:
+  `AbstractTerminal.extendVariantArraySize` (5.0 %), `deleteVariantArrayElement`
+  (2.9 %), `VariantManagerImpl.getStafulObjects` (2.7 %),
+  `TByteArrayList.ensureCapacity/get` (3.7 %), and `HashMap$HashIterator.<init>`
+  (3.6 %). Of these, only `getStafulObjects` (the per-op re-scan) was cleanly
+  addressable → **IIDM-G**. The rest is scoped below.
+
 ---
 
 ## 2. Implemented (✅)
@@ -81,6 +101,7 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 | IIDM-9 | Single traversal in `getP`/`getQ` instead of count-then-sum | `AbstractBus` |
 | IIDM-C | Lock-free `volatile` copy-on-write reads | `VariantArray` (`cc0ee3d`) |
 | **IIDM-F** | **Loop instead of a stream per object in the 4 variant-array methods (−45% on clone/remove)** | `AbstractIdentifiable` (`be70681`) |
+| **IIDM-G** | **Cache the stateful-objects list in the network index (invalidated on add/remove/clean); avoids re-scanning + re-filtering every identifiable per variant op (~−9 to −19% on repeated clone/remove)** | `NetworkIndex` + `VariantManagerImpl` (`c36dcfd`) |
 
 ### cgmes-conversion — `c33ef79`, `1f06d99`
 | ID | Finding | File |
@@ -146,7 +167,8 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 
 | ID | Finding | Conclusion |
 |---|---|---|
-| IIDM-B | Per-object variant-array cost in clone/remove | The `TDoubleArrayList`/`TByteArrayList` extend/delete per object is intrinsic (already batched by `cloneVariant(source,[N])`; only a columnar redesign would change it). **But** profiling found a *separate*, non-intrinsic per-object stream pipeline in the same methods — fixed in IIDM-F (−45 %). Lesson: "intrinsic" was only half true; the profiler found the other half. |
+| IIDM-B | Per-object variant-array cost in clone/remove | The `TDoubleArrayList`/`TByteArrayList` extend/delete per object is intrinsic (already batched by `cloneVariant(source,[N])`; only a columnar redesign would change it). **But** profiling found *two* non-intrinsic pieces in the same path: a per-object stream pipeline (fixed in IIDM-F, −45 %) and a per-op re-scan of all identifiables in `getStafulObjects` (fixed in IIDM-G, ~−9 to −19 %). The remaining per-object trove copy is the genuine work — see the "clone-variant" scoping note below. Lesson: "intrinsic" was only a third true. |
+| IIDM-H | `for (Extension e : getExtensions())` allocates a `HashMap` iterator per object per variant op, even when the object has no extension (the common case) | The re-profile attributed 3.6 % of the round trip to `HashMap$HashIterator.<init>`, all from these loops. Adding an allocation-free `getExtensions().isEmpty()` guard was implemented and A/B-measured (variant-clone-remove ×50: 2823/2774/2518 ms vs IIDM-G-only ~2775 ms) → **within noise, reverted.** C2 escape analysis already scalar-replaces the non-escaping empty-map iterator at steady state; the profiled frames are a warmup/JFR-tier artifact, not real steady-state cost. |
 | CMN-5 / CONV-6 | `String.format("%g")` per numeric cell (table/AMPL export) | No `DecimalFormat` pattern reproduces `%g` (6 sig-figs with conditional fixed/scientific switching), so any change alters AMPL/CSV output and breaks golden-file tests. Not safe to change without a format-behavior decision. |
 | CMN-4 | `writeString` allocates a `byte[]` per string (`getBytes`) | Avoiding it needs a `CharsetEncoder` into a reusable buffer with length back-patching into `SegmentedByteBuffer` — real complexity/risk for one array per string. Deferred as not worth it. |
 
@@ -159,6 +181,7 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 |---|---|---|---|---|
 | ✅ PROF-1 | XML export took ~10 % of round-trip CPU on a per-write `InternalLock` in the JDK StAX writer | `commons/xml XmlUtil` + `UnsynchronizedBufferedWriter` + `FlushOnEndDocumentStreamWriter` (`5fdc6da`) | **Done — cgmes-export −58 %, xiidm-write −42 %** | — |
 | PROF-2 | CGMES import is ~90 % rdf4j + Xerces; powsybl is ~5 % (hard ceiling) | `triple-store-impl-rdf4j` + rdf4j MemoryStore/RDFXML parser | High (the #1 hot path) but architectural | High · **High** — fewer/cheaper SPARQL queries (cache done), a faster RDF/XML parser, a lighter triple store, or streaming the parse instead of loading a full in-memory store |
+| PROF-3 | Variant clone/remove touches every object's per-variant trove array (intrinsic after IIDM-F/-G) | `iidm-impl` variant-array methods | Med (variant-heavy workloads) but architectural | High · **High** — lazy copy-on-write variants: O(1) clone but slows every state read/write and touches every getter/setter. Documented only; not recommended |
 
 **PROF-1 (done, `5fdc6da`).** Build the StAX writer over a non-synchronized
 buffered writer (encoding delegated to `OutputStreamWriter`, so bytes are
@@ -193,8 +216,59 @@ round trip. **Applies to all powsybl XML export.**
 | ID | Finding | File / location | Impact | Effort · Risk |
 |---|---|---|---|---|
 | TS-5 | `getLocals` recompiles a regex via `String.split` per multivalued row | `triple-store-api PropertyBag.getLocals` 54–64 | Med (CGMES-layer frequency) | Low · Low — cache `Pattern` per separator |
-| TS-7 | `distinctResults` materializes a full dedup `Set<BindingSet>` per query | `TripleStoreRDF4J.query` 200 | Potentially large heap/CPU on huge results | Med · **Med-high** — correctness safeguard; only bypass for `DISTINCT`/explicit `GRAPH` |
+| ~~TS-7~~ | `distinctResults` full dedup `Set<BindingSet>` per query | `TripleStoreRDF4J.query` 200 | **Fully scoped — not worth it.** See TS-7 note below. |
 | TS-8 | `pluck*` unnecessary sort + stream when order unused | `triple-store-api PropertyBags.java` 33–52 | Low | Low · Low — sized loop; keep sorted variants where needed |
+
+**TS-7 full scoping — `distinctResults` (not worth it).** `TripleStoreRDF4J.query`
+wraps every query in `QueryResults.distinctResults(...)`, an rdf4j
+`DistinctIteration` that holds a `HashSet<BindingSet>` of every row seen and
+hashes/equals each row. Findings:
+
+- **The dedup is semantically required.** Duplicate rows arise when a resource is
+  defined (`rdf:ID`) in one profile file and referenced (`rdf:about`) in another,
+  each loaded into its own context, then queried without an explicit `GRAPH`
+  clause. In the production CIM16 catalog only **1 of 63** `SELECT` queries uses
+  `SELECT DISTINCT`, so nearly every query relies on this outer dedup for
+  correctness.
+- **Its pure overhead is small.** In the JFR, the dedup-specific frames
+  (`DistinctIteration.add` + `ArrayBindingSet/AbstractBindingSet.hashCode`) sum to
+  ~1.5–2 % of CGMES import (~1 % of the round trip). The bulk of rdf4j cost is
+  genuine query *evaluation* (`MemStatementIterator`, IRI parsing) — the PROF-2
+  wall — not the dedup.
+- **Swapping the dedup key is unsafe.** We already build a `PropertyBag` per row,
+  so dedup-on-`PropertyBag` (dropping the rdf4j `Set<BindingSet>`) looks tempting,
+  but it is **not** equivalent: `BindingSet` dedup compares typed RDF `Value`s,
+  whereas `PropertyBag` compares the projected *strings* after underscore-removal /
+  unescaping and after the empty-row filter — two distinct bindings can collapse to
+  the same bag (or vice-versa), changing which rows survive. Golden-file risk.
+- **The only safe skip is negligible.** Bypassing `distinctResults` when the parsed
+  query root is already `Distinct`/`Reduced` (or a top-level aggregation) is
+  correct but applies to ~1–2 of 63 queries → immeasurable.
+
+Conclusion: required, cheap (~1.5–2 %), and high-risk to alter. Real triple-store
+gains live in PROF-2 (fewer/cheaper queries — the query cache already did this —
+or a lighter store/parser), not here.
+
+**Clone-variant full scoping.** After IIDM-F (stream→loop) and IIDM-G (cache the
+stateful-objects list), what remains in `cloneVariant`/`removeVariant`:
+
+- **Intrinsic and unavoidable in this design:** each op must touch *every* stateful
+  object's per-variant trove array (`AbstractTerminal` p/q, `ConfiguredBusImpl`
+  v/angle/CC/SC, etc.) — `extendVariantArraySize` appends the source slot,
+  `deleteVariantArrayElement`/`reduceVariantArraySize` free it. This is the genuine
+  work (top profile frames) and scales with `objects × variants`.
+- **`removeVariant` index scan is already O(1):** `id2index` is a Guava `HashBiMap`,
+  so `containsValue` uses the inverse map — no O(n²) risk there.
+- **Micro-opt considered, not worth it:** hoisting `p.get(sourceIndex)` out of the
+  `for i<number` loop in `extendVariantArraySize` only helps *batch* clones
+  (`cloneVariant(src,[N])`, N>1); for the common single-variant clone (N=1) the loop
+  runs once, so there is nothing to hoist.
+- **IIDM-H (extension-iterator guard):** tested, within noise, reverted (see §3).
+- **Architectural ceiling (PROF-3, not recommended):** the only way past the
+  intrinsic per-object copy is lazy copy-on-write variants (O(1) clone, copy on
+  first write). That would push cost onto *every* state read/write (the hot paths)
+  and touch every getter/setter in iidm-impl — high risk, wrong trade for the rare
+  clone. Left as a documented architectural option only.
 
 ### iidm — remaining (mostly off this benchmark's critical path)
 | ID | Finding | File / location | Impact | Effort · Risk |
@@ -237,8 +311,10 @@ round trip. **Applies to all powsybl XML export.**
    (CMN-5/CONV-6) and binary `writeString` (CMN-4) **rejected** — see §3.
    allocation, but wants a reusable-buffer / cached-formatter design pass — do as
    one deliberate batch, not piecemeal.
-4. Leave StAX-bound (CMN-12) and correctness-sensitive (TS-7) items unless a
-   profiler shows them dominating a real workload.
+4. Leave StAX-bound (CMN-12) items unless a profiler shows them dominating a real
+   workload. TS-7 is now fully scoped and closed (required dedup, ~1.5–2 % pure
+   overhead, unsafe to alter — see the TS-7 note in §4). Clone-variant is fully
+   scoped: IIDM-F + IIDM-G done, the rest is intrinsic (see the clone-variant note).
 
 Each batch should be verified against the touched modules' test suites (as the
 implemented ones were) and, where a benchmark can exercise it, measured
