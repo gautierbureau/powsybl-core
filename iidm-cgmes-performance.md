@@ -57,8 +57,8 @@ survive that noise:
   noise-prone.
 - **`variant-clone-remove` and `cgmes-import` essentially flat in the initial
   batch** — this is the key profiling result (§4). `cgmes-import` was then
-  addressed directly with a query cache (**−9.5 %**, §6); `variant-clone` remains
-  open (§7.B/C).
+  addressed directly with a query cache (**−9.5 %**, §6); the `variant-clone`
+  cost was found to be intrinsic and its read-path lock made lock-free (§7).
 
 ## 3. Where the hot paths are
 
@@ -179,26 +179,57 @@ the two distributions do not overlap — it is not cross-run noise. All 522
 cgmes-model + cgmes-conversion tests pass with the cache in place, exercising the
 import + update + export paths that a stale-cache bug would break.
 
-## 7. Remaining opportunities (not implemented), ranked by the benchmark
+## 7. Variant hot path #2 — investigation and outcome (opportunities B & C)
 
-These are ordered by where the time actually is on this case.
+Variant clone/remove is the #2 hot path (6.4 s for 50×). Both candidate
+opportunities were investigated to conclusion.
 
-### B. Reduce per-object variant-array cost — *addresses hot path #2*
-Variant clone/remove is O(stateful objects) per operation because each
-`MultiVariantObject` manages its own array. Options: batch the array
-grow/shrink, or make `VariantArray` publish a single shared `volatile` array
-instead of `Collections.synchronizedList` (see C). **Risk:** memory-visibility
-correctness under the supported multi-thread variant mode; needs care and TCK
-coverage.
+### B. Per-object variant-array cost — *investigated, not a real fix*
+`cloneVariant` is O(number of `MultiVariantObject`s) because each connectable
+extends its **own** per-variant primitive arrays (e.g. `LoadImpl` grows its `p0`
+and `q0` `TDoubleArrayList`s by one slot per new variant). That per-object work
+is **intrinsic** to the variant model — every object genuinely needs a new
+per-variant slot — and it is **already batched**: a single
+`cloneVariant(source, [N targets])` extends every object by N in one pass. The
+6.4 s in the benchmark is 50 *separate* clone+remove calls (50 full-network
+traversals), which is the benchmark's choice, not an inefficiency. There is
+nothing to fix here short of a columnar variant-storage redesign (out of scope).
 
-### C. Drop the lock on the hottest variant read: `VariantArray`
-`VariantArray` wraps its list in `Collections.synchronizedList`, so
-`variants.get()` takes the list monitor on essentially every variant-scoped read
-(`getBusView().getBus()` and friends — millions of calls). Backing it with a
-plain array / `volatile`-published array, confining synchronization to structural
-changes, removes that lock from the read path. **Risk:** same as B — this is the
-highest-frequency path in the model, so correctness of the multi-thread mode must
-be preserved (memory visibility, TCK).
+### C. Lock-free `VariantArray` reads — *implemented*
+`VariantArray` held its variant list in a `Collections.synchronizedList`, so
+`get()` (the per-variant topology-state read used across the topology models)
+took the list monitor on every call. It now publishes the list through a
+`volatile` reference and rebuilds it **copy-on-write** on the rare,
+main-thread-only structural changes (push/pop/delete/allocate); reads index into
+a list that is never structurally modified after publication, so they are
+**lock-free** while still seeing a fully constructed, consistent list. The
+`volatile` publication supplies the memory visibility the lock previously gave,
+matching the `VariantManager` contract (structural changes on the main thread
+only; concurrent threads read/write pre-allocated variants, each on its own
+index).
+
+- **Correctness:** full iidm-impl suite (997 tests) + the multi-thread TCK
+  (`MultiVariantNetworkTest.multiThreadTest`, concurrent variant reads from an
+  `ExecutorService`) pass.
+- **Measured impact:** *within noise on this environment.* A topology-read sweep
+  (`getBusView()/getBusBreakerView().getBuses()`), 2 warmup + 8 runs, on this
+  **4-core** box:
+
+  | | 1 thread | 4 threads |
+  |---|---:|---:|
+  | before (synchronizedList) | 205 ms | 217 ms |
+  | after (volatile COW)      | 231 ms | 223 ms |
+
+  The runs overlap; the lock is **uncontended at the parallelism a 4-core box can
+  reach** (both versions already scale linearly to 4 threads), and on realistic
+  topology reads `get()` is a small fraction of the work (bus iteration
+  dominates). The change is a correctness-preserving modernization whose benefit
+  appears under **high thread counts on many-core machines** (real multi-variant
+  security-analysis workloads), which this environment cannot exercise. Kept
+  because it is a clean lock removal with no regression, not for a demonstrated
+  speedup here.
+
+## 8. Remaining opportunities (not implemented), ranked by the benchmark
 
 ### D. Index buses by component in the components manager
 `AbstractComponent.getBuses()` scans every bus in the network per component
@@ -214,13 +245,15 @@ indexed concrete type (`getGenerators()` etc. use O(1) buckets). Delegating to
 `index.getAll(clazz)` when the class is indexed avoids the full scan. **Risk:**
 low; only affects generic-typed callers.
 
-## 8. Caveats / how to reproduce
+## 9. Caveats / how to reproduce
 
-- The before/after numbers are **separate JVM runs**; treat sub-20 % deltas on
+- The §2 before/after numbers are **separate JVM runs**; treat sub-20 % deltas on
   the fast stages as inside the noise. For publication-grade numbers, run BEFORE
-  and AFTER interleaved (or via JMH forks) and repeat 3–5×.
+  and AFTER interleaved (or via JMH forks) and repeat 3–5×. The §6 (query cache)
+  and §7.C (VariantArray) measurements *were* taken this way — same session,
+  back-to-back, reverting only the one file under test between runs.
 - Reproduce: convert `case13659pegase.m` → `.mat` (`scipy.io.savemat`, struct
   name `mpc`), then run `bench.Bench <case.mat> <workdir> <label>` against the
   `main` jars and the branch jars respectively.
-- The `.mat` conversion and the `Bench` harness live in the session scratchpad
-  (`m2mat.py`, `bench/`).
+- The `.mat` conversion and the `Bench`/`CgmesBench`/`VariantReadBench` harnesses
+  live in the session scratchpad (`m2mat.py`, `bench/`).
