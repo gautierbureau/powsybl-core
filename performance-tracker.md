@@ -87,12 +87,15 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 | SEC-3 | Resolve the voltage level once per violation | `LimitViolationFilter.apply` |
 | SEC-4 | `filterIdentifiable` once per identifier instead of twice | `IdentifierContingencyList.getContingencies` |
 
-### converters / commons — `ab5b375`
+### converters / commons — `ab5b375`, `9e00cd2`
 | ID | Finding | File |
 |---|---|---|
 | CONV-8 | Precompile bus-number regex | `MatpowerExporter` |
 | CONV-2 | Reuse computed header index instead of scanning twice | `psse-model Util.parseValueFromRecord` |
 | CONV-5 | Drop redundant trim, avoid boxing, use `isBlank` | `UcteRecordParser` |
+| CONV-1 | Cache the suffixed field map per (fields, suffix) instead of rebuilding per record | `psse-model Util.fromRecord`/`toRecord` (`9e00cd2`) |
+| CONV-3 | Precompile the comment/space-normalization regexes (was `String.replaceAll` per line) | `psse-model LegacyTextReader` (`9e00cd2`) |
+| CONV-4 | Pad with a `StringBuilder` instead of two `String.format` per field | `ucte-network UcteRecordWriter.alignAndTruncate` (`9e00cd2`) |
 | CMN-1 | Cache enum constants per class (avoid `getEnumConstants()` clone) | `BinReader.readEnumAttribute` |
 
 ---
@@ -107,12 +110,9 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 
 ## 4. Pending (⬜) — ranked within each area by value
 
-### Converters — highest-value pending group (per-record/line cost, big files)
+### Converters — CONV-1/3/4 done (`9e00cd2`); remaining below
 | ID | Finding | File / location | Impact | Effort · Risk |
 |---|---|---|---|---|
-| CONV-1 | `fieldsWithSuffix` map rebuilt via stream for every record (read & write) | `psse-model/io/Util.java` `fromRecord` 133–150, `toRecord` 228–243 | High (per-record HashMap+stream alloc) | Med · Low — build map once per record group; skip when suffix empty |
-| CONV-3 | `String.replaceAll` (recompiles regex) per record line, up to ~4× | `psse-model/io/LegacyTextReader.java` `removeComment` 130, `processText` 135–158 | Med-high | Low · Low — precompile `static final Pattern` (file already uses re2j) |
-| CONV-4 | Two `String.format` per numeric/integer field on export | `ucte-network/io/UcteRecordWriter.java` `alignAndTruncate` 70–74 | Med (~18 fields/node record) | Low-med · Low — pad with a reused `StringBuilder` |
 | CONV-6 | `String.format("%g")` per numeric cell (AMPL export, no column `NumberFormat`) | driver: `ampl-converter .../BasicAmplExporter.java` columns; cost: `commons AbstractTableFormatter.format` 93–100 | Med (dominant AMPL export cost) | Med · Med — cache `DecimalFormat` per column; `%g` semantics must be matched |
 | 🌿 MATH-7 | Element-wise bounds-checked copy / scans in `DenseMatrix` | `math DenseMatrix.java` `copyValuesFrom`, `resetRow`/`resetColumn`/`removeSmallValues` | — | **Covered by branch `optim_dense_matrix`** (`a7222d2` "Use double[] in DenseMatrix", reworks the backing store from `ByteBuffer` to `double[]`). Do not duplicate here. |
 
@@ -176,11 +176,9 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 
 ## 5. Suggested next batches
 
-1. **Converters** (CONV-1, CONV-3, CONV-4): genuine per-record/line cost on the
-   files these modules exist to parse; low risk. Best value-to-risk of the
-   pending set.
+1. ~~**Converters** (CONV-1, CONV-3, CONV-4)~~ — **done** (`9e00cd2`).
 2. **Criteria** (SERDE-4/5/6): trivial `List`→`Set`/`EnumSet` and loop rewrites
-   on the per-element security-analysis path.
+   on the per-element security-analysis path. ← next
 3. **Commons binary + table formatter** (CMN-2/3/4/5, CONV-6): real per-attribute
    allocation, but wants a reusable-buffer / cached-formatter design pass — do as
    one deliberate batch, not piecemeal.
