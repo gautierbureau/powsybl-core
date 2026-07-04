@@ -1009,16 +1009,11 @@ public class SubnetworkImpl extends AbstractNetwork {
         Iterable<VoltageAngleLimit> vals = getVoltageAngleLimits();
 
         // Re-home the columnar variant state of the detached elements into the detached network's stores,
-        // while the network reference still resolves to the current owner.
+        // while the network reference still resolves to the current owner. Each object cascades to its
+        // children (terminals, extensions, ...), mirroring the extend cascade.
         for (Identifiable<?> i : identifiables) {
-            if (i instanceof AbstractConnectable<?> connectable) {
-                for (TerminalExt t : connectable.getTerminals()) {
-                    ((AbstractTerminal) t).reHomeVariantStores(detachedNetwork);
-                }
-            } else if (i instanceof SwitchImpl aSwitch) {
-                aSwitch.reHomeVariantStores(detachedNetwork);
-            } else if (i instanceof ConfiguredBusImpl bus) {
-                bus.reHomeVariantStores(detachedNetwork);
+            if (i instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(detachedNetwork);
             }
         }
 

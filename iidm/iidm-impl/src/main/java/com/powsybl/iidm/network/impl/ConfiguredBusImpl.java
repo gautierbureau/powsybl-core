@@ -28,6 +28,10 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     // v, angle, fictitiousP0, fictitiousQ0 (double) and connected/synchronous component number (int) are held
     // columnarly in the network-level configured-bus store (see NumericVariantStore)
+    private static final String STORE_KEY = "ConfiguredBus";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN, 0.0, 0.0};
+    private static final int[] INT_DEFAULTS = {-1, -1};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
     private static final int COL_V = 0;
     private static final int COL_ANGLE = 1;
     private static final int COL_FIC_P0 = 2;
@@ -35,6 +39,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     private static final int COL_CC = 0;
     private static final int COL_SC = 1;
 
+    private NumericVariantStore variantStore;
     private int busVariantStoreRow;
 
     ConfiguredBusImpl(String id, String name, boolean fictitious, VoltageLevelExt voltageLevel) {
@@ -45,11 +50,12 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         for (int i = 0; i < variantArraySize; i++) {
             terminals.add(new ArrayList<>());
         }
-        this.busVariantStoreRow = network.get().getConfiguredBusVariantStore().allocateRow();
+        this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.busVariantStoreRow = variantStore.allocateRow();
     }
 
     private NumericVariantStore store() {
-        return network.get().getConfiguredBusVariantStore();
+        return variantStore;
     }
 
     @Override
@@ -225,7 +231,9 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         }
     }
 
-    void reHomeVariantStores(NetworkImpl targetNetwork) {
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // extensions
         NumericVariantStore oldStore = store();
         double v0 = oldStore.getDouble(0, COL_V, busVariantStoreRow);
         double angle0 = oldStore.getDouble(0, COL_ANGLE, busVariantStoreRow);
@@ -233,7 +241,8 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         double ficQ0 = oldStore.getDouble(0, COL_FIC_Q0, busVariantStoreRow);
         int cc0 = oldStore.getInt(0, COL_CC, busVariantStoreRow);
         int sc0 = oldStore.getInt(0, COL_SC, busVariantStoreRow);
-        NumericVariantStore newStore = targetNetwork.getConfiguredBusVariantStore();
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStore = newStore;
         this.busVariantStoreRow = newStore.allocateRow();
         newStore.setDouble(0, COL_V, busVariantStoreRow, v0);
         newStore.setDouble(0, COL_ANGLE, busVariantStoreRow, angle0);

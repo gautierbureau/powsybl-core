@@ -49,4 +49,15 @@ public interface MultiVariantObject {
      * @param sourceIndex the variant index to use to initialize new variants
      */
     void allocateVariantArrayElement(int[] indexes, int sourceIndex);
+
+    /**
+     * Called when this object changes network (merge/detach) to move its columnar variant state
+     * (see {@link NumericVariantStore}) into {@code targetNetwork}'s stores, before the network reference is
+     * redirected. Implementations re-home their own rows and cascade to their children, mirroring the
+     * {@code extendVariantArraySize} cascade. Default is a no-op for objects with no columnar state. Only
+     * single-variant networks can be merged/detached, so only the initial variant is transferred.
+     */
+    default void reHomeVariantStores(NetworkImpl targetNetwork) {
+        // no columnar state by default
+    }
 }

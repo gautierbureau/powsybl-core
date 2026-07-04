@@ -12,20 +12,21 @@ import java.util.Arrays;
 import java.util.Deque;
 
 /**
- * Generic columnar (structure-of-arrays) store of variant-dependent numeric state, holding a fixed set of
- * {@code double} columns and {@code int} columns shared by every object of one type (e.g. all node terminals'
- * v / angle / connected-component / synchronous-component).
+ * Generic columnar (structure-of-arrays) store of variant-dependent state, holding a fixed set of
+ * {@code double}, {@code int} and {@code boolean} columns shared by every object of one type (e.g. all node
+ * terminals' v / angle / connected-component / synchronous-component).
  *
- * <p>Reusable form of {@link TerminalVariantStore}: a variant's cells for all columns are contiguous, so a
- * clone copies one flat block per variant with {@link System#arraycopy} instead of one method call per object.
- * Layout, per array, is variant-major then column-major then row: {@code doubles[(v * nDouble + col) *
- * rowStride + row]}. Per-column default values initialise new rows / capacity so behaviour matches the former
- * per-object {@code TDoubleArrayList}/{@code TIntArrayList} defaults.</p>
+ * <p>Reusable form of {@link TerminalVariantStore}: a variant's cells for all columns of a given primitive
+ * type are contiguous, so a clone copies one flat block per variant with {@link System#arraycopy} instead of
+ * one method call per object. Layout, per array, is variant-major then column-major then row, e.g.
+ * {@code doubles[(v * nDouble + col) * rowStride + row]}. Per-column default values initialise new rows and
+ * grown capacity, so behaviour matches the former per-object {@code TDoubleArrayList}/{@code TIntArrayList}/
+ * {@code TBooleanArrayList} defaults.</p>
  *
  * <p>Thread-safety follows the {@link com.powsybl.iidm.network.VariantManager} contract: structural changes on
  * the main thread only; pre-allocated variants read/written concurrently, each thread on its own band. Rows of
- * removed objects are recycled through a free list (callers must guard reads of removed objects, as terminals
- * do with their {@code removed} flag).</p>
+ * removed objects are recycled through a free list; callers must not read a freed row (which holds true for
+ * equipment whose reads are guarded once removed).</p>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -35,11 +36,14 @@ class NumericVariantStore implements VariantColumnStore {
 
     private final int nDouble;
     private final int nInt;
+    private final int nBoolean;
     private final double[] doubleDefaults;
     private final int[] intDefaults;
+    private final boolean[] booleanDefaults;
 
     private volatile double[] doubles;
     private volatile int[] ints;
+    private volatile boolean[] booleans;
 
     private int rowStride;
     private int rowCount;
@@ -48,17 +52,20 @@ class NumericVariantStore implements VariantColumnStore {
 
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults) {
+    NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
         this.nDouble = doubleDefaults.length;
         this.nInt = intDefaults.length;
+        this.nBoolean = booleanDefaults.length;
         this.doubleDefaults = doubleDefaults.clone();
         this.intDefaults = intDefaults.clone();
+        this.booleanDefaults = booleanDefaults.clone();
         this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
         this.variantCapacity = Math.max(variantArraySize, 1);
         this.doubles = new double[variantCapacity * nDouble * rowStride];
         this.ints = new int[variantCapacity * nInt * rowStride];
+        this.booleans = new boolean[variantCapacity * nBoolean * rowStride];
     }
 
     private int doubleIndex(int variant, int col, int row) {
@@ -67,6 +74,10 @@ class NumericVariantStore implements VariantColumnStore {
 
     private int intIndex(int variant, int col, int row) {
         return (variant * nInt + col) * rowStride + row;
+    }
+
+    private int booleanIndex(int variant, int col, int row) {
+        return (variant * nBoolean + col) * rowStride + row;
     }
 
     /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
@@ -82,12 +93,40 @@ class NumericVariantStore implements VariantColumnStore {
         }
         double[] dd = doubles;
         int[] id = ints;
+        boolean[] bd = booleans;
         for (int v = 0; v < variantSize; v++) {
             for (int c = 0; c < nDouble; c++) {
                 dd[doubleIndex(v, c, row)] = doubleDefaults[c];
             }
             for (int c = 0; c < nInt; c++) {
                 id[intIndex(v, c, row)] = intDefaults[c];
+            }
+            for (int c = 0; c < nBoolean; c++) {
+                bd[booleanIndex(v, c, row)] = booleanDefaults[c];
+            }
+        }
+        return row;
+    }
+
+    /**
+     * Allocate a row initialised to the given per-instance values in every live variant band (as the former
+     * per-object constructor did, filling every variant with the object's initial values). The array lengths
+     * must match the store's column counts.
+     */
+    int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
+        int row = allocateRow();
+        double[] dd = doubles;
+        int[] id = ints;
+        boolean[] bd = booleans;
+        for (int v = 0; v < variantSize; v++) {
+            for (int c = 0; c < nDouble; c++) {
+                dd[doubleIndex(v, c, row)] = doubleInit[c];
+            }
+            for (int c = 0; c < nInt; c++) {
+                id[intIndex(v, c, row)] = intInit[c];
+            }
+            for (int c = 0; c < nBoolean; c++) {
+                bd[booleanIndex(v, c, row)] = booleanInit[c];
             }
         }
         return row;
@@ -122,6 +161,18 @@ class NumericVariantStore implements VariantColumnStore {
         return old;
     }
 
+    boolean getBoolean(int variant, int col, int row) {
+        return booleans[booleanIndex(variant, col, row)];
+    }
+
+    boolean setBoolean(int variant, int col, int row, boolean value) {
+        boolean[] data = booleans;
+        int i = booleanIndex(variant, col, row);
+        boolean old = data[i];
+        data[i] = value;
+        return old;
+    }
+
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
     @Override
@@ -129,8 +180,10 @@ class NumericVariantStore implements VariantColumnStore {
         ensureVariantCapacity(variantSize + number);
         int dBlock = nDouble * rowStride;
         int iBlock = nInt * rowStride;
+        int bBlock = nBoolean * rowStride;
         double[] dd = doubles;
         int[] id = ints;
+        boolean[] bd = booleans;
         for (int i = 0; i < number; i++) {
             int dst = variantSize + i;
             if (dBlock > 0) {
@@ -139,9 +192,13 @@ class NumericVariantStore implements VariantColumnStore {
             if (iBlock > 0) {
                 System.arraycopy(id, sourceIndex * iBlock, id, dst * iBlock, iBlock);
             }
+            if (bBlock > 0) {
+                System.arraycopy(bd, sourceIndex * bBlock, bd, dst * bBlock, bBlock);
+            }
         }
         doubles = dd;
         ints = id;
+        booleans = bd;
         variantSize += number;
     }
 
@@ -159,8 +216,10 @@ class NumericVariantStore implements VariantColumnStore {
     public void allocate(int[] indexes, int sourceIndex) {
         int dBlock = nDouble * rowStride;
         int iBlock = nInt * rowStride;
+        int bBlock = nBoolean * rowStride;
         double[] dd = doubles;
         int[] id = ints;
+        boolean[] bd = booleans;
         for (int index : indexes) {
             if (dBlock > 0) {
                 System.arraycopy(dd, sourceIndex * dBlock, dd, index * dBlock, dBlock);
@@ -168,9 +227,13 @@ class NumericVariantStore implements VariantColumnStore {
             if (iBlock > 0) {
                 System.arraycopy(id, sourceIndex * iBlock, id, index * iBlock, iBlock);
             }
+            if (bBlock > 0) {
+                System.arraycopy(bd, sourceIndex * bBlock, bd, index * bBlock, bBlock);
+            }
         }
         doubles = dd;
         ints = id;
+        booleans = bd;
     }
 
     // Move each live variant band to a wider row stride.
@@ -178,6 +241,7 @@ class NumericVariantStore implements VariantColumnStore {
         int newStride = rowStride * 2;
         double[] nd = new double[variantCapacity * nDouble * newStride];
         int[] ni = new int[variantCapacity * nInt * newStride];
+        boolean[] nb = new boolean[variantCapacity * nBoolean * newStride];
         for (int v = 0; v < variantSize; v++) {
             for (int c = 0; c < nDouble; c++) {
                 System.arraycopy(doubles, (v * nDouble + c) * rowStride, nd, (v * nDouble + c) * newStride, rowCount);
@@ -185,9 +249,13 @@ class NumericVariantStore implements VariantColumnStore {
             for (int c = 0; c < nInt; c++) {
                 System.arraycopy(ints, (v * nInt + c) * rowStride, ni, (v * nInt + c) * newStride, rowCount);
             }
+            for (int c = 0; c < nBoolean; c++) {
+                System.arraycopy(booleans, (v * nBoolean + c) * rowStride, nb, (v * nBoolean + c) * newStride, rowCount);
+            }
         }
         doubles = nd;
         ints = ni;
+        booleans = nb;
         rowStride = newStride;
     }
 
@@ -198,6 +266,7 @@ class NumericVariantStore implements VariantColumnStore {
         int newCapacity = Math.max(required, variantCapacity * 2);
         doubles = Arrays.copyOf(doubles, newCapacity * nDouble * rowStride);
         ints = Arrays.copyOf(ints, newCapacity * nInt * rowStride);
+        booleans = Arrays.copyOf(booleans, newCapacity * nBoolean * rowStride);
         variantCapacity = newCapacity;
     }
 }

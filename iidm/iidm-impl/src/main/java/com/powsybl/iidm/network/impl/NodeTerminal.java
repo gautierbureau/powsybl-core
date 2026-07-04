@@ -25,11 +25,16 @@ class NodeTerminal extends AbstractTerminal {
 
     // attributes depending on the variant, held columnarly in the network-level node-terminal store
     // (see NumericVariantStore): columns v, angle (double) and connected/synchronous component number (int)
+    private static final String STORE_KEY = "NodeTerminal";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {0, 0};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
     private static final int COL_V = 0;
     private static final int COL_ANGLE = 1;
     private static final int COL_CC = 0;
     private static final int COL_SC = 1;
 
+    private NumericVariantStore nodeVariantStore;
     private int nodeVariantStoreRow;
 
     private final NodeBreakerView nodeBreakerView = new NodeBreakerView() {
@@ -116,7 +121,8 @@ class NodeTerminal extends AbstractTerminal {
     NodeTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, int node) {
         super(network, side, terminalNumber);
         this.node = node;
-        this.nodeVariantStoreRow = network.get().getNodeTerminalVariantStore().allocateRow();
+        this.nodeVariantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.nodeVariantStoreRow = nodeVariantStore.allocateRow();
     }
 
     protected void notifyUpdate(String attribute, String variantId, Object oldValue, Object newValue) {
@@ -133,7 +139,7 @@ class NodeTerminal extends AbstractTerminal {
             throw new PowsyblException("Cannot access v of removed equipment " + connectable.id);
         }
         VariantManagerHolder holder = getVariantManagerHolder();
-        return holder.getNodeTerminalVariantStore().getDouble(holder.getVariantIndex(), COL_V, nodeVariantStoreRow);
+        return nodeVariantStore.getDouble(holder.getVariantIndex(), COL_V, nodeVariantStoreRow);
     }
 
     void setV(double v) {
@@ -145,7 +151,7 @@ class NodeTerminal extends AbstractTerminal {
         }
         VariantManagerHolder holder = getVariantManagerHolder();
         int variantIndex = holder.getVariantIndex();
-        double oldValue = holder.getNodeTerminalVariantStore().setDouble(variantIndex, COL_V, nodeVariantStoreRow, v);
+        double oldValue = nodeVariantStore.setDouble(variantIndex, COL_V, nodeVariantStoreRow, v);
         String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("v", variantId, oldValue, v);
     }
@@ -155,7 +161,7 @@ class NodeTerminal extends AbstractTerminal {
             throw new PowsyblException("Cannot access angle of removed equipment " + connectable.id);
         }
         VariantManagerHolder holder = getVariantManagerHolder();
-        return holder.getNodeTerminalVariantStore().getDouble(holder.getVariantIndex(), COL_ANGLE, nodeVariantStoreRow);
+        return nodeVariantStore.getDouble(holder.getVariantIndex(), COL_ANGLE, nodeVariantStoreRow);
     }
 
     void setAngle(double angle) {
@@ -164,7 +170,7 @@ class NodeTerminal extends AbstractTerminal {
         }
         VariantManagerHolder holder = getVariantManagerHolder();
         int variantIndex = holder.getVariantIndex();
-        double oldValue = holder.getNodeTerminalVariantStore().setDouble(variantIndex, COL_ANGLE, nodeVariantStoreRow, angle);
+        double oldValue = nodeVariantStore.setDouble(variantIndex, COL_ANGLE, nodeVariantStoreRow, angle);
         String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("angle", variantId, oldValue, angle);
     }
@@ -174,7 +180,7 @@ class NodeTerminal extends AbstractTerminal {
             throw new PowsyblException("Cannot access connected component of removed equipment " + connectable.id);
         }
         VariantManagerHolder holder = getVariantManagerHolder();
-        return holder.getNodeTerminalVariantStore().getInt(holder.getVariantIndex(), COL_CC, nodeVariantStoreRow);
+        return nodeVariantStore.getInt(holder.getVariantIndex(), COL_CC, nodeVariantStoreRow);
     }
 
     void setConnectedComponentNumber(int connectedComponentNumber) {
@@ -183,7 +189,7 @@ class NodeTerminal extends AbstractTerminal {
         }
         VariantManagerHolder holder = getVariantManagerHolder();
         int variantIndex = holder.getVariantIndex();
-        int oldValue = holder.getNodeTerminalVariantStore().setInt(variantIndex, COL_CC, nodeVariantStoreRow, connectedComponentNumber);
+        int oldValue = nodeVariantStore.setInt(variantIndex, COL_CC, nodeVariantStoreRow, connectedComponentNumber);
         String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("connectedComponentNumber", variantId, oldValue, connectedComponentNumber);
     }
@@ -193,7 +199,7 @@ class NodeTerminal extends AbstractTerminal {
             throw new PowsyblException("Cannot access synchronous component of removed equipment " + connectable.id);
         }
         VariantManagerHolder holder = getVariantManagerHolder();
-        return holder.getNodeTerminalVariantStore().getInt(holder.getVariantIndex(), COL_SC, nodeVariantStoreRow);
+        return nodeVariantStore.getInt(holder.getVariantIndex(), COL_SC, nodeVariantStoreRow);
     }
 
     void setSynchronousComponentNumber(int componentNumber) {
@@ -202,7 +208,7 @@ class NodeTerminal extends AbstractTerminal {
         }
         VariantManagerHolder holder = getVariantManagerHolder();
         int variantIndex = holder.getVariantIndex();
-        int oldValue = holder.getNodeTerminalVariantStore().setInt(variantIndex, COL_SC, nodeVariantStoreRow, componentNumber);
+        int oldValue = nodeVariantStore.setInt(variantIndex, COL_SC, nodeVariantStoreRow, componentNumber);
         String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("synchronousComponentNumber", variantId, oldValue, componentNumber);
     }
@@ -270,14 +276,14 @@ class NodeTerminal extends AbstractTerminal {
     }
 
     @Override
-    void reHomeVariantStores(NetworkImpl targetNetwork) {
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        NumericVariantStore oldStore = getVariantManagerHolder().getNodeTerminalVariantStore();
+        NumericVariantStore oldStore = nodeVariantStore;
         double v0 = oldStore.getDouble(0, COL_V, nodeVariantStoreRow);
         double angle0 = oldStore.getDouble(0, COL_ANGLE, nodeVariantStoreRow);
         int cc0 = oldStore.getInt(0, COL_CC, nodeVariantStoreRow);
         int sc0 = oldStore.getInt(0, COL_SC, nodeVariantStoreRow);
-        NumericVariantStore newStore = targetNetwork.getNodeTerminalVariantStore();
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.nodeVariantStoreRow = newStore.allocateRow();
         newStore.setDouble(0, COL_V, nodeVariantStoreRow, v0);
         newStore.setDouble(0, COL_ANGLE, nodeVariantStoreRow, angle0);
@@ -290,7 +296,7 @@ class NodeTerminal extends AbstractTerminal {
         boolean wasRemoved = removed;
         super.remove(); // frees the p/q store row (and sets removed)
         if (!wasRemoved) {
-            getVariantManagerHolder().getNodeTerminalVariantStore().freeRow(nodeVariantStoreRow);
+            nodeVariantStore.freeRow(nodeVariantStoreRow);
         }
     }
 

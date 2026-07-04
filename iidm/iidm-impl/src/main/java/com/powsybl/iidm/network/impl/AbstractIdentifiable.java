@@ -275,6 +275,17 @@ abstract class AbstractIdentifiable<I extends Identifiable<I>> extends AbstractE
         }
     }
 
+    // Re-home the columnar variant state on merge/detach; cascade to the (multi-variant) extensions, mirroring
+    // the extend cascade. Subclasses with their own columnar state override and call super.
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(targetNetwork);
+            }
+        }
+    }
+
     @Override
     public <E extends Extension<I>> boolean removeExtension(Class<E> type) {
         return removeExtension(type, true);

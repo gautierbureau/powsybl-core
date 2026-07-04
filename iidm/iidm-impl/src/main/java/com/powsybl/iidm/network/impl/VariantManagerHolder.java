@@ -29,10 +29,12 @@ public interface VariantManagerHolder {
      */
     SwitchVariantStore getSwitchVariantStore();
 
-    /** Network-level columnar store for node-terminal v / angle / connected &amp; synchronous component. */
-    NumericVariantStore getNodeTerminalVariantStore();
-
-    /** Network-level columnar store for configured-bus v / angle / fictitious P0/Q0 / component numbers. */
-    NumericVariantStore getConfiguredBusVariantStore();
+    /**
+     * Return the shared numeric columnar variant store for a given object type, creating and registering it on
+     * first use. {@code key} identifies the type; {@code doubleDefaults}/{@code intDefaults} give the initial
+     * value of each column for a fresh row (and must be identical for every call with the same key).
+     */
+    NumericVariantStore getOrCreateNumericVariantStore(String key, double[] doubleDefaults, int[] intDefaults,
+                                                       boolean[] booleanDefaults);
 
 }

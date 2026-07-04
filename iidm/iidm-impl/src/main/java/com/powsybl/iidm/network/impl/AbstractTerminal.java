@@ -236,7 +236,8 @@ abstract class AbstractTerminal implements TerminalExt {
      * {@code network.get()} still resolves to the current owner. Only single-variant networks can be
      * merged/detached, so only the initial variant is transferred. Subclasses extend this for their own stores.
      */
-    void reHomeVariantStores(NetworkImpl targetNetwork) {
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
         TerminalVariantStore oldStore = network.get().getTerminalVariantStore();
         TerminalVariantStore newStore = targetNetwork.getTerminalVariantStore();
         double p0 = oldStore.getP(0, variantStoreRow);
