@@ -65,6 +65,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     private final TerminalVariantStore terminalVariantStore;
 
+    private final SwitchVariantStore switchVariantStore;
+
     private AbstractReportNodeContext reportNodeContext;
 
     private final NetworkListenerList listeners = new NetworkListenerList();
@@ -133,6 +135,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
         terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
+        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize());
         variants = new VariantArray<>(ref, VariantImpl::new);
         // add the network the object list as it is a multi variant object
         // and it needs to be notified when and extension or a reduction of
@@ -239,6 +242,11 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     @Override
     public TerminalVariantStore getTerminalVariantStore() {
         return terminalVariantStore;
+    }
+
+    @Override
+    public SwitchVariantStore getSwitchVariantStore() {
+        return switchVariantStore;
     }
 
     @Override
@@ -1210,8 +1218,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
-        // columnar terminal p/q: extended once for the whole network instead of once per terminal
+        // columnar terminal p/q and switch open/retained: extended once for the whole network
         terminalVariantStore.extend(number, sourceIndex);
+        switchVariantStore.extend(number, sourceIndex);
 
         variants.push(number, () -> variants.copy(sourceIndex));
     }
@@ -1223,6 +1232,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().reduceVariantArraySize(number));
 
         terminalVariantStore.reduce(number);
+        switchVariantStore.reduce(number);
 
         variants.pop(number);
     }
@@ -1234,6 +1244,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().deleteVariantArrayElement(index));
 
         terminalVariantStore.delete(index);
+        switchVariantStore.delete(index);
 
         variants.delete(index);
     }
@@ -1245,6 +1256,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
 
         terminalVariantStore.allocate(indexes, sourceIndex);
+        switchVariantStore.allocate(indexes, sourceIndex);
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
     }
@@ -1287,14 +1299,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
             findAndAssociateBoundaryLines(dl2, dl1byPairingKey::get, (dll1, dll2) -> pairBoundaryLines(lines, dll1, dll2, dl1byPairingKey));
         }
 
-        // re-home the merged network's terminal p/q into this (root) columnar store, before createSubnetwork
-        // redirects the merged elements' network references
-        TerminalVariantStore rootStore = getTerminalVariantStore();
+        // re-home the merged network's columnar variant state (terminal p/q, switch open/retained) into this
+        // (root) store, before createSubnetwork redirects the merged elements' network references
+        TerminalVariantStore rootTerminalStore = getTerminalVariantStore();
+        SwitchVariantStore rootSwitchStore = getSwitchVariantStore();
         for (Identifiable<?> i : otherNetwork.getIdentifiables()) {
             if (i instanceof AbstractConnectable<?> connectable) {
                 for (TerminalExt t : connectable.getTerminals()) {
-                    ((AbstractTerminal) t).reHomeVariantStore(rootStore);
+                    ((AbstractTerminal) t).reHomeVariantStore(rootTerminalStore);
                 }
+            } else if (i instanceof SwitchImpl aSwitch) {
+                aSwitch.reHomeVariantStore(rootSwitchStore);
             }
         }
 

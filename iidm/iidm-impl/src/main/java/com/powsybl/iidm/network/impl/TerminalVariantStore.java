@@ -7,7 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
 
 /**
  * Columnar (structure-of-arrays) store for the variant-dependent {@code p} and {@code q} of every
@@ -44,9 +46,12 @@ class TerminalVariantStore {
     private volatile double[] q;
 
     private int rowStride;      // capacity (in rows) of each variant band
-    private int rowCount;       // number of allocated rows (terminals)
+    private int rowCount;       // high-water mark of allocated rows
     private int variantSize;    // number of live variant bands
     private int variantCapacity;
+
+    // rows freed by removed terminals, available for reuse (avoids leaking a row per removed terminal)
+    private final Deque<Integer> freeRows = new ArrayDeque<>();
 
     TerminalVariantStore(int variantArraySize) {
         this.rowStride = DEFAULT_ROW_CAPACITY;
@@ -64,13 +69,36 @@ class TerminalVariantStore {
     }
 
     /**
-     * Allocate a fresh row for a new terminal. The row reads as {@code NaN} in every existing variant band.
+     * Allocate a row for a new terminal. The row reads as {@code NaN} in every existing variant band. A row
+     * freed by a previously removed terminal is reused if available, otherwise a fresh one is allocated.
      */
     int allocateRow() {
+        if (!freeRows.isEmpty()) {
+            int row = freeRows.pop();
+            resetRow(row);
+            return row;
+        }
         if (rowCount == rowStride) {
             growRowStride();
         }
         return rowCount++;
+    }
+
+    /**
+     * Release the row of a removed terminal so it can be reused. The caller must never read/write the row again.
+     */
+    void freeRow(int row) {
+        freeRows.push(row);
+    }
+
+    // Reset a (reused) row to NaN in every live variant band.
+    private void resetRow(int row) {
+        double[] pd = p;
+        double[] qd = q;
+        for (int v = 0; v < variantSize; v++) {
+            pd[v * rowStride + row] = Double.NaN;
+            qd[v * rowStride + row] = Double.NaN;
+        }
     }
 
     /**

@@ -98,6 +98,8 @@ re-homing across `merge`/`detach`.
 - **Correctness: fully green** — iidm-impl 997/997, iidm-serde golden-file 303/303,
   byte-identical. Merge/detach lifecycle handled by re-homing rows between stores
   (both operations are single-variant by contract, so only band 0 is transferred).
+  Row recycling is implemented: a removed terminal frees its row (guarded by the
+  existing `removed` flag) for reuse by a later terminal — no leak on churn.
 - **A key implementation lesson:** the store must be a **flat pre-grown `double[]`**
   (`p[variant*stride + row]`) copied with `System.arraycopy` into existing space. A
   first `double[][]` version that allocated a fresh band per clone *regressed* the
@@ -135,24 +137,41 @@ So even a perfect columnar rewrite (saving order ~1–2 s on the ×50 microbench
 moves real end-to-end times little. The biggest real lever remains PROF-2 (the
 rdf4j/Xerces CGMES-import wall), not variant storage.
 
-## Candidate 3 — Columnar variant *topology*, not just characteristics
+## Candidate 3 — Columnar variant *topology* (implemented + measured)
 
 `p`/`q` are computed *characteristics*. The same array-of-structures-per-variant
 pattern also holds the variant-dependent **topology**, which is more interesting for
-the workloads that actually clone variants:
+the workloads that actually clone variants. This was built as a second slice on the
+branch (`SwitchVariantStore`) and it is the bigger win.
 
-- **`SwitchImpl.open` and `SwitchImpl.retained`** are per-variant `TBooleanArrayList`
-  — one boolean per (switch, variant). Every clone copies every switch's open/retained
-  state. This is the *same* AoS pattern as terminal p/q, so the *same* columnar
-  treatment applies — and booleans bit-pack: a whole variant's switch states become a
-  `long[]` bitset, so a clone is a single `System.arraycopy` of one bitset and reads
-  are a bit test. Extremely compact and cache-friendly.
+- **`SwitchImpl.open` and `SwitchImpl.retained`** were per-variant `TBooleanArrayList`
+  — one boolean per (switch, variant); every clone copied every switch's state. They
+  now index a network-level flat `boolean[]` columnar store, extended once per clone
+  by `NetworkImpl` (same shape as the terminal store), with merge/detach re-homing.
+- **Measured on a 40 000-switch node-breaker network** (`bench.SwitchBench`,
+  clone+remove ×50), same container:
+
+  | | switch-clone-remove ×50 (median) |
+  |---|---:|
+  | Baseline (per-switch `TBooleanArrayList`) | **198 ms** |
+  | Columnar `SwitchVariantStore` | **95–105 ms** |
+  | | **≈ −48 to −52 %** |
+
+  That is 2–5× the relative win of the p/q slice — because this network is
+  switch-dominated and switch state is exactly what a topology clone copies.
+- **Correctness: fully green** — iidm-impl 997/997, iidm-serde golden-file 303/303,
+  byte-identical (switch open/retained is serialized).
 - **Why it matters more:** security-analysis contingencies *change topology* per
   variant (open a switch / trip a line), and node-breaker networks (CGMES, UCTE) have
-  very many switches. So switch-state variant handling is on the path of the real
-  variant-cloning workload, unlike computed p/q which is mostly overwritten by the
-  flow anyway. A `SwitchVariantStore` (bitset-per-variant) is the natural next slice
-  and likely a better bang-for-buck than p/q.
+  very many switches — so switch state is on the real variant-cloning path, unlike
+  p/q which the flow mostly overwrites anyway.
+- **Rows are monotonic here** (no free list): `SwitchImpl` has no `removed` guard on
+  its reads, so recycling a row would risk a use-after-free that the terminal store
+  avoids via its `removed` flag. Adding a guard would enable recycling; left as a
+  follow-up (memory-only, correctness is fine).
+- **Further compaction:** `boolean[]` is one byte per flag; bit-packing each variant
+  band into a `long[]` (one bit per switch) would make a clone an even smaller bitset
+  copy. Left as a follow-up.
 - **Not columnar-friendly:** the calculated bus-view/connectivity caches in
   `NodeBreakerTopologyModel`/`BusBreakerTopologyModel` use the object-based
   `VariantArray<VariantImpl>` (heterogeneous cached objects), which stay per-object —
@@ -161,15 +180,20 @@ the workloads that actually clone variants:
 ## Recommendation
 
 1. **Do not pursue copy-on-write** — it breaks the concurrency contract.
-2. **Columnar SoA is the only safe architecture that attacks the cost.** The terminal
-   p/q slice proves it works end-to-end (997/997 + 303/303 green, byte-identical) for
-   ~−10–20 %; the ceiling per field is large (22× on extend). The full win needs every
-   primitive per-variant field converted — a multi-week, high-risk rewrite.
-3. **If pursuing it, start with switch `open`/`retained` (Candidate 3), not p/q** — a
-   bitset-per-variant `SwitchVariantStore` is compact, and switch state is on the real
-   topology-changing (security-analysis) path, whereas p/q is largely overwritten by
-   the flow.
+2. **Columnar SoA is the only safe architecture that attacks the cost, and two slices
+   now prove it end-to-end** (both 997/997 + 303/303 green, byte-identical):
+   - terminal p/q: **~−10–20 %** on bus-breaker PEGASE;
+   - switch open/retained: **~−48–52 %** on a 40 k-switch node-breaker network.
+   Each converted field buys a slice of the clone cost; the full win needs every
+   primitive per-variant field converted — still a multi-week, high-risk rewrite, but
+   the mechanism, lifecycle handling (merge/detach re-homing, row recycling) and
+   thread-safety are now demonstrated.
+3. **Topology (switch) is the higher-value target than p/q**, as suspected — it is on
+   the real security-analysis path and gave 2–5× the relative win. A node-breaker
+   field sweep (switch state done; bus/connectable/tap-changer fields next) is the
+   productive order.
 4. Practical stance: keep the shipped, low-risk wins (IIDM-F −45 %, IIDM-G −9–19 %);
    treat the full columnar rewrite as a deliberate, separately-scoped project, greenlit
-   only if variant-heavy / node-breaker workloads become a measured priority. The
-   biggest real lever overall remains PROF-2 (the rdf4j/Xerces CGMES-import wall).
+   if variant-heavy / node-breaker workloads become a priority. The biggest real lever
+   overall still remains PROF-2 (the rdf4j/Xerces CGMES-import wall), which no variant
+   work touches.

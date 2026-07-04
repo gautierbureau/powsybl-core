@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.*;
 
 /**
@@ -20,22 +19,17 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
 
     private final SwitchKind kind;
 
-    private final TBooleanArrayList open;
-
-    private final TBooleanArrayList retained;
+    // open/retained are held columnarly in the network-level SwitchVariantStore (structure-of-arrays), so a
+    // variant clone extends all switches at once with a bulk array copy instead of once per switch. This
+    // switch owns a single row in that store (re-homed if the switch moves network on merge/detach).
+    private int variantStoreRow;
 
     SwitchImpl(VoltageLevelExt voltageLevel,
                String id, String name, boolean fictitious, SwitchKind kind, final boolean open, boolean retained) {
         super(id, name, fictitious);
         this.voltageLevel = voltageLevel;
         this.kind = kind;
-        int variantArraySize = voltageLevel.getNetwork().getVariantManager().getVariantArraySize();
-        this.open = new TBooleanArrayList(variantArraySize);
-        this.retained = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.open.add(open);
-            this.retained.add(retained);
-        }
+        this.variantStoreRow = voltageLevel.getNetwork().getSwitchVariantStore().allocateRow(open, retained);
     }
 
     @Override
@@ -60,16 +54,18 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
 
     @Override
     public boolean isOpen() {
-        return open.get(getNetwork().getVariantIndex());
+        NetworkImpl network = getNetwork();
+        return network.getSwitchVariantStore().getOpen(network.getVariantIndex(), variantStoreRow);
     }
 
     @Override
     public void setOpen(boolean open) {
         NetworkImpl network = getNetwork();
         int index = network.getVariantIndex();
-        boolean oldValue = this.open.get(index);
+        SwitchVariantStore store = network.getSwitchVariantStore();
+        boolean oldValue = store.getOpen(index, variantStoreRow);
         if (oldValue != open) {
-            this.open.set(index, open);
+            store.setOpen(index, variantStoreRow, open);
             voltageLevel.getTopologyModel().invalidateCache(isRetained());
             String variantId = network.getVariantManager().getVariantId(index);
             network.getListeners().notifyUpdate(this, "open", variantId, oldValue, open);
@@ -78,7 +74,8 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
 
     @Override
     public boolean isRetained() {
-        return retained.get(getNetwork().getVariantIndex());
+        NetworkImpl network = getNetwork();
+        return network.getSwitchVariantStore().getRetained(network.getVariantIndex(), variantStoreRow);
     }
 
     @Override
@@ -88,9 +85,10 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
         }
         NetworkImpl network = getNetwork();
         int index = network.getVariantIndex();
-        boolean oldValue = this.retained.get(index);
+        SwitchVariantStore store = network.getSwitchVariantStore();
+        boolean oldValue = store.getRetained(index, variantStoreRow);
         if (oldValue != retained) {
-            this.retained.set(index, retained);
+            store.setRetained(index, variantStoreRow, retained);
             voltageLevel.getTopologyModel().invalidateCache();
             String variantId = network.getVariantManager().getVariantId(index);
             network.getListeners().notifyUpdate(this, "retained", variantId, oldValue, retained);
@@ -108,22 +106,19 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
         }
     }
 
+    // open/retained are maintained columnarly by the network-level SwitchVariantStore, which the root network
+    // extends/reduces/allocates once per variant operation (see NetworkImpl). These per-switch hooks therefore
+    // have nothing to do for open/retained; super still handles the (rare) switch extensions.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-
-        open.ensureCapacity(open.size() + number);
-        open.fill(initVariantArraySize, initVariantArraySize + number, open.get(sourceIndex));
-        retained.ensureCapacity(retained.size() + number);
-        retained.fill(initVariantArraySize, initVariantArraySize + number, retained.get(sourceIndex));
+        // open/retained handled by SwitchVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-
-        open.remove(open.size() - number, number);
-        retained.remove(retained.size() - number, number);
+        // open/retained handled by SwitchVariantStore
     }
 
     @Override
@@ -135,11 +130,19 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
+        // open/retained handled by SwitchVariantStore
+    }
 
-        for (int index : indexes) {
-            open.set(index, open.get(sourceIndex));
-            retained.set(index, retained.get(sourceIndex));
-        }
+    /**
+     * Move this switch's open/retained into {@code newStore}, allocating a fresh row there. Called when the
+     * switch changes network (merge/detach), before the network reference is redirected. Only single-variant
+     * networks can be merged/detached, so only the initial variant is transferred.
+     */
+    void reHomeVariantStore(SwitchVariantStore newStore) {
+        SwitchVariantStore oldStore = getNetwork().getSwitchVariantStore();
+        boolean open0 = oldStore.getOpen(0, variantStoreRow);
+        boolean retained0 = oldStore.getRetained(0, variantStoreRow);
+        this.variantStoreRow = newStore.importRow(open0, retained0);
     }
 
     @Override

@@ -245,7 +245,11 @@ abstract class AbstractTerminal implements TerminalExt {
 
     @Override
     public void remove() {
-        removed = true;
+        if (!removed) {
+            removed = true;
+            // release the columnar store row so it can be reused by a future terminal
+            network.get().getTerminalVariantStore().freeRow(variantStoreRow);
+        }
     }
 
     @Override

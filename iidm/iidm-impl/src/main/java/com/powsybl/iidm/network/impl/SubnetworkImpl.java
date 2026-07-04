@@ -1008,14 +1008,17 @@ public class SubnetworkImpl extends AbstractNetwork {
         Collection<Identifiable<?>> identifiables = getIdentifiables();
         Iterable<VoltageAngleLimit> vals = getVoltageAngleLimits();
 
-        // Re-home the terminal p/q of the detached elements into the detached network's columnar store,
-        // while the network reference still resolves to the current (root) owner.
-        TerminalVariantStore detachedStore = detachedNetwork.getTerminalVariantStore();
+        // Re-home the columnar variant state (terminal p/q, switch open/retained) of the detached elements
+        // into the detached network's stores, while the network reference still resolves to the current owner.
+        TerminalVariantStore detachedTerminalStore = detachedNetwork.getTerminalVariantStore();
+        SwitchVariantStore detachedSwitchStore = detachedNetwork.getSwitchVariantStore();
         for (Identifiable<?> i : identifiables) {
             if (i instanceof AbstractConnectable<?> connectable) {
                 for (TerminalExt t : connectable.getTerminals()) {
-                    ((AbstractTerminal) t).reHomeVariantStore(detachedStore);
+                    ((AbstractTerminal) t).reHomeVariantStore(detachedTerminalStore);
                 }
+            } else if (i instanceof SwitchImpl aSwitch) {
+                aSwitch.reHomeVariantStore(detachedSwitchStore);
             }
         }
 

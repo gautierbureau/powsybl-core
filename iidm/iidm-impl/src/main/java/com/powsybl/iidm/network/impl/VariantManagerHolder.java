@@ -23,4 +23,10 @@ public interface VariantManagerHolder {
      */
     TerminalVariantStore getTerminalVariantStore();
 
+    /**
+     * Network-level columnar store for the variant-dependent switch topology ({@code open}/{@code retained}).
+     * Shared by every switch, it is owned and structurally maintained by the root network.
+     */
+    SwitchVariantStore getSwitchVariantStore();
+
 }
