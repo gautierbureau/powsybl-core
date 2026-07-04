@@ -87,6 +87,13 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 | SEC-3 | Resolve the voltage level once per violation | `LimitViolationFilter.apply` |
 | SEC-4 | `filterIdentifiable` once per identifier instead of twice | `IdentifierContingencyList.getContingencies` |
 
+### iidm-criteria — `114a8a4`
+| ID | Finding | File |
+|---|---|---|
+| SERDE-5 | EnumSet membership instead of `List.contains` (list getter kept) | `SingleCountryCriterion`, `TwoCountriesCriterion`, `AtLeastOneCountryCriterion` |
+| SERDE-4 | Direct loop instead of a per-call stream pipeline | `AtLeastOneCountryCriterion`, `AtLeastOneNominalVoltageCriterion` |
+| SERDE-6 | `ImmutableSet` membership instead of `List.contains` (list getter kept) | `PropertyCriterion` |
+
 ### converters / commons — `ab5b375`, `9e00cd2`
 | ID | Finding | File |
 |---|---|---|
@@ -154,12 +161,9 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 | CGMES-10 | `injectParams` rebuilds the query via repeated `String.replace` | `CgmesModelTripleStore.injectParams` 797–809 | Low | Low · Low — single-pass build; real win is caching (done, CGMES-A) |
 | CGMES-11 | `getBaseVoltageSources`/`getRegions`/`getSubRegions` copy into a new `HashSet` per call | `CgmesExportContext.java` 488–502 | Low (called once/export today) | Low · Low — return `unmodifiableCollection(values())` |
 
-### iidm-serde / iidm-criteria — remaining
+### iidm-serde / iidm-criteria — remaining (SERDE-4/5/6 done, `114a8a4`)
 | ID | Finding | File / location | Impact | Effort · Risk |
 |---|---|---|---|---|
-| SERDE-5 | `Country` membership via `List.contains` | `SingleCountryCriterion` 79, `TwoCountriesCriterion` 70–73, `AtLeastOneCountryCriterion` 74 | Low-med (per-element SA path) | Low · Low — `EnumSet<Country>` |
-| SERDE-6 | `PropertyCriterion` property-value `List.contains` | `PropertyCriterion.java` 46/60/66 | Low-med | Low · Low — `ImmutableSet<String>` |
-| SERDE-4 | `AtLeastOne*` intermediate `List` + stream per `filter` | `AtLeastOneNominalVoltageCriterion` 57–78, `AtLeastOneCountryCriterion` 57–75 | Low-med | Low · Low — direct loop over ≤3 values |
 | SERDE-8 | Per-terminal string concat for indexed attribute names | `ConnectableSerDeUtil.java` (writeNode/Bus/PQ) | Low (high frequency, small strings) | Low · Low — precomputed constants per index |
 | SERDE-10 | Compiled `Schema` rebuilt for non-default `ExtensionsSupplier` | `NetworkSerDe.createSchema` 130–183 | Low-med (validation-only) | Med · Low — cache `Schema` by `(supplier,version)` |
 | SERDE-11 | `sortedExtensions` allocates stream+list per identifiable | `util/IidmSerDeUtil.java` 429–495 | Low | Low · Low — skip when ≤1 element |
@@ -177,9 +181,8 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 ## 5. Suggested next batches
 
 1. ~~**Converters** (CONV-1, CONV-3, CONV-4)~~ — **done** (`9e00cd2`).
-2. **Criteria** (SERDE-4/5/6): trivial `List`→`Set`/`EnumSet` and loop rewrites
-   on the per-element security-analysis path. ← next
-3. **Commons binary + table formatter** (CMN-2/3/4/5, CONV-6): real per-attribute
+2. ~~**Criteria** (SERDE-4/5/6)~~ — **done** (`114a8a4`).
+3. **Commons binary + table formatter** (CMN-2/3/4/5, CONV-6): real per-attribute ← next
    allocation, but wants a reusable-buffer / cached-formatter design pass — do as
    one deliberate batch, not piecemeal.
 4. Leave StAX-bound (CMN-12) and correctness-sensitive (TS-7) items unless a
