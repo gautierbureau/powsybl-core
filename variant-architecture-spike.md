@@ -177,6 +177,48 @@ branch (`SwitchVariantStore`) and it is the bigger win.
   `VariantArray<VariantImpl>` (heterogeneous cached objects), which stay per-object —
   the primitive `open`/`retained` bits are the columnar target, not the cache.
 
+## Full prototype — generic store, all high-cardinality primitive fields
+
+The two bespoke stores were generalised and the sweep extended to the remaining
+high-cardinality per-variant primitive state, so the prototype now covers every
+per-object primitive variant field of the numerous object types:
+
+- `VariantColumnStore` interface; `NetworkImpl` drives every registered store once
+  per variant operation through a single list.
+- `NumericVariantStore`: a **generic** flat columnar store of N `double` columns + M
+  `int` columns, with per-column defaults and row recycling — one `arraycopy` block
+  per variant per clone.
+- Converted with it: **`NodeTerminal`** (v, angle, connected/synchronous component)
+  and **`ConfiguredBusImpl`** (v, angle, fictitious P0/Q0, connected/synchronous
+  component). Together with terminal p/q and switch open/retained, **all four
+  high-cardinality primitive field groups are now columnar** (one row per terminal,
+  per switch, per node terminal, per bus). Merge/detach re-home every store through a
+  single `reHomeVariantStores(targetNetwork)` hook.
+- **Correctness: iidm-impl 997/997, iidm-serde 303/303, byte-identical.**
+
+**Clean same-container A/B** (no stores vs all four stores, measured back-to-back;
+the earlier "5740 ms" PEGASE figure was a slow-machine-window artifact — this block
+is the trustworthy comparison):
+
+| bench | no stores | all 4 stores | Δ |
+|---|---:|---:|---:|
+| PEGASE (bus-breaker) clone/remove ×50 | 3049 ms | 1977 ms | **−35 %** |
+| 40 000-switch node-breaker ×50 | 213 ms | 111 ms | **−48 %** |
+
+**Where the win comes from, honestly.** On PEGASE the terminal-p/q store is the main
+contributor; adding the node-terminal and configured-bus numeric stores on top was
+within measurement noise. The reason is instructive: `ConfiguredBusImpl` still copies
+a per-variant **list of connected terminals** (`ArrayList<List<BusTerminal>>`) on
+every clone, and that object-list copy — not the numeric fields — dominates a bus's
+clone cost. Lists of object references are not columnar-friendly, so columnarizing the
+bus *numerics* helps little while that list copy remains.
+
+**The new floor is the object-based `VariantArray<Variant>` path** — the per-voltage-
+level topology/bus-view caches and the configured-bus terminal lists. These hold
+heterogeneous per-variant *objects*, not primitives, so the columnar arraycopy
+technique does not apply. After the primitive sweep, this is what remains of the clone
+cost, and it is a genuine architectural boundary rather than more of the same work.
+
 ## Recommendation
 
 1. **Do not pursue copy-on-write** — it breaks the concurrency contract.
@@ -189,11 +231,16 @@ branch (`SwitchVariantStore`) and it is the bigger win.
    the mechanism, lifecycle handling (merge/detach re-homing, row recycling) and
    thread-safety are now demonstrated.
 3. **Topology (switch) is the higher-value target than p/q**, as suspected — it is on
-   the real security-analysis path and gave 2–5× the relative win. A node-breaker
-   field sweep (switch state done; bus/connectable/tap-changer fields next) is the
-   productive order.
-4. Practical stance: keep the shipped, low-risk wins (IIDM-F −45 %, IIDM-G −9–19 %);
-   treat the full columnar rewrite as a deliberate, separately-scoped project, greenlit
-   if variant-heavy / node-breaker workloads become a priority. The biggest real lever
-   overall still remains PROF-2 (the rdf4j/Xerces CGMES-import wall), which no variant
-   work touches.
+   the real security-analysis path and gave the largest relative win (−48 %).
+4. **The primitive columnar sweep saturates once terminals + switches are done.** The
+   generic store makes converting further primitive fields cheap and safe, but the
+   remaining clone cost is the object-based `VariantArray` path (topology/bus-view
+   caches, bus terminal lists), which columnar storage cannot touch. Converting the
+   lower-cardinality equipment numerics (generators, loads, tap changers, …) with the
+   generic store is mechanical but has diminishing returns.
+5. Practical stance: keep the shipped, low-risk wins (IIDM-F −45 %, IIDM-G −9–19 %).
+   The full prototype demonstrates the mechanism, thread-safety and lifecycle handling
+   end-to-end for a real ~−35 to −48 % clone speedup; treat productionising it as a
+   deliberate project, greenlit if variant-heavy / node-breaker workloads become a
+   priority. The biggest real lever overall still remains PROF-2 (the rdf4j/Xerces
+   CGMES-import wall), which no variant work touches.
