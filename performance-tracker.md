@@ -25,6 +25,8 @@ Isolated before/after, PEGASE `case13659pegase` (13 659 buses), median of
 
 | Change | Operation | Before | After | Δ | Verdict |
 |---|---|---:|---:|---:|---|
+| **XML export: bypass StAX per-write lock** (PROF-1) | cgmes-export | 3231 ms | 1359 ms | **−58 %** | clear win — found by profiling |
+| **XML export: bypass StAX per-write lock** (PROF-1) | xiidm-write | 639 ms | 375 ms | **−42 %** | clear win |
 | **Variant methods: loop not stream** (IIDM-F) | variant-clone-remove ×50 | 5900 ms | 3223 ms | **−45 %** | clear win, non-overlapping — found by profiling |
 | `RegexCriterion` precompile | criteria eval ×20 | 2456 ms | 1389 ms | **−43 %** | clear win, outside noise |
 | CGMES query cache | cgmes-import | 7567 ms | 6850 ms | **−9.5 %** | clear win, non-overlapping |
@@ -152,24 +154,23 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 
 ## 4. Pending (⬜) — ranked within each area by value
 
-### Profiler-found (JFR) — highest-value, but architectural
+### Profiler-found (JFR)
 | ID | Finding | File / location | Impact | Effort · Risk |
 |---|---|---|---|---|
-| PROF-1 | XML export spends ~10 % of round-trip CPU taking a per-write `InternalLock` in the JDK StAX writer (CGMES export + xiidm-write) | JDK `com.sun.xml.internal.stream.writers.*` under `iidm-serde XmlWriter` / CGMES export | Med-high (export paths) | High · **High** — see attempt below |
+| ✅ PROF-1 | XML export took ~10 % of round-trip CPU on a per-write `InternalLock` in the JDK StAX writer | `commons/xml XmlUtil` + `UnsynchronizedBufferedWriter` + `FlushOnEndDocumentStreamWriter` (`5fdc6da`) | **Done — cgmes-export −58 %, xiidm-write −42 %** | — |
 | PROF-2 | CGMES import is ~90 % rdf4j + Xerces; powsybl is ~5 % (hard ceiling) | `triple-store-impl-rdf4j` + rdf4j MemoryStore/RDFXML parser | High (the #1 hot path) but architectural | High · **High** — fewer/cheaper SPARQL queries (cache done), a faster RDF/XML parser, a lighter triple store, or streaming the parse instead of loading a full in-memory store |
 
-**PROF-1 attempt (reverted).** Wiring the JDK StAX writer through a
-non-synchronized buffered `Writer` (encoding delegated to `OutputStreamWriter`)
-kept XIIDM export byte-identical (commons 307 + iidm-serde 303 pass) but
-**truncated CGMES export** (49 failures + 92 errors: exported CGMES re-read as
-malformed — unterminated elements). The CGMES export path finalizes its writer
-differently from XIIDM, so the buffered tail was not flushed. Making the flush
-reliable across every export path is a much larger, riskier change than a 10 %
-uncontended-lock win warrants. The remaining safe option is Woodstox
-(`com.ctc.wstx`) — but it is **not** currently a dependency (adding it to
-`powsybl-commons` is an ecosystem/maintainer decision) and its writer output
-would have to be verified byte-identical against every golden file. Left as a
-documented finding, not implemented.
+**PROF-1 (done, `5fdc6da`).** Build the StAX writer over a non-synchronized
+buffered writer (encoding delegated to `OutputStreamWriter`, so bytes are
+unchanged) instead of directly over the OutputStream. A first attempt truncated
+CGMES export because several export paths finalize the writer with
+`writeEndDocument()` only (no flush/close) — so the returned writer is wrapped to
+flush on `writeEndDocument` (`FlushOnEndDocumentStreamWriter`, via the staxutils
+`StreamWriterDelegate` already on the classpath), and the buffered writer never
+closes the underlying stream (JSR-173). The whole change is confined to
+`commons/xml`; no caller is modified. Byte-identical: commons 307, iidm-serde 303,
+cgmes-conversion 486, cgmes-completion 1 all pass, incl. the CGMES export→import
+round trip. **Applies to all powsybl XML export.**
 
 ### Converters — CONV-1/3/4 done (`9e00cd2`); remaining below
 | ID | Finding | File / location | Impact | Effort · Risk |
