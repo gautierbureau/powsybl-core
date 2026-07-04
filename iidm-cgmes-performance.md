@@ -229,7 +229,73 @@ index).
   because it is a clean lock removal with no regression, not for a demonstrated
   speedup here.
 
-## 8. Remaining opportunities (not implemented), ranked by the benchmark
+## 8. Cross-repo micro-optimizations (implemented)
+
+A repo-wide scan (commons serialization core, triplestore backend, security /
+contingency evaluation, and the UCTE/MATPOWER/PSSE converters) surfaced a batch
+of allocation- and complexity-reduction fixes on plausibly-hot paths. All are
+correct and test-verified (905 tests across the touched modules pass), low-risk,
+and self-contained. Honest caveat up front: **most are within noise or not
+exercised by this import/export/variant benchmark** — they reduce allocation and
+algorithmic cost on paths the PEGASE round trip either barely spends time on
+(after the query cache) or does not run at all (security analysis). They are kept
+as clean, correct improvements for the workloads that *do* hit them, not for a
+demonstrated speedup here.
+
+**Triplestore (on the CGMES import path).**
+- `TripleStoreRDF4J.query`: hoist the option flags out of the per-row loop,
+  iterate binding names by index with a single `BindingSet.getValue` lookup per
+  cell (was `hasBinding` + `getBinding` = two hash lookups), drop the per-row
+  capturing lambda.
+- `PropertyBag`: guard `URLDecoder.decode` behind a `%`/`+` scan (most
+  identifiers have no escape and now skip a `StringBuilder` + O(n) copy);
+  Set-backed membership for `isResource`/`isClassProperty`/`isMultivaluedProperty`
+  (O(1) vs linear scan on the write path); size the per-row `HashMap` for the
+  load factor.
+- *Measured:* isolated CGMES-import A/B on PEGASE — before **6996 ms**, after
+  **6926 ms** (−1 %, distributions overlap → within noise). The query cache
+  (§6) already removed the redundant query executions, so what remains is a
+  single materialization pass that is a small fraction of the 7 s import
+  (SPARQL evaluation + conversion dominate). The membership-set and write-path
+  fixes help the *export* side, not measured here.
+
+**Security-analysis / contingency (per-contingency paths — not run by this
+benchmark, but the core use case for those modules).**
+- `LimitViolationDetection.checkLimitViolation`: only allocate the temporary-
+  overload-ids `HashSet` when TATL is actually checked (this is the innermost
+  detection primitive — every branch side and 3wt side, pre- and every
+  post-contingency state).
+- `LimitViolationDetection.createViolationLocation`: resolve just this bus's
+  nodes (`Networks.getNodes`) instead of building the whole voltage level's
+  node→bus map (and its per-node topology traversals) to keep one entry.
+- `LimitViolationFilter.apply`: resolve the voltage level once per violation
+  instead of once for the nominal-voltage check and again for the country check.
+- `IdentifierContingencyList.getContingencies`: call `filterIdentifiable` (a full
+  network scan, plus a per-element regex for wildcards) once per identifier
+  instead of twice.
+
+**Converters.**
+- `MatpowerExporter`: precompile the bus-number regex (was `String.matches` per
+  bus).
+- PSSE `Util.parseValueFromRecord`: reuse the computed header index instead of
+  scanning the headers array twice.
+- `UcteRecordParser`: drop the redundant `trim` in `parseInt`/`parseDouble`
+  (`parseString` already trims), use `Double.parseDouble` instead of
+  `Double.valueOf` (no boxing), and `isBlank()` instead of `trim().isEmpty()`
+  when skipping empty lines.
+
+**Commons.**
+- `BinReader.readEnumAttribute`: cache enum constants per class instead of
+  calling `Class.getEnumConstants()` (which clones its array) on every enum
+  attribute read on the binary-import path.
+
+Additional lower-ranked findings from the scan were left unimplemented as
+higher-risk or lower-value: binary string/entry reuse pools (`BinReader`/
+`BinWriter`), per-cell `String.format` in the table formatter (AMPL/CSV export),
+PSSE per-record `fieldsWithSuffix` map rebuild, and a bulk `DenseMatrix`
+buffer copy. These are documented in the scan notes if a follow-up is wanted.
+
+## 9. Remaining opportunities (not implemented), ranked by the benchmark
 
 ### D. Index buses by component in the components manager
 `AbstractComponent.getBuses()` scans every bus in the network per component
@@ -245,7 +311,7 @@ indexed concrete type (`getGenerators()` etc. use O(1) buckets). Delegating to
 `index.getAll(clazz)` when the class is indexed avoids the full scan. **Risk:**
 low; only affects generic-typed callers.
 
-## 9. Caveats / how to reproduce
+## 10. Caveats / how to reproduce
 
 - The §2 before/after numbers are **separate JVM runs**; treat sub-20 % deltas on
   the fast stages as inside the noise. For publication-grade numbers, run BEFORE
