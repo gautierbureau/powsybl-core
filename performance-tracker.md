@@ -155,8 +155,21 @@ xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
 ### Profiler-found (JFR) — highest-value, but architectural
 | ID | Finding | File / location | Impact | Effort · Risk |
 |---|---|---|---|---|
-| PROF-1 | XML export spends ~10 % of round-trip CPU taking a per-write `InternalLock` in the JDK StAX writer (CGMES export + xiidm-write) | JDK `com.sun.xml.internal.stream.writers.*` under `iidm-serde XmlWriter` / CGMES export | Med-high (export paths) | Med · **Med** — try Woodstox StAX (`com.ctc.wstx`, often 2–3× faster and different locking), or reduce write() calls / a custom buffered writer; must keep output identical (golden-file tests) |
+| PROF-1 | XML export spends ~10 % of round-trip CPU taking a per-write `InternalLock` in the JDK StAX writer (CGMES export + xiidm-write) | JDK `com.sun.xml.internal.stream.writers.*` under `iidm-serde XmlWriter` / CGMES export | Med-high (export paths) | High · **High** — see attempt below |
 | PROF-2 | CGMES import is ~90 % rdf4j + Xerces; powsybl is ~5 % (hard ceiling) | `triple-store-impl-rdf4j` + rdf4j MemoryStore/RDFXML parser | High (the #1 hot path) but architectural | High · **High** — fewer/cheaper SPARQL queries (cache done), a faster RDF/XML parser, a lighter triple store, or streaming the parse instead of loading a full in-memory store |
+
+**PROF-1 attempt (reverted).** Wiring the JDK StAX writer through a
+non-synchronized buffered `Writer` (encoding delegated to `OutputStreamWriter`)
+kept XIIDM export byte-identical (commons 307 + iidm-serde 303 pass) but
+**truncated CGMES export** (49 failures + 92 errors: exported CGMES re-read as
+malformed — unterminated elements). The CGMES export path finalizes its writer
+differently from XIIDM, so the buffered tail was not flushed. Making the flush
+reliable across every export path is a much larger, riskier change than a 10 %
+uncontended-lock win warrants. The remaining safe option is Woodstox
+(`com.ctc.wstx`) — but it is **not** currently a dependency (adding it to
+`powsybl-commons` is an ecosystem/maintainer decision) and its writer output
+would have to be verified byte-identical against every golden file. Left as a
+documented finding, not implemented.
 
 ### Converters — CONV-1/3/4 done (`9e00cd2`); remaining below
 | ID | Finding | File / location | Impact | Effort · Risk |
