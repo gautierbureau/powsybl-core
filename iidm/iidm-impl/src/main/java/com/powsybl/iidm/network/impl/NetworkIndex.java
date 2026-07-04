@@ -26,6 +26,12 @@ class NetworkIndex {
 
     private final Map<Class<? extends Identifiable>, Set<Identifiable<?>>> objectsByClass = new HashMap<>();
 
+    // Lazily-built list of the multi-variant objects (a subset of objectsById). Variant operations
+    // (clone/remove) iterate over it once per operation; caching it avoids re-scanning and re-filtering
+    // all the network identifiables on each variant operation. Invalidated whenever an identifiable is
+    // added or removed.
+    private List<MultiVariantObject> statefulObjectsCache;
+
     static void checkId(String id) {
         if (id == null || id.isEmpty()) {
             throw new PowsyblException("Invalid id '" + id + "'");
@@ -47,6 +53,7 @@ class NetworkIndex {
 
         Set<Identifiable<?>> all = objectsByClass.computeIfAbsent(obj.getClass(), k -> new LinkedHashSet<>());
         all.add(obj);
+        statefulObjectsCache = null;
     }
 
     boolean addAlias(Identifiable<?> obj, String alias) {
@@ -111,6 +118,23 @@ class NetworkIndex {
         return objectsById.values();
     }
 
+    /**
+     * Return the multi-variant objects held by this index. The returned list is cached and rebuilt lazily
+     * after any structural change (add/remove/clean); callers must only iterate over it, not mutate it.
+     */
+    List<MultiVariantObject> getStatefulObjects() {
+        if (statefulObjectsCache == null) {
+            List<MultiVariantObject> stateful = new ArrayList<>(objectsById.size());
+            for (Identifiable<?> obj : objectsById.values()) {
+                if (obj instanceof MultiVariantObject multiVariantObject) {
+                    stateful.add(multiVariantObject);
+                }
+            }
+            statefulObjectsCache = stateful;
+        }
+        return statefulObjectsCache;
+    }
+
     <T extends Identifiable> Set<T> getAll(Class<T> clazz) {
         Set<Identifiable<?>> all = objectsByClass.get(clazz);
         if (all == null) {
@@ -137,11 +161,13 @@ class NetworkIndex {
         if (all != null) {
             all.remove(obj);
         }
+        statefulObjectsCache = null;
     }
 
     void clean() {
         objectsById.clear();
         objectsByClass.clear();
+        statefulObjectsCache = null;
     }
 
     /**

@@ -11,7 +11,6 @@ import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.primitives.Ints;
 import com.powsybl.commons.PowsyblException;
-import com.powsybl.iidm.network.Identifiable;
 import com.powsybl.iidm.network.VariantManager;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import org.slf4j.Logger;
@@ -102,16 +101,9 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     private List<MultiVariantObject> getStafulObjects() {
-        // materialize the list so that callers looping several times over it do not
-        // re-scan and re-filter all the network identifiables on each loop
-        Collection<Identifiable<?>> all = networkIndex.getAll();
-        List<MultiVariantObject> statefulObjects = new ArrayList<>(all.size());
-        for (Identifiable<?> obj : all) {
-            if (obj instanceof MultiVariantObject multiVariantObject) {
-                statefulObjects.add(multiVariantObject);
-            }
-        }
-        return statefulObjects;
+        // the list is cached and incrementally invalidated by the network index, so repeated variant
+        // operations do not re-scan and re-filter all the network identifiables each time
+        return networkIndex.getStatefulObjects();
     }
 
     @Override
