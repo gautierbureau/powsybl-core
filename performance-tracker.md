@@ -6,7 +6,7 @@ remains. Companion to `iidm-cgmes-performance.md` (which holds the benchmark
 method, the hot-path ranking, and the measured results in narrative form).
 
 **Status legend:** ✅ done · ⬜ pending · 🔬 investigated, not a real fix ·
-📏 measured.
+🌿 covered by another branch · 📏 measured.
 
 **How to read impact:** relative to the affected module's hot path. Per the
 benchmark caveat, most micro-optimizations are *within noise on the PEGASE
@@ -114,7 +114,7 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 | CONV-3 | `String.replaceAll` (recompiles regex) per record line, up to ~4× | `psse-model/io/LegacyTextReader.java` `removeComment` 130, `processText` 135–158 | Med-high | Low · Low — precompile `static final Pattern` (file already uses re2j) |
 | CONV-4 | Two `String.format` per numeric/integer field on export | `ucte-network/io/UcteRecordWriter.java` `alignAndTruncate` 70–74 | Med (~18 fields/node record) | Low-med · Low — pad with a reused `StringBuilder` |
 | CONV-6 | `String.format("%g")` per numeric cell (AMPL export, no column `NumberFormat`) | driver: `ampl-converter .../BasicAmplExporter.java` columns; cost: `commons AbstractTableFormatter.format` 93–100 | Med (dominant AMPL export cost) | Med · Med — cache `DecimalFormat` per column; `%g` semantics must be matched |
-| MATH-7 | Element-wise bounds-checked copy / scans | `math DenseMatrix.java` `copyValuesFrom` 362–373, `resetRow`/`resetColumn`/`removeSmallValues` 375–407 | Med-high (numeric inner loops) | Med · Med — bulk `ByteBuffer` copy; `getUnsafe`/`setUnsafe` in ranged loops |
+| 🌿 MATH-7 | Element-wise bounds-checked copy / scans in `DenseMatrix` | `math DenseMatrix.java` `copyValuesFrom`, `resetRow`/`resetColumn`/`removeSmallValues` | — | **Covered by branch `optim_dense_matrix`** (`a7222d2` "Use double[] in DenseMatrix", reworks the backing store from `ByteBuffer` to `double[]`). Do not duplicate here. |
 
 ### Commons serialization core — real but StAX-constrained or needs a buffer redesign
 | ID | Finding | File / location | Impact | Effort · Risk |
