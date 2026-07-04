@@ -37,7 +37,7 @@ import java.util.Deque;
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
-class TerminalVariantStore {
+class TerminalVariantStore implements VariantColumnStore {
 
     private static final int DEFAULT_ROW_CAPACITY = 16;
 
@@ -174,7 +174,7 @@ class TerminalVariantStore {
 
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
-    void extend(int number, int sourceIndex) {
+    public void extend(int number, int sourceIndex) {
         ensureVariantCapacity(variantSize + number);
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
@@ -190,16 +190,16 @@ class TerminalVariantStore {
         variantSize += number;
     }
 
-    void reduce(int number) {
+    public void reduce(int number) {
         variantSize -= number; // bands past the new size are simply no longer read
     }
 
-    void delete(int index) {
+    public void delete(int index) {
         // Match the previous per-terminal behaviour ("nothing to do"): the band at this now-unused index
         // is left in place and will be overwritten if the index is later recycled by allocate().
     }
 
-    void allocate(int[] indexes, int sourceIndex) {
+    public void allocate(int[] indexes, int sourceIndex) {
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
         double[] pd = p;

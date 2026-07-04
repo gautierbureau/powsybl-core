@@ -31,7 +31,7 @@ import java.util.Arrays;
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
-class SwitchVariantStore {
+class SwitchVariantStore implements VariantColumnStore {
 
     private static final int DEFAULT_ROW_CAPACITY = 16;
 
@@ -129,7 +129,7 @@ class SwitchVariantStore {
 
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
-    void extend(int number, int sourceIndex) {
+    public void extend(int number, int sourceIndex) {
         ensureVariantCapacity(variantSize + number);
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
@@ -145,15 +145,15 @@ class SwitchVariantStore {
         variantSize += number;
     }
 
-    void reduce(int number) {
+    public void reduce(int number) {
         variantSize -= number;
     }
 
-    void delete(int index) {
+    public void delete(int index) {
         // nothing to do: the band is left in place and overwritten if the index is recycled by allocate()
     }
 
-    void allocate(int[] indexes, int sourceIndex) {
+    public void allocate(int[] indexes, int sourceIndex) {
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
         boolean[] od = open;

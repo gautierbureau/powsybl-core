@@ -29,4 +29,10 @@ public interface VariantManagerHolder {
      */
     SwitchVariantStore getSwitchVariantStore();
 
+    /** Network-level columnar store for node-terminal v / angle / connected &amp; synchronous component. */
+    NumericVariantStore getNodeTerminalVariantStore();
+
+    /** Network-level columnar store for configured-bus v / angle / fictitious P0/Q0 / component numbers. */
+    NumericVariantStore getConfiguredBusVariantStore();
+
 }

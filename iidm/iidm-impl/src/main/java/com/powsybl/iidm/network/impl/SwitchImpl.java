@@ -138,11 +138,11 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
      * switch changes network (merge/detach), before the network reference is redirected. Only single-variant
      * networks can be merged/detached, so only the initial variant is transferred.
      */
-    void reHomeVariantStore(SwitchVariantStore newStore) {
+    void reHomeVariantStores(NetworkImpl targetNetwork) {
         SwitchVariantStore oldStore = getNetwork().getSwitchVariantStore();
         boolean open0 = oldStore.getOpen(0, variantStoreRow);
         boolean retained0 = oldStore.getRetained(0, variantStoreRow);
-        this.variantStoreRow = newStore.importRow(open0, retained0);
+        this.variantStoreRow = targetNetwork.getSwitchVariantStore().importRow(open0, retained0);
     }
 
     @Override

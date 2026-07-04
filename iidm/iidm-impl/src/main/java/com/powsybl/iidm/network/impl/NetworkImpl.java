@@ -67,6 +67,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     private final SwitchVariantStore switchVariantStore;
 
+    // v / angle / connectedComponentNumber / synchronousComponentNumber of every node terminal
+    private final NumericVariantStore nodeTerminalVariantStore;
+
+    // v / angle / fictitiousP0 / fictitiousQ0 / connectedComponentNumber / synchronousComponentNumber of buses
+    private final NumericVariantStore configuredBusVariantStore;
+
+    // all columnar variant stores, driven once per variant operation instead of once per object
+    private final List<VariantColumnStore> variantColumnStores;
+
     private AbstractReportNodeContext reportNodeContext;
 
     private final NetworkListenerList listeners = new NetworkListenerList();
@@ -134,8 +143,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
-        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
-        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize());
+        int variantArraySize = variantManager.getVariantArraySize();
+        terminalVariantStore = new TerminalVariantStore(variantArraySize);
+        switchVariantStore = new SwitchVariantStore(variantArraySize);
+        // node terminal: v, angle (NaN) ; connectedComponentNumber, synchronousComponentNumber (0)
+        nodeTerminalVariantStore = new NumericVariantStore(variantArraySize,
+                new double[] {Double.NaN, Double.NaN}, new int[] {0, 0});
+        // configured bus: v, angle (NaN), fictitiousP0, fictitiousQ0 (0.0) ; connected/synchronous component (-1)
+        configuredBusVariantStore = new NumericVariantStore(variantArraySize,
+                new double[] {Double.NaN, Double.NaN, 0.0, 0.0}, new int[] {-1, -1});
+        variantColumnStores = List.of(terminalVariantStore, switchVariantStore,
+                nodeTerminalVariantStore, configuredBusVariantStore);
         variants = new VariantArray<>(ref, VariantImpl::new);
         // add the network the object list as it is a multi variant object
         // and it needs to be notified when and extension or a reduction of
@@ -247,6 +265,16 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     @Override
     public SwitchVariantStore getSwitchVariantStore() {
         return switchVariantStore;
+    }
+
+    @Override
+    public NumericVariantStore getNodeTerminalVariantStore() {
+        return nodeTerminalVariantStore;
+    }
+
+    @Override
+    public NumericVariantStore getConfiguredBusVariantStore() {
+        return configuredBusVariantStore;
     }
 
     @Override
@@ -1218,9 +1246,11 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
-        // columnar terminal p/q and switch open/retained: extended once for the whole network
-        terminalVariantStore.extend(number, sourceIndex);
-        switchVariantStore.extend(number, sourceIndex);
+        // columnar variant stores (terminal p/q, switch open/retained, node terminal, bus...):
+        // extended once for the whole network instead of once per object
+        for (VariantColumnStore store : variantColumnStores) {
+            store.extend(number, sourceIndex);
+        }
 
         variants.push(number, () -> variants.copy(sourceIndex));
     }
@@ -1231,8 +1261,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.reduceVariantArraySize(number);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().reduceVariantArraySize(number));
 
-        terminalVariantStore.reduce(number);
-        switchVariantStore.reduce(number);
+        for (VariantColumnStore store : variantColumnStores) {
+            store.reduce(number);
+        }
 
         variants.pop(number);
     }
@@ -1243,8 +1274,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.deleteVariantArrayElement(index);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().deleteVariantArrayElement(index));
 
-        terminalVariantStore.delete(index);
-        switchVariantStore.delete(index);
+        for (VariantColumnStore store : variantColumnStores) {
+            store.delete(index);
+        }
 
         variants.delete(index);
     }
@@ -1255,8 +1287,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.allocateVariantArrayElement(indexes, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
 
-        terminalVariantStore.allocate(indexes, sourceIndex);
-        switchVariantStore.allocate(indexes, sourceIndex);
+        for (VariantColumnStore store : variantColumnStores) {
+            store.allocate(indexes, sourceIndex);
+        }
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
     }
@@ -1299,17 +1332,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
             findAndAssociateBoundaryLines(dl2, dl1byPairingKey::get, (dll1, dll2) -> pairBoundaryLines(lines, dll1, dll2, dl1byPairingKey));
         }
 
-        // re-home the merged network's columnar variant state (terminal p/q, switch open/retained) into this
-        // (root) store, before createSubnetwork redirects the merged elements' network references
-        TerminalVariantStore rootTerminalStore = getTerminalVariantStore();
-        SwitchVariantStore rootSwitchStore = getSwitchVariantStore();
+        // re-home the merged network's columnar variant state into this (root) network's stores, before
+        // createSubnetwork redirects the merged elements' network references
         for (Identifiable<?> i : otherNetwork.getIdentifiables()) {
             if (i instanceof AbstractConnectable<?> connectable) {
                 for (TerminalExt t : connectable.getTerminals()) {
-                    ((AbstractTerminal) t).reHomeVariantStore(rootTerminalStore);
+                    ((AbstractTerminal) t).reHomeVariantStores(this);
                 }
             } else if (i instanceof SwitchImpl aSwitch) {
-                aSwitch.reHomeVariantStore(rootSwitchStore);
+                aSwitch.reHomeVariantStores(this);
+            } else if (i instanceof ConfiguredBusImpl bus) {
+                bus.reHomeVariantStores(this);
             }
         }
 

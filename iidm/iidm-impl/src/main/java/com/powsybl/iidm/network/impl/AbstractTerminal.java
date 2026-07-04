@@ -231,13 +231,14 @@ abstract class AbstractTerminal implements TerminalExt {
     }
 
     /**
-     * Move this terminal's p/q into {@code newStore}, allocating a fresh row there. Called when the terminal
-     * changes network (merge/detach), before the network reference is redirected, so {@code network.get()}
-     * still resolves to the current owner. Only single-variant networks can be merged/detached, so only the
-     * initial variant is transferred.
+     * Move this terminal's columnar variant state into {@code targetNetwork}'s stores, allocating fresh rows.
+     * Called when the terminal changes network (merge/detach), before the network reference is redirected, so
+     * {@code network.get()} still resolves to the current owner. Only single-variant networks can be
+     * merged/detached, so only the initial variant is transferred. Subclasses extend this for their own stores.
      */
-    void reHomeVariantStore(TerminalVariantStore newStore) {
+    void reHomeVariantStores(NetworkImpl targetNetwork) {
         TerminalVariantStore oldStore = network.get().getTerminalVariantStore();
+        TerminalVariantStore newStore = targetNetwork.getTerminalVariantStore();
         double p0 = oldStore.getP(0, variantStoreRow);
         double q0 = oldStore.getQ(0, variantStoreRow);
         this.variantStoreRow = newStore.importRow(p0, q0);
