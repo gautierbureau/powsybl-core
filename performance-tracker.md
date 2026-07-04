@@ -25,6 +25,7 @@ Isolated before/after, PEGASE `case13659pegase` (13 659 buses), median of
 
 | Change | Operation | Before | After | Δ | Verdict |
 |---|---|---:|---:|---:|---|
+| **Variant methods: loop not stream** (IIDM-F) | variant-clone-remove ×50 | 5900 ms | 3223 ms | **−45 %** | clear win, non-overlapping — found by profiling |
 | `RegexCriterion` precompile | criteria eval ×20 | 2456 ms | 1389 ms | **−43 %** | clear win, outside noise |
 | CGMES query cache | cgmes-import | 7567 ms | 6850 ms | **−9.5 %** | clear win, non-overlapping |
 | Triplestore materialization | cgmes-import | 6996 ms | 6926 ms | −1 % | within noise (cache already removed redundant runs) |
@@ -33,6 +34,35 @@ Isolated before/after, PEGASE `case13659pegase` (13 659 buses), median of
 
 Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 §2, §6, §7, §8.
+
+---
+
+## 1b. Profiling findings (JFR CPU + allocation, PEGASE 13659)
+
+Static scans kept landing within noise, so the round trip was profiled with JFR
+(`settings=profile`). Leaf-frame attribution of CPU samples:
+
+**CGMES import (7 s) is ~90 % third-party, ~5 % powsybl.** By leaf frame:
+rdf4j 49.7 %, Xerces XML parser 10 %, JDK String/HashMap/WeakHashMap 35 %
+(overwhelmingly called *from inside* rdf4j IRI parsing / symbol tables /
+statement storage), **powsybl 5 %**. Top methods: `MemStatementIterator`,
+`ParsedIRI.parsePctEncoded`, `MemIRI`, `SAXFilter.startElement`,
+`MemValueFactory`. Implication: powsybl-side import micro-opts have a ~5 %
+ceiling; the query cache (−9.5 %) worked precisely because it removed whole
+rdf4j query *executions*. Real further gains require attacking rdf4j (fewer
+queries, a faster RDF parser, a lighter store, or streaming the parse) — big
+architectural changes, tracked as PROF-2.
+
+**XML export is dominated by per-write lock acquisition in the JDK StAX writer.**
+`ReentrantLock.initialTryLock` (via `jdk.internal.misc.InternalLock`) was the #1
+hot method of the whole round trip (10.4 %), all from
+`com.sun.xml.internal.stream.writers.UTF8OutputStreamWriter.write` /
+`XMLStreamWriterImpl` under the `IndentingXMLStreamWriter` — i.e. CGMES export +
+xiidm-write. Every StAX write call locks. Actionable — tracked as PROF-1.
+
+**Variant clone (6.3 s):** the per-object trove-array extend/delete is intrinsic
+(IIDM-B), but profiling also found a per-object *stream pipeline* (`wrapSink`
+~7 %) that was **not** intrinsic — fixed in IIDM-F (−45 %).
 
 ---
 
@@ -48,6 +78,7 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 | IIDM-8 | `HashSet` dedup instead of `List.contains` in a loop | `CalculatedBusImpl.buildConnectableTerminalsCache` |
 | IIDM-9 | Single traversal in `getP`/`getQ` instead of count-then-sum | `AbstractBus` |
 | IIDM-C | Lock-free `volatile` copy-on-write reads | `VariantArray` (`cc0ee3d`) |
+| **IIDM-F** | **Loop instead of a stream per object in the 4 variant-array methods (−45% on clone/remove)** | `AbstractIdentifiable` (`be70681`) |
 
 ### cgmes-conversion — `c33ef79`, `1f06d99`
 | ID | Finding | File |
@@ -113,13 +144,19 @@ Full context and the noise-floor discussion are in `iidm-cgmes-performance.md`
 
 | ID | Finding | Conclusion |
 |---|---|---|
-| IIDM-B | Per-object variant-array cost in clone/remove | Intrinsic: each connectable extends its own `TDoubleArrayList`; already batched by `cloneVariant(source,[N])`. Only a columnar redesign would change it. |
+| IIDM-B | Per-object variant-array cost in clone/remove | The `TDoubleArrayList`/`TByteArrayList` extend/delete per object is intrinsic (already batched by `cloneVariant(source,[N])`; only a columnar redesign would change it). **But** profiling found a *separate*, non-intrinsic per-object stream pipeline in the same methods — fixed in IIDM-F (−45 %). Lesson: "intrinsic" was only half true; the profiler found the other half. |
 | CMN-5 / CONV-6 | `String.format("%g")` per numeric cell (table/AMPL export) | No `DecimalFormat` pattern reproduces `%g` (6 sig-figs with conditional fixed/scientific switching), so any change alters AMPL/CSV output and breaks golden-file tests. Not safe to change without a format-behavior decision. |
 | CMN-4 | `writeString` allocates a `byte[]` per string (`getBytes`) | Avoiding it needs a `CharsetEncoder` into a reusable buffer with length back-patching into `SegmentedByteBuffer` — real complexity/risk for one array per string. Deferred as not worth it. |
 
 ---
 
 ## 4. Pending (⬜) — ranked within each area by value
+
+### Profiler-found (JFR) — highest-value, but architectural
+| ID | Finding | File / location | Impact | Effort · Risk |
+|---|---|---|---|---|
+| PROF-1 | XML export spends ~10 % of round-trip CPU taking a per-write `InternalLock` in the JDK StAX writer (CGMES export + xiidm-write) | JDK `com.sun.xml.internal.stream.writers.*` under `iidm-serde XmlWriter` / CGMES export | Med-high (export paths) | Med · **Med** — try Woodstox StAX (`com.ctc.wstx`, often 2–3× faster and different locking), or reduce write() calls / a custom buffered writer; must keep output identical (golden-file tests) |
+| PROF-2 | CGMES import is ~90 % rdf4j + Xerces; powsybl is ~5 % (hard ceiling) | `triple-store-impl-rdf4j` + rdf4j MemoryStore/RDFXML parser | High (the #1 hot path) but architectural | High · **High** — fewer/cheaper SPARQL queries (cache done), a faster RDF/XML parser, a lighter triple store, or streaming the parse instead of loading a full in-memory store |
 
 ### Converters — CONV-1/3/4 done (`9e00cd2`); remaining below
 | ID | Finding | File / location | Impact | Effort · Risk |
