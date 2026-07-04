@@ -29,6 +29,10 @@ public class BinReader extends AbstractTreeDataReader {
     private final BufferedChannelReader in;
     private final byte[] binaryMagicNumber;
 
+    // Class.getEnumConstants() clones its internal array on every call; cache the shared array per
+    // enum class so that reading enum attributes does not allocate a fresh array each time
+    private final Map<Class<?>, Object> enumConstantsCache = new HashMap<>();
+
     private String[] names;
     private byte[] types;
 
@@ -297,7 +301,8 @@ public class BinReader extends AbstractTreeDataReader {
         }
         int ordinal = in.readUnsignedShort();
         peekNextEntry();
-        T[] constants = clazz.getEnumConstants();
+        @SuppressWarnings("unchecked")
+        T[] constants = (T[]) enumConstantsCache.computeIfAbsent(clazz, Class::getEnumConstants);
         if (ordinal >= constants.length) {
             throw new PowsyblException("Invalid enum ordinal for " + clazz.getSimpleName() + ": "
                     + ordinal + " (max " + (constants.length - 1) + ")");

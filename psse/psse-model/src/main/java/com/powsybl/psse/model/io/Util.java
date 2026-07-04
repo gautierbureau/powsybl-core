@@ -268,9 +268,9 @@ public final class Util {
     }
 
     private static String parseValueFromRecord(List<String> rec, String[] headers, String header) {
-        // Parse the value from the record
+        // Parse the value from the record (reuse the computed index instead of scanning headers twice)
         int index = ArrayUtils.indexOf(headers, header);
-        return index >= 0 && index < rec.size() ? rec.get(ArrayUtils.indexOf(headers, header)) : null;
+        return index >= 0 && index < rec.size() ? rec.get(index) : null;
     }
 
     private static String manageNumericalNullValues(String value) {
