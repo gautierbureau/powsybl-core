@@ -356,13 +356,26 @@ All absolute numbers here run on a container ~1.5–2× slower than the README's
 NEW serialization figures track the README at that factor); the A/B *ratios* above are what
 to trust, except the XIIDM-copy one noted as an artifact.
 
-### Next non-XML levers (profiler leads, not yet actioned)
+### Next non-XML levers
 
 Once the XML lock is gone, the top format-agnostic frames on the JSON/binary read+write
 paths are: `RefChain.get` / `ref.get()` call volume (~3–7 %, top read frame — trivial body,
 so it is call count from resolving the network ref per element/attribute during
-construction), `NetworkIndex` HashMap resize (~2.6–3.5 %, pre-sizable on import), the
-exporter's per-element iteration (`isElementWrittenInsideNetwork` 4.6 % + Guava concatenated
-iterators / stream pipeline ~12 %), plus format-specific JSON `parseDouble` and binary Zstd
-compression. These lift XML/JSON/BIN together and are the natural follow-up to the
-XML-focused PROF-1 work.
+construction), `NetworkIndex` HashMap resize (~2.6–3.5 %), the exporter's per-element
+iteration (`isElementWrittenInsideNetwork` 4.6 % + Guava concatenated iterators / stream
+pipeline ~12 %), plus format-specific JSON `parseDouble` and binary Zstd compression.
+
+**Actioned (SERDE-EXPORT-1, shipped on its own branch
+`claude/iidm-serde-export-subnetwork-shortcircuit`, off `main` — independent of this variant
+work):** `isElementWrittenInsideNetwork` short-circuit when the network has no subnetwork —
+every element is then written inside the root network, so the per-element
+`getParentNetwork()`/equals is skipped. Byte-identical (serde 303, cgmes 486 incl. subnetwork
+round trips); measured XIIDM file write −10 % (non-overlapping CIs), XIIDM/binary stream write
+−8–9 % (borderline in-container), JSON within noise.
+
+**Evaluated and rejected:** caching in `RefChain` (unsafe — nested `RefChain` re-homing on
+merge/detach would leave a stale cache, the same bug class as the terminal store re-home);
+`NetworkIndex` pre-sizing (marginal by construction — streaming import never knows the element
+count up front, so the large rehashes remain regardless of the initial-capacity floor). The
+remaining `RefChain` call-volume reduction is a broad adder/read-path refactor best scoped as
+its own effort, measured off a less syscall-noisy machine than this sandbox.
