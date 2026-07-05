@@ -49,6 +49,10 @@ public class AmplNetworkReader {
 
     private final OutputFileFormat format;
 
+    // Token separator compiled once: it is a regex ("( )+" by default), so splitting each read line with
+    // String.split(format.getTokenSeparator()) would recompile the pattern on every line of the result files.
+    private final Pattern tokenSeparatorPattern;
+
     public AmplNetworkReader(ReadOnlyDataSource dataSource, Network network, int variantIndex,
                              StringToIntMapper<AmplSubset> mapper, AmplNetworkUpdaterFactory networkUpdater,
                              OutputFileFormat format) {
@@ -61,6 +65,7 @@ public class AmplNetworkReader {
                             .collect(Collectors.toMap(Identifiable::getId, Function.identity()));
         this.variantIndex = variantIndex;
         this.format = format;
+        this.tokenSeparatorPattern = Pattern.compile(format.getTokenSeparator());
     }
 
     public AmplNetworkReader(ReadOnlyDataSource dataSource, Network network, int variantIndex,
@@ -103,7 +108,7 @@ public class AmplNetworkReader {
                     continue;
                 }
 
-                String[] tokens = trimedLine.split(format.getTokenSeparator());
+                String[] tokens = tokenSeparatorPattern.split(trimedLine);
                 if (tokens.length != expectedTokenCount) {
                     throw createWrongNumberOfColumnException(expectedTokenCount, tokens.length);
                 }
