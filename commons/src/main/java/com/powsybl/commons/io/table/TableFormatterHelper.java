@@ -8,7 +8,7 @@
 package com.powsybl.commons.io.table;
 
 import java.io.IOException;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -17,7 +17,7 @@ import java.util.List;
 public class TableFormatterHelper {
 
     private final TableFormatter tableFormatter;
-    private final List<Object> objectsToWrite = new LinkedList<>();
+    private final List<Object> objectsToWrite = new ArrayList<>();
 
     public TableFormatterHelper(TableFormatter tableFormatter) {
         this.tableFormatter = tableFormatter;
