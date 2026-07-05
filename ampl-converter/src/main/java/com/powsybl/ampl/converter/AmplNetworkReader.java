@@ -382,7 +382,8 @@ public class AmplNetworkReader {
     }
 
     private double readDouble(String d) {
-        return Float.parseFloat(d) != AmplConstants.INVALID_FLOAT_VALUE ? Double.parseDouble(d) : Double.NaN;
+        double value = Double.parseDouble(d);
+        return (float) value != AmplConstants.INVALID_FLOAT_VALUE ? value : Double.NaN;
     }
 
 }
