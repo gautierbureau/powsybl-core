@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -60,7 +61,7 @@ public class CimAnonymizer {
 
     private static final String RDF_URI = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 
-    private static final String CIM_URI_PATTERN = "http://iec.ch/TC57/20\\d\\d/CIM-schema-cim\\d\\d";
+    private static final Pattern CIM_URI_PATTERN = Pattern.compile("http://iec.ch/TC57/20\\d\\d/CIM-schema-cim\\d\\d");
 
     private static final QName RDF_ID = new QName(RDF_URI, "ID");
     private static final QName RDF_RESOURCE = new QName(RDF_URI, "resource");
@@ -145,7 +146,7 @@ public class CimAnonymizer {
             } else if (attribute.getName().equals(RDF_RESOURCE) || attribute.getName().equals(RDF_ABOUT)) {
                 // skip outside graph rdf:ID references
                 AttributeValue value = AttributeValue.parseValue(attribute);
-                if ((value.getNsUri() == null || !value.getNsUri().matches(CIM_URI_PATTERN)) &&
+                if ((value.getNsUri() == null || !CIM_URI_PATTERN.matcher(value.getNsUri()).matches()) &&
                         (rdfIdValues == null || rdfIdValues.contains(value.get()))) {
                     return xmlStaxContext.eventFactory.createAttribute(attribute.getName(), value.toString(dictionary));
                 } else {
