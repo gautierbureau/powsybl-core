@@ -179,11 +179,21 @@ public class SensitivityAnalysisResult {
         this.contingencyIds = Collections.unmodifiableList(Objects.requireNonNull(contingencyIds));
         this.operatorStrategyIds = Collections.unmodifiableList(Objects.requireNonNull(operatorStrategyIds));
         this.values = Collections.unmodifiableList(Objects.requireNonNull(values));
+        // There is one SensitivityState per (contingency, operator strategy) pair but one value per (state,
+        // factor), so minting a fresh state - and re-resolving its ids - for every value is wasteful. Reuse a
+        // single state instance per pair, keyed by the (contingencyIndex, operatorStrategyIndex) pair packed
+        // into a long. SensitivityState is a value record, so map behaviour is unchanged.
+        Map<Long, SensitivityState> stateByIndexes = new HashMap<>();
         for (SensitivityValue value : values) {
             SensitivityFactor factor = factors.get(value.getFactorIndex());
-            String contingencyId = value.getContingencyIndex() != -1 ? contingencyIds.get(value.getContingencyIndex()) : null;
-            String operatorStrategyId = value.getOperatorStrategyIndex() != -1 ? operatorStrategyIds.get(value.getOperatorStrategyIndex()) : null;
-            SensitivityState state = new SensitivityState(contingencyId, operatorStrategyId);
+            int contingencyIndex = value.getContingencyIndex();
+            int operatorStrategyIndex = value.getOperatorStrategyIndex();
+            long stateKey = ((long) contingencyIndex << 32) | (operatorStrategyIndex & 0xFFFFFFFFL);
+            SensitivityState state = stateByIndexes.computeIfAbsent(stateKey, k -> {
+                String contingencyId = contingencyIndex != -1 ? contingencyIds.get(contingencyIndex) : null;
+                String operatorStrategyId = operatorStrategyIndex != -1 ? operatorStrategyIds.get(operatorStrategyIndex) : null;
+                return new SensitivityState(contingencyId, operatorStrategyId);
+            });
             valuesByState.computeIfAbsent(state, k -> new ArrayList<>())
                     .add(value);
             valuesByKey.put(new SensitivityValueKey(state, factor.getVariableId(), factor.getFunctionId(), factor.getFunctionType(), factor.getVariableType()), value);
