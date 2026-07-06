@@ -37,6 +37,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -199,6 +200,11 @@ public class TripleStoreRDF4J extends AbstractPowsyblTripleStore {
                 // This means that we have to filter distinct results
                 try (TupleQueryResult r = QueryResults.distinctResults(q.evaluate())) {
                     List<String> names = r.getBindingNames();
+                    // Canonicalize cell values within this query result: getValue().stringValue() creates a
+                    // fresh String per cell, but the same ids / URIs / types repeat across many rows. Interning
+                    // them through a per-query map lets the materialized PropertyBags share one String instance
+                    // per distinct value instead of retaining thousands of duplicates.
+                    Map<String, String> canonicalValues = new HashMap<>();
                     while (r.hasNext()) {
                         BindingSet s = r.next();
                         PropertyBag result = new PropertyBag(names, getOptions().isRemoveInitialUnderscoreForIdentifiers(), getOptions().unescapeIdentifiers());
@@ -206,7 +212,7 @@ public class TripleStoreRDF4J extends AbstractPowsyblTripleStore {
                         names.forEach(name -> {
                             if (s.hasBinding(name)) {
                                 String value = s.getBinding(name).getValue().stringValue();
-                                result.put(name, value);
+                                result.put(name, canonicalValues.computeIfAbsent(value, Function.identity()));
                             }
                         });
                         if (result.size() > 0) {
