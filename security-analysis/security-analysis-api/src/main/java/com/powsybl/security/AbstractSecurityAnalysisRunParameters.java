@@ -15,7 +15,7 @@ import com.powsybl.contingency.strategy.OperatorStrategy;
 import com.powsybl.contingency.violations.LimitViolationFilter;
 import com.powsybl.security.interceptors.SecurityAnalysisInterceptor;
 import com.powsybl.security.monitor.StateMonitor;
-import com.powsybl.security.writer.SecurityAnalysisResultWriter;
+import com.powsybl.security.writer.SecurityAnalysisResultWriterFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +37,7 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     private List<Action> actions = new ArrayList<>();
     private List<StateMonitor> monitors = new ArrayList<>();
     private ReportNode reportNode = ReportNode.NO_OP;
-    private SecurityAnalysisResultWriter resultWriter = SecurityAnalysisResultWriter.NO_OP;
+    private SecurityAnalysisResultWriterFactory resultWriterFactory = SecurityAnalysisResultWriterFactory.NO_OP;
 
     /**
      * {@link LimitViolationFilter} getter<br>
@@ -82,11 +82,11 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     }
 
     /**
-     * {@link SecurityAnalysisResultWriter} getter. Defaults to {@link SecurityAnalysisResultWriter#NO_OP},
-     * i.e. streaming disabled.
+     * {@link SecurityAnalysisResultWriterFactory} getter. Defaults to
+     * {@link SecurityAnalysisResultWriterFactory#NO_OP}, i.e. streaming disabled.
      */
-    public SecurityAnalysisResultWriter getResultWriter() {
-        return resultWriter;
+    public SecurityAnalysisResultWriterFactory getResultWriterFactory() {
+        return resultWriterFactory;
     }
 
     public T setFilter(LimitViolationFilter filter) {
@@ -176,13 +176,14 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     }
 
     /**
-     * Sets the writer used to stream results incrementally, see {@link SecurityAnalysisResultWriter}.
+     * Sets the factory building the per-partition writers used to stream results incrementally, see
+     * {@link SecurityAnalysisResultWriterFactory}.
      * <p>Support is provider-dependent: a provider that does not support streaming ignores it. Set to
-     * {@link SecurityAnalysisResultWriter#NO_OP} (the default) to disable streaming.
+     * {@link SecurityAnalysisResultWriterFactory#NO_OP} (the default) to disable streaming.
      */
-    public T setResultWriter(SecurityAnalysisResultWriter resultWriter) {
-        Objects.requireNonNull(resultWriter, "SecurityAnalysisResultWriter should not be null");
-        this.resultWriter = resultWriter;
+    public T setResultWriterFactory(SecurityAnalysisResultWriterFactory resultWriterFactory) {
+        Objects.requireNonNull(resultWriterFactory, "SecurityAnalysisResultWriterFactory should not be null");
+        this.resultWriterFactory = resultWriterFactory;
         return self();
     }
 

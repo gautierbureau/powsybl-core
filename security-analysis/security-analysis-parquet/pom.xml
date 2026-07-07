@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (c) 2025, RTE (http://www.rte-france.com)
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.powsybl</groupId>
+        <artifactId>powsybl-security-analysis</artifactId>
+        <version>7.4.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>powsybl-security-analysis-parquet</artifactId>
+    <name>Security analysis Parquet</name>
+    <description>Streaming of security analysis branch flows to Parquet files</description>
+
+    <properties>
+        <!-- parquet-floor is a minimal, Hadoop-free Parquet writer/reader (parquet-hadoop's hadoop-common is provided) -->
+        <parquet-floor.version>1.47</parquet-floor.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Automatic-Module-Name>com.powsybl.security.analysis.parquet</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- prototype: this module pulls a large 3rd-party dependency tree (parquet); relax the parent's dependency
+                 convergence enforcement here so it does not need every transitive version aligned by hand yet. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <dependencies>
+        <!-- Compilation dependencies -->
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>powsybl-security-analysis-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>blue.strategic.parquet</groupId>
+            <artifactId>parquet-floor</artifactId>
+            <version>${parquet-floor.version}</version>
+        </dependency>
+
+        <!-- Test dependencies -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

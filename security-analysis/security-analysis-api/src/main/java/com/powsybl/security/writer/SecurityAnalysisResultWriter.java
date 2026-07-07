@@ -7,53 +7,54 @@
  */
 package com.powsybl.security.writer;
 
-import com.powsybl.security.results.PostContingencyResult;
-import com.powsybl.security.results.PreContingencyResult;
-
 /**
- * A streaming sink for security analysis results.
+ * A streaming sink for security analysis branch flows.
  *
- * <p>Security analysis providers that support streaming call this writer incrementally, once for the
- * pre-contingency (base case) state and once for each post-contingency state, as soon as the corresponding
- * results are computed. This allows the monitored quantities (typically all branch flows) to be persisted
- * without keeping the whole result set in memory, which does not scale for large networks with many
+ * <p>Security analysis providers that support streaming call {@link #writeBranchResult} once per monitored branch, for
+ * the base case and for each post-contingency state, as soon as the corresponding results are computed. This lets the
+ * flows be persisted without keeping the whole result set in memory, which does not scale for large networks with many
  * contingencies.
  *
- * <p>Implementations are not required to be thread-safe. When a provider runs contingencies on several
- * threads, it is expected to use one writer instance per thread (for instance one part file per partition).
+ * <p>The method is intentionally primitive (no per-row object to allocate) so that providers can feed a columnar output
+ * (e.g. Parquet) directly from the solved network state — a "vectorized" write path.
+ *
+ * <p>A single writer instance is <b>not</b> required to be thread-safe: providers running contingencies on several
+ * threads obtain one writer per thread from a {@link SecurityAnalysisResultWriterFactory} (e.g. one part file per
+ * partition), so each thread writes to its own writer without locking.
  *
  * @author (design proposal)
  */
 public interface SecurityAnalysisResultWriter extends AutoCloseable {
 
     /**
-     * A writer that does nothing. This is the default so that streaming is fully opt-in and the behaviour of
-     * providers that do not support it, or of runs that do not request it, is unchanged.
+     * A writer that does nothing. This is the default so that streaming is fully opt-in and the behaviour of providers
+     * that do not support it, or of runs that do not request it, is unchanged.
      */
-    SecurityAnalysisResultWriter NO_OP = new SecurityAnalysisResultWriter() {
-        @Override
-        public void writePreContingencyResult(PreContingencyResult preContingencyResult) {
-            // no-op
-        }
-
-        @Override
-        public void writePostContingencyResult(PostContingencyResult postContingencyResult) {
-            // no-op
-        }
+    SecurityAnalysisResultWriter NO_OP = (contingencyId, status, branchId, p1, q1, i1, p2, q2, i2, flowTransfer) -> {
+        // no-op
     };
 
     /**
-     * Write the pre-contingency (base case) result. Called at most once, before any post-contingency result.
+     * Write one monitored branch flow row.
+     *
+     * @param contingencyId the id of the contingency, or an empty string for the base (pre-contingency) case
+     * @param status        the computation status of the state the flow belongs to
+     * @param branchId      the id of the branch
+     * @param p1            active power at side 1 (MW)
+     * @param q1            reactive power at side 1 (MVar)
+     * @param i1            current at side 1 (A)
+     * @param p2            active power at side 2 (MW)
+     * @param q2            reactive power at side 2 (MVar)
+     * @param i2            current at side 2 (A)
+     * @param flowTransfer  flow transfer ratio (NaN for the base case)
      */
-    void writePreContingencyResult(PreContingencyResult preContingencyResult);
+    void writeBranchResult(String contingencyId, String status, String branchId,
+                           double p1, double q1, double i1,
+                           double p2, double q2, double i2, double flowTransfer);
 
     /**
-     * Write one post-contingency result. Called once per contingency, in no guaranteed order.
-     */
-    void writePostContingencyResult(PostContingencyResult postContingencyResult);
-
-    /**
-     * Flush and release any underlying resource (file, stream...). Called once at the end of the analysis.
+     * Flush and release any underlying resource (file, stream...). Called once when the partition this writer serves is
+     * finished.
      */
     @Override
     default void close() {
