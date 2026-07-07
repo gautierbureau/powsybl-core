@@ -36,6 +36,7 @@ public class ParquetSecurityAnalysisResultWriter implements SecurityAnalysisResu
 
     static final MessageType SCHEMA = Types.buildMessage()
             .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("contingencyId")
+            .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("operatorStrategyId")
             .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("status")
             .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("branchId")
             .required(PrimitiveTypeName.DOUBLE).named("p1")
@@ -51,6 +52,7 @@ public class ParquetSecurityAnalysisResultWriter implements SecurityAnalysisResu
 
     // reused row state: a single mutable holder is written repeatedly, so there is no per-row object allocation.
     private String contingencyId;
+    private String operatorStrategyId;
     private String status;
     private String branchId;
     private double p1;
@@ -66,6 +68,7 @@ public class ParquetSecurityAnalysisResultWriter implements SecurityAnalysisResu
         try {
             this.parquetWriter = ParquetWriter.writeFile(SCHEMA, file, (row, valueWriter) -> {
                 valueWriter.write("contingencyId", row.contingencyId);
+                valueWriter.write("operatorStrategyId", row.operatorStrategyId);
                 valueWriter.write("status", row.status);
                 valueWriter.write("branchId", row.branchId);
                 valueWriter.write("p1", row.p1);
@@ -82,10 +85,11 @@ public class ParquetSecurityAnalysisResultWriter implements SecurityAnalysisResu
     }
 
     @Override
-    public void writeBranchResult(String contingencyId, String status, String branchId,
+    public void writeBranchResult(String contingencyId, String operatorStrategyId, String status, String branchId,
                                   double p1, double q1, double i1,
                                   double p2, double q2, double i2, double flowTransfer) {
         this.contingencyId = contingencyId;
+        this.operatorStrategyId = operatorStrategyId;
         this.status = status;
         this.branchId = branchId;
         this.p1 = p1;

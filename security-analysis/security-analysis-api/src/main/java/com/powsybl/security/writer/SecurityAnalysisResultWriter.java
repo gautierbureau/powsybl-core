@@ -30,25 +30,30 @@ public interface SecurityAnalysisResultWriter extends AutoCloseable {
      * A writer that does nothing. This is the default so that streaming is fully opt-in and the behaviour of providers
      * that do not support it, or of runs that do not request it, is unchanged.
      */
-    SecurityAnalysisResultWriter NO_OP = (contingencyId, status, branchId, p1, q1, i1, p2, q2, i2, flowTransfer) -> {
+    SecurityAnalysisResultWriter NO_OP = (contingencyId, operatorStrategyId, status, branchId, p1, q1, i1, p2, q2, i2, flowTransfer) -> {
         // no-op
     };
 
     /**
      * Write one monitored branch flow row.
      *
-     * @param contingencyId the id of the contingency, or an empty string for the base (pre-contingency) case
-     * @param status        the computation status of the state the flow belongs to
-     * @param branchId      the id of the branch
-     * @param p1            active power at side 1 (MW)
-     * @param q1            reactive power at side 1 (MVar)
-     * @param i1            current at side 1 (A)
-     * @param p2            active power at side 2 (MW)
-     * @param q2            reactive power at side 2 (MVar)
-     * @param i2            current at side 2 (A)
-     * @param flowTransfer  flow transfer ratio (NaN for the base case)
+     * <p>The three id columns together identify the state the flow belongs to: base case (both {@code contingencyId} and
+     * {@code operatorStrategyId} empty), post-contingency ({@code contingencyId} set, {@code operatorStrategyId} empty),
+     * or operator-strategy ({@code contingencyId} and {@code operatorStrategyId} both set).
+     *
+     * @param contingencyId     the id of the contingency, or an empty string for the base (pre-contingency) case
+     * @param operatorStrategyId the id of the operator strategy, or an empty string when not an operator-strategy state
+     * @param status            the computation status of the state the flow belongs to
+     * @param branchId          the id of the branch
+     * @param p1                active power at side 1 (MW)
+     * @param q1                reactive power at side 1 (MVar)
+     * @param i1                current at side 1 (A)
+     * @param p2                active power at side 2 (MW)
+     * @param q2                reactive power at side 2 (MVar)
+     * @param i2                current at side 2 (A)
+     * @param flowTransfer      flow transfer ratio (NaN for the base case)
      */
-    void writeBranchResult(String contingencyId, String status, String branchId,
+    void writeBranchResult(String contingencyId, String operatorStrategyId, String status, String branchId,
                            double p1, double q1, double i1,
                            double p2, double q2, double i2, double flowTransfer);
 

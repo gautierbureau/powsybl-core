@@ -43,6 +43,7 @@ public class CsvSecurityAnalysisResultWriter implements SecurityAnalysisResultWr
         Objects.requireNonNull(config);
         this.formatter = new CsvTableFormatter(writer, "", config,
                 new Column("contingencyId"),
+                new Column("operatorStrategyId"),
                 new Column("status"),
                 new Column("branchId"),
                 new Column("p1"),
@@ -55,11 +56,12 @@ public class CsvSecurityAnalysisResultWriter implements SecurityAnalysisResultWr
     }
 
     @Override
-    public void writeBranchResult(String contingencyId, String status, String branchId,
+    public void writeBranchResult(String contingencyId, String operatorStrategyId, String status, String branchId,
                                   double p1, double q1, double i1,
                                   double p2, double q2, double i2, double flowTransfer) {
         try {
             formatter.writeCell(contingencyId)
+                    .writeCell(operatorStrategyId)
                     .writeCell(status)
                     .writeCell(branchId)
                     .writeCell(p1)

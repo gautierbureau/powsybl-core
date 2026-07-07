@@ -34,8 +34,8 @@ class ParquetSecurityAnalysisResultWriterTest {
         File file = dir.resolve("part-0.parquet").toFile();
 
         try (ParquetSecurityAnalysisResultWriter writer = new ParquetSecurityAnalysisResultWriter(file)) {
-            writer.writeBranchResult("", "CONVERGED", "L1", 1.0, 2.0, 3.0, -1.0, -2.0, 3.5, Double.NaN);
-            writer.writeBranchResult("cont1", "CONVERGED", "L2", 10.0, 20.0, 30.0, -10.0, -20.0, 35.0, 0.5);
+            writer.writeBranchResult("", "", "CONVERGED", "L1", 1.0, 2.0, 3.0, -1.0, -2.0, 3.5, Double.NaN);
+            writer.writeBranchResult("cont1", "strategy1", "CONVERGED", "L2", 10.0, 20.0, 30.0, -10.0, -20.0, 35.0, 0.5);
         }
 
         // read each row back into a column-name -> value map
@@ -71,6 +71,7 @@ class ParquetSecurityAnalysisResultWriterTest {
 
         Map<String, Object> l1 = byBranch.get("L1");
         assertEquals("", String.valueOf(l1.get("contingencyId")));
+        assertEquals("", String.valueOf(l1.get("operatorStrategyId")));
         assertEquals("CONVERGED", String.valueOf(l1.get("status")));
         assertEquals(1.0, (double) l1.get("p1"));
         assertEquals(3.5, (double) l1.get("i2"));
@@ -78,6 +79,7 @@ class ParquetSecurityAnalysisResultWriterTest {
 
         Map<String, Object> l2 = byBranch.get("L2");
         assertEquals("cont1", String.valueOf(l2.get("contingencyId")));
+        assertEquals("strategy1", String.valueOf(l2.get("operatorStrategyId")));
         assertEquals(10.0, (double) l2.get("p1"));
         assertEquals(0.5, (double) l2.get("flowTransfer"));
     }
