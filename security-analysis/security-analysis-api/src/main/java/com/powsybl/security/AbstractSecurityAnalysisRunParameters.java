@@ -15,6 +15,7 @@ import com.powsybl.contingency.strategy.OperatorStrategy;
 import com.powsybl.contingency.violations.LimitViolationFilter;
 import com.powsybl.security.interceptors.SecurityAnalysisInterceptor;
 import com.powsybl.security.monitor.StateMonitor;
+import com.powsybl.security.writer.SecurityAnalysisResultWriter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +37,7 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     private List<Action> actions = new ArrayList<>();
     private List<StateMonitor> monitors = new ArrayList<>();
     private ReportNode reportNode = ReportNode.NO_OP;
+    private SecurityAnalysisResultWriter resultWriter = SecurityAnalysisResultWriter.NO_OP;
 
     /**
      * {@link LimitViolationFilter} getter<br>
@@ -77,6 +79,14 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
 
     public ReportNode getReportNode() {
         return reportNode;
+    }
+
+    /**
+     * {@link SecurityAnalysisResultWriter} getter. Defaults to {@link SecurityAnalysisResultWriter#NO_OP},
+     * i.e. streaming disabled.
+     */
+    public SecurityAnalysisResultWriter getResultWriter() {
+        return resultWriter;
     }
 
     public T setFilter(LimitViolationFilter filter) {
@@ -162,6 +172,17 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     public T addAction(Action action) {
         Objects.requireNonNull(action, "Action should not be null");
         actions.add(action);
+        return self();
+    }
+
+    /**
+     * Sets the writer used to stream results incrementally, see {@link SecurityAnalysisResultWriter}.
+     * <p>Support is provider-dependent: a provider that does not support streaming ignores it. Set to
+     * {@link SecurityAnalysisResultWriter#NO_OP} (the default) to disable streaming.
+     */
+    public T setResultWriter(SecurityAnalysisResultWriter resultWriter) {
+        Objects.requireNonNull(resultWriter, "SecurityAnalysisResultWriter should not be null");
+        this.resultWriter = resultWriter;
         return self();
     }
 
