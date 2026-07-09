@@ -88,16 +88,45 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
 
     public abstract Stream<Terminal> getTerminalStream();
 
+    // Spike (structural-variant branching): when true, this voltage level is a branch-owned copy onto
+    // which shared terminals may be rebound; reverse enumeration then unions in the branch-attached
+    // terminals from the active BranchContext. Default false -> the common path is exactly getTerminals().
+    private boolean branchAttachmentHint = false;
+
+    void setBranchAttachmentHint(boolean branchAttachmentHint) {
+        this.branchAttachmentHint = branchAttachmentHint;
+    }
+
+    private Iterable<Terminal> terminalsWithBranchAttached() {
+        Iterable<Terminal> own = getTerminals();
+        Set<TerminalExt> attached = branchAttachedTerminals();
+        return attached.isEmpty() ? own
+                : FluentIterable.from(own).append(FluentIterable.from(attached).transform(t -> (Terminal) t));
+    }
+
+    private Stream<Terminal> terminalStreamWithBranchAttached() {
+        Stream<Terminal> own = getTerminalStream();
+        Set<TerminalExt> attached = branchAttachedTerminals();
+        return attached.isEmpty() ? own : Stream.concat(own, attached.stream().map(t -> (Terminal) t));
+    }
+
+    private Set<TerminalExt> branchAttachedTerminals() {
+        if (!branchAttachmentHint) {
+            return Set.of();
+        }
+        BranchContext context = ThreadLocalBranchContext.get();
+        return context == null ? Set.of() : context.branchAttachedTerminals(voltageLevel);
+    }
+
     public <T extends Connectable> Iterable<T> getConnectables(Class<T> clazz) {
-        Iterable<Terminal> terminals = getTerminals();
-        return FluentIterable.from(terminals)
+        return FluentIterable.from(terminalsWithBranchAttached())
                 .transform(Terminal::getConnectable)
                 .filter(clazz)
                 .toSet();
     }
 
     public <T extends Connectable> Stream<T> getConnectableStream(Class<T> clazz) {
-        return getTerminalStream()
+        return terminalStreamWithBranchAttached()
                 .map(Terminal::getConnectable)
                 .filter(clazz::isInstance)
                 .map(clazz::cast)
@@ -109,13 +138,13 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     }
 
     public Iterable<Connectable> getConnectables() {
-        return FluentIterable.from(getTerminals())
+        return FluentIterable.from(terminalsWithBranchAttached())
                 .transform(Terminal::getConnectable)
                 .toSet();
     }
 
     public Stream<Connectable> getConnectableStream() {
-        return getTerminalStream()
+        return terminalStreamWithBranchAttached()
                 .map(Terminal::getConnectable)
                 .distinct();
     }
