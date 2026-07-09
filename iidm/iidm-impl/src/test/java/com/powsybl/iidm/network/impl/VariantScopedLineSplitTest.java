@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  * Structural-variant spike <b>v2.1a</b> turnkey: a fault-on-line split as pure variant state on a
  * <b>single network</b>. See {@code structural-variant-generic-design.md}, the v2.1 section. After
  * {@code split(...)}, the whole split topology is visible simply by {@code setWorkingVariant("faulted")}
- * — no {@link OverlayNetworkIndex}, no {@link BranchContext}, no {@code ThreadLocalBranchContext.run} —
+ * — no side-car index, no ambient context, no thread-local —
  * while the source variant keeps the original network.
  *
  * @author Claude

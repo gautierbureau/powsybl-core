@@ -44,29 +44,6 @@ abstract class AbstractTerminal implements TerminalExt {
 
     protected boolean removed = false;
 
-    // Spike (structural-variant branching): when true, this terminal has been rebound onto a branch's
-    // voltage level, so getVoltageLevel consults the active BranchContext. Default false -> the common
-    // path stays a direct field read; see structural-variant-cascade-design.md.
-    private boolean branchAttachmentOverride = false;
-
-    void setBranchAttachmentOverride(boolean branchAttachmentOverride) {
-        this.branchAttachmentOverride = branchAttachmentOverride;
-    }
-
-    /** Resolve a node/breaker terminal's node through the active branch context, else the base node. */
-    protected int resolveBranchNode(int baseNode) {
-        if (branchAttachmentOverride) {
-            BranchContext context = ThreadLocalBranchContext.get();
-            if (context != null) {
-                Integer override = context.resolveNode((TerminalExt) this);
-                if (override != null) {
-                    return override;
-                }
-            }
-        }
-        return baseNode;
-    }
-
     AbstractTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber) {
         if (side != null && terminalNumber != null) {
             throw new IllegalStateException("cannot have both side and number");
@@ -114,20 +91,10 @@ abstract class AbstractTerminal implements TerminalExt {
     }
 
     /**
-     * The terminal's voltage level, resolved through the active branch context if this terminal was
-     * rebound (else the base voltage level). Unlike {@link #getVoltageLevel()} this has no removed
-     * check, so it can back internal resolution (e.g. the terminal's topology model / bus view).
+     * The terminal's voltage level without the {@link #getVoltageLevel()} removed check, so it can back
+     * internal resolution (e.g. the terminal's topology model / bus view).
      */
     VoltageLevelExt resolveVoltageLevel() {
-        if (branchAttachmentOverride) {
-            BranchContext context = ThreadLocalBranchContext.get();
-            if (context != null) {
-                VoltageLevelExt override = context.resolveVoltageLevel(this);
-                if (override != null) {
-                    return override;
-                }
-            }
-        }
         return voltageLevel;
     }
 

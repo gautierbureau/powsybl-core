@@ -1,5 +1,16 @@
 # Generic structural branching — eliminating per-type materialisation (design rework)
 
+> **Status: consolidated onto the canonical model.** The exploratory lineage in this document — v1
+> (materialised copy-on-write branch) and v2 (generic don't-copy over a side-car `OverlayNetworkIndex` +
+> ambient `BranchContext`) — has been **removed from the code**. It served its purpose: proving the
+> mechanism and de-risking each step. The branch now carries only the canonical end-state:
+> **variant-scoped structural variants (v2.1a)** — `VariantScopedExistence` + `VariantScopedMembership` +
+> `VariantScopedLineSplit`, where a structural branch *is* a cloned variant and the working variant is
+> the context — plus the **copy-on-write variant-state prototype (v2.1b)**, `CowVariantColumn` /
+> `CowVariantParentage`, that would make branch creation O(1). No `...V2` classes, no overlay, no
+> thread-local context remain. The sections below keep the full v1→v2→v2.1 reasoning as the design record
+> of *why* the canonical model is shaped the way it is.
+
 How to make the spike handle **all** equipment types generically, the way powsybl-network-store does —
 without a per-type copy helper for every equipment. This is a proposed **v2** of the branch model; the
 current spike (v1) works but pays per-type code in materialisation.

@@ -21,7 +21,7 @@ import java.util.Set;
  * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
  *
  * <p>The membership counterpart of {@link VariantScopedExistence}: it moves the {@code attached} /
- * {@code detached} terminal-membership delta v2 kept in an ambient {@link BranchContext} into
+ * {@code detached} terminal-membership delta into
  * <b>per-variant</b> state on a single network. A voltage level's terminal set is then
  * {@code graph − detached(activeVariant) + attached(activeVariant)} — resolved against the
  * <b>working variant</b>, with no thread-local context. Combined with {@link VariantScopedExistence},
@@ -98,7 +98,7 @@ final class VariantScopedMembership implements MultiVariantObject {
 
     // Bus-view filters (current variant): the connected attached/detached terminals of a voltage level
     // whose configured bus is one of {@code busIds} (bus/breaker) or whose node is one of {@code nodes}
-    // (node/breaker). Mirror the equivalent BranchContext filters so the bus-view folds read identically.
+    // (node/breaker), for the bus-view folds.
 
     List<TerminalExt> attachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
         return connectedOnBuses(attachedTerminals(voltageLevel), busIds);

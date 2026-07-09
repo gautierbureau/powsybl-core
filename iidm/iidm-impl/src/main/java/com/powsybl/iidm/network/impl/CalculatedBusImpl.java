@@ -87,30 +87,14 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
     // empty, so behaviour is unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
         VoltageLevelExt vl = (VoltageLevelExt) super.getVoltageLevel();
-        // v2.1a: variant-scoped membership (the active variant IS the context) takes precedence over v2's
-        // ambient BranchContext.
         VariantScopedMembership membership = vl.getNetwork().getVariantScopedMembership();
-        if (membership != null) {
-            return membership.attachedTerminalsOnNodes(vl, nodeSet());
-        }
-        BranchContext context = ThreadLocalBranchContext.get();
-        if (context == null) {
-            return List.of();
-        }
-        return context.branchAttachedTerminalsOnNodes(vl, nodeSet());
+        return membership == null ? List.of() : membership.attachedTerminalsOnNodes(vl, nodeSet());
     }
 
     private List<TerminalExt> branchDetachedConnectedTerminals() {
         VoltageLevelExt vl = (VoltageLevelExt) super.getVoltageLevel();
         VariantScopedMembership membership = vl.getNetwork().getVariantScopedMembership();
-        if (membership != null) {
-            return membership.detachedTerminalsOnNodes(vl, nodeSet());
-        }
-        BranchContext context = ThreadLocalBranchContext.get();
-        if (context == null) {
-            return List.of();
-        }
-        return context.branchDetachedTerminalsOnNodes(vl, nodeSet());
+        return membership == null ? List.of() : membership.detachedTerminalsOnNodes(vl, nodeSet());
     }
 
     private Set<Integer> nodeSet() {
