@@ -38,7 +38,10 @@ final class BranchContext {
     void rebind(TerminalExt terminal, VoltageLevelExt branchVoltageLevel) {
         voltageLevelOverride.put(terminal, branchVoltageLevel);
         branchAttached.computeIfAbsent(branchVoltageLevel, k -> new LinkedHashSet<>()).add(terminal);
+        // forward: the terminal now consults the context for its voltage level
         ((AbstractTerminal) terminal).setBranchAttachmentOverride(true);
+        // reverse: the branch voltage level now unions branch-attached terminals in its enumeration
+        ((VoltageLevelImpl) branchVoltageLevel).getTopologyModel().setBranchAttachmentHint(true);
     }
 
     /** Forward: the branch voltage level a rebound terminal resolves to, or {@code null} if not rebound. */
