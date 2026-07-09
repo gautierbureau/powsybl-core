@@ -215,6 +215,7 @@ final class BranchLineSplit {
         if (g.getReactiveLimits() instanceof MinMaxReactiveLimits limits) {
             gB.newMinMaxReactiveLimits().setMinQ(limits.getMinQ()).setMaxQ(limits.getMaxQ()).add();
         }
+        BranchExtensionCopier.copy(g, gB);
     }
 
     /** Attach an injection adder where its base terminal was — by node (node/breaker) or bus (bus/breaker). */
