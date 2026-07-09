@@ -44,7 +44,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException("Cannot access node of removed equipment " + connectable.id);
             }
-            return resolveBranchNode(node);
+            return node;
         }
 
         @Override
@@ -57,8 +57,6 @@ class NodeTerminal extends AbstractTerminal {
     };
 
     private NodeBreakerTopologyModel getTopologyModel() {
-        // resolveVoltageLevel (not the raw field) so a rebound terminal's bus resolution follows the
-        // active branch context to the branch voltage level; unchanged for non-rebound terminals.
         return (NodeBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
@@ -69,7 +67,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(resolveBranchNode(node));
+            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(node);
         }
 
         @Override
@@ -77,7 +75,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(resolveBranchNode(node));
+            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(node);
         }
 
         @Override
@@ -107,7 +105,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getBus(resolveBranchNode(node));
+            return getTopologyModel().getCalculatedBusTopology().getBus(node);
         }
 
         @Override
@@ -115,7 +113,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(resolveBranchNode(node));
+            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(node);
         }
 
     };

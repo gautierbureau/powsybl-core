@@ -19,8 +19,8 @@ import java.util.List;
 /**
  * <p><b>Spike v2.1a — turnkey single-network structural split.</b> See
  * {@code structural-variant-generic-design.md}, the v2.1 section. The end-to-end payoff: a fault-on-line
- * split expressed as <b>pure variant state on one network</b>. No {@link OverlayNetworkIndex}, no
- * {@link BranchContext}, no {@code ThreadLocalBranchContext} — the "branch" is a cloned variant, and
+ * split expressed as <b>pure variant state on one network</b>. No side-car index and no ambient
+ * context — the "branch" is a cloned variant, and
  * after {@code split(...)} the whole split topology is visible simply by
  * {@code setWorkingVariant(faultedVariantId)}, while the source variant keeps the original network.</p>
  *

@@ -59,10 +59,6 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     private final NetworkIndex index;
 
-    // Spike (structural-variant branching): the branch's terminal-attachment overrides, when this
-    // network is a structural branch (see createStructuralBranch); null for a normal network.
-    private BranchContext branchContext;
-
     private final Map<String, VoltageAngleLimit> voltageAngleLimitsIndex = new LinkedHashMap<>();
 
     private final VariantManagerImpl variantManager;
@@ -162,24 +158,6 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel = new DcTopologyModel(ref, subnetworkRef);
     }
 
-    /**
-     * Spike (structural-variant / copy-on-write branching): create a structural branch of
-     * {@code base}. The branch shares {@code base}'s whole object registry by reference through an
-     * {@link OverlayNetworkIndex}, and is a fully traversable {@code Network}; structural additions to
-     * the branch land in the overlay delta and leave {@code base} untouched. See
-     * {@code structural-variant-spike.md}.
-     */
-    static NetworkImpl createStructuralBranch(NetworkImpl base, String branchId) {
-        NetworkImpl branch = new NetworkImpl(branchId, branchId, base.getSourceFormat(), new OverlayNetworkIndex(base.getIndex()));
-        branch.branchContext = new BranchContext(base);
-        branch.branchContext.setBranch(branch);
-        return branch;
-    }
-
-    BranchContext getBranchContext() {
-        return branchContext;
-    }
-
     static Network merge(String id, String name, Network... networks) {
         if (networks == null || networks.length < 2) {
             throw new IllegalArgumentException("At least 2 networks are expected");
@@ -258,8 +236,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     /**
      * Spike v2.1a: enable — and return — variant-scoped terminal membership (the {@code attached} /
-     * {@code detached} delta resolved against the active variant instead of an ambient
-     * {@link BranchContext}). Idempotent. See {@code structural-variant-generic-design.md} (v2.1).
+     * {@code detached} delta resolved against the active variant). Idempotent. See
+     * {@code structural-variant-generic-design.md} (v2.1).
      */
     VariantScopedMembership enableVariantScopedMembership() {
         VariantScopedMembership current = index.getVariantScopedMembership();

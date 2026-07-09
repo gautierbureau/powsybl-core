@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * <p>The membership counterpart of {@link VariantScopedExistenceTest}: a voltage level's terminal set
  * (what {@code getConnectables} enumerates) becomes a function of the <b>working variant</b>, with
- * <b>no</b> {@link BranchContext} and <b>no</b> {@code ThreadLocalBranchContext.run} — the same
+ * <b>no</b> ambient context and <b>no</b> thread-local — the same
  * enumeration folds v2 drove from an ambient context now read the active variant. And the membership
  * delta is cloned by the <em>real</em> {@code cloneVariant}, exactly as state is.</p>
  *

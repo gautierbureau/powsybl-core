@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Structural-variant spike <b>v2.1a</b> (variant-scoped existence) de-risking prototype. See
  * {@code structural-variant-generic-design.md}, the v2.1 section.
  *
- * <p>Proves the deepest end-state on a <b>single network</b>, with <b>no</b> {@link OverlayNetworkIndex}
- * and <b>no</b> ambient {@link BranchContext}: object existence is a function of the active variant, the
+ * <p>Proves the deepest end-state on a <b>single network</b>, with <b>no</b> side-car index and <b>no</b>
+ * ambient context: object existence is a function of the active variant, the
  * "branch" is a cloned variant, and the working variant <em>is</em> the context. Crucially the existence
  * column rides the <em>real</em> {@code cloneVariant} — cloning a variant clones existence exactly as it
  * clones state (tap positions, switch open, terminal p/q) — the network-store {@code fullVariantNum}

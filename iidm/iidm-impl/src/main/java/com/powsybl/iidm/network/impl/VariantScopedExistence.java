@@ -16,8 +16,8 @@ import java.util.Set;
  * <p><b>Spike v2.1a — variant-scoped existence (de-risking prototype).</b> See
  * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
  *
- * <p>Proves the deeper end-state: instead of a side-car {@link OverlayNetworkIndex} plus an ambient
- * {@link BranchContext}, object <em>existence</em> becomes a function of the <b>active variant</b> — the
+ * <p>Proves the deeper end-state: instead of a side-car index plus an ambient context, object
+ * <em>existence</em> becomes a function of the <b>active variant</b> — the
  * same mechanism IIDM already uses for per-variant <em>state</em> (tap position, switch open, terminal
  * p/q). One network answers {@code getLine(id)} differently per working variant; the "branch" is just a
  * cloned variant, and the working variant <em>is</em> the context.</p>
