@@ -156,17 +156,20 @@ voltage level. The spike now asserts, through the public `VoltageLevel.getConnec
 branch context `VLB'` hosts `M`; outside it, `VLB'` does not claim `M` — consistent with the forward
 direction (`M` at `VLB'` in-branch, `VLB` in-base). Full suite still 1011 green.
 
-**Node-breaker confirmed (phase 4, VL level).** The forward hook is terminal-type-agnostic and the
+**Node-breaker done (phase 4, attachment level).** The forward hook is terminal-type-agnostic and the
 reverse union lives in `AbstractTopologyModel` (shared by both models), so the VL-level branch-scoped
-attachment works unchanged for node/breaker voltage levels — `StructuralBranchCascadeSpikeTest` now
-proves the same forward/reverse/no-cascade/base-intact claims on a node/breaker `VLA--L--VLB--M--VLC`.
-What is *not* yet covered for node-breaker is the terminal's **node** within `VLB'` (the override
-carries the voltage level, not yet the node index); resolving `getNodeBreakerView().getNode(terminal)`
-in the branch is the remaining node-breaker-specific detail.
+attachment works unchanged for node/breaker. The node/breaker-specific piece — the terminal's **node**
+within `VLB'` — is now covered too: `BranchContext.rebind(terminal, VLB', node)` records a node
+override, and the public `Terminal.NodeBreakerView.getNode()` resolves it through the same guarded
+path (`AbstractTerminal.resolveBranchNode`). The internal `NodeTerminal.getNode()` (graph-vertex
+identity in the object's own base graph) deliberately stays raw. `StructuralBranchCascadeSpikeTest`
+proves, on a node/breaker `VLA--L--VLB--M--VLC`: forward VL *and node* (`M` at `VLB'` node 5 in-branch,
+`VLB` node 2 in-base), reverse via `getConnectables()`, no cascade, base intact.
 
-Remaining before production: node-index override (above); calculated-bus folding (risk below);
-branch-scoped `move` + removing the `BranchLineSplit` guard; and the branch-access contract
-(traversal of branch objects must run within `ThreadLocalBranchContext.run`).
+Remaining before production: calculated-bus folding (risk below — make a branch-attached terminal
+participate in `VLB'`'s bus/topology computation, not just enumeration); branch-scoped `move` +
+removing the `BranchLineSplit` guard; and the branch-access contract (traversal of branch objects must
+run within `ThreadLocalBranchContext.run`).
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go

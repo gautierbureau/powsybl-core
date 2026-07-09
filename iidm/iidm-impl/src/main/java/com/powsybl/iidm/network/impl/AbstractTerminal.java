@@ -53,6 +53,20 @@ abstract class AbstractTerminal implements TerminalExt {
         this.branchAttachmentOverride = branchAttachmentOverride;
     }
 
+    /** Resolve a node/breaker terminal's node through the active branch context, else the base node. */
+    protected int resolveBranchNode(int baseNode) {
+        if (branchAttachmentOverride) {
+            BranchContext context = ThreadLocalBranchContext.get();
+            if (context != null) {
+                Integer override = context.resolveNode((TerminalExt) this);
+                if (override != null) {
+                    return override;
+                }
+            }
+        }
+        return baseNode;
+    }
+
     AbstractTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber) {
         if (side != null && terminalNumber != null) {
             throw new IllegalStateException("cannot have both side and number");
