@@ -109,3 +109,56 @@ ambient `BranchContext` (a VL's very terminal set is now context-dependent), so 
 must run within `ThreadLocalBranchContext.run` — a stricter contract than v1, where materialised objects
 were self-consistent without a context. That is the price of never copying: the same price network-store
 pays by resolving every read against the variant. It is the right trade for a general feature.
+
+## Lineage: each v2 element vs its network-store `PartialVariantUtils` counterpart
+
+v2 was not derived top-down from network-store, but every one of its moving parts turns out to be the
+in-place analogue of a specific `PartialVariantUtils` operation. The mapping is exact enough to be worth
+stating element by element — it is the strongest evidence that v2 is the *right* generic shape, because
+it independently re-derives production code's algorithm without adopting its record model.
+
+| v2 element (this design) | network-store `PartialVariantUtils` counterpart | why they coincide |
+|---|---|---|
+| `OverlayNetworkIndex.get(id)` — order added → tombstone → base | `getOptionalIdentifiable` — partial variant → (tombstoned? empty) → full variant | single-id read resolved by fall-through; a local override wins, an explicit tombstone erases, else inherit |
+| `OverlayNetworkIndex.getAll()` — base − shadowed + added | `getIdentifiables` — `full − (partialIds ∪ tombstonedIds) + partial` | collection read = inherited set minus everything locally shadowed/removed, plus everything locally added |
+| `createStructuralBranch(base, id)` — new overlay + `BranchContext`, **no element copy** | clone-from-FULL: new `variantNum` whose `fullVariantNum` points at the source, copying **no** resources | branching is O(1): record the parent pointer, copy nothing; divergence is paid lazily per element |
+| v2 **branch-detached** per-VL terminal set (hide a base terminal from a shared VL) | per-table **tombstone** sets (external attributes, limits groups, regulating points) | "this inherited thing is gone in my variant" expressed as a tombstone at the *membership* granularity, not by mutating the parent |
+| v2 **branch-attached** per-VL terminal set (show a new terminal on a shared VL) | `partial` resources carrying the child `variantNum` | "this thing exists only in my variant" — a local addition surfaced at read time |
+| v2 flatten = `NetworkSerDe.copy(base)` + replay delta | read-time merge (`getIdentifiables`) that a full-variant clone would materialise | flatten is just the merge run eagerly and written out; the branch view is byte-identical to it by construction |
+| extensions on branch objects (future) | **external attributes** with their own tombstone + merge tables | extensions resolve exactly like top-level resources: own local set, own tombstones, same fall-through |
+
+The one structural difference: network-store stamps a `variantNum` on **every resource** and resolves
+**every** read against it, so *existence itself is variant-scoped* uniformly. v2 keeps object existence
+global and layers a *membership* delta (attached/detached terminals) over shared VLs. v2 is the same
+algorithm applied only where the split actually perturbs the graph; network-store is the same algorithm
+applied everywhere, unconditionally.
+
+## v2.1 — variant-scoped existence (the faithful, deeper option)
+
+v2 stops one step short of full network-store fidelity. The remaining step, **v2.1**, is to stop treating
+object existence as global and make it **variant-scoped**, unifying the structural delta with IIDM's
+existing per-variant *state* mechanism — i.e. give IIDM the network-store property that *which objects
+exist* is answered per variant, exactly as *what setpoint a generator holds* already is.
+
+Concretely, v2.1 would:
+
+- Move the overlay's added/tombstoned sets out of a side `OverlayNetworkIndex` and **into the variant
+  array** already threaded through every impl object, so `network.getLine(id)` returns present-or-absent
+  *as a function of the active variant index* — the same array lookup that today returns a per-variant
+  tap position would return per-variant existence.
+- Collapse `branch-attached` / `branch-detached` into that same per-variant existence: a terminal's
+  membership in a VL becomes one more variant-indexed field, so no ambient `BranchContext` is needed —
+  the active variant *is* the context. This retires v2's stricter "everything must run inside
+  `ThreadLocalBranchContext.run`" contract; a variant is self-consistent on its own, as v1's materialised
+  objects were.
+- Make branching a variant clone (`cloneVariant`) that sets a parent pointer instead of copying the
+  per-variant slots — the direct analogue of network-store's `fullVariantNum`, and O(1) like it.
+
+**Cost — and why it is not this spike's next step.** v2.1 changes the meaning of the most fundamental
+IIDM read: `network.getX(id)` becomes variant-dependent, and every `NetworkIndex` / `getConnectables` /
+bus-view path must consult the active variant to decide existence. That is a core-IIDM change touching
+the index, the variant manager, and every topology model — far beyond a spike, and a compatibility
+question for every downstream consumer that assumes object identity is variant-independent. v2 gets the
+genericity (zero per-type code) **without** that core change, by scoping the delta to terminal membership
+over shared VLs. v2.1 is the honest end-state if IIDM ever wants network-store's uniform model natively;
+v2 is the pragmatic reach of that model achievable inside iidm-impl today.
