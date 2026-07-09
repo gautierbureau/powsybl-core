@@ -195,13 +195,37 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      everywhere; the index can be recycled). Proven by `StructuralVariantParentageTest` (descendant
      inheritance, sibling/ancestor invisibility, remove-variant cleanup). All 1025 iidm-impl + 305 serde
      tests pass.
-   - ⏳ **Bulk state O(1)** — the remaining, larger part: object *removal* existence and terminal
-     *membership* still eager-copy at clone (small); and the per-field **state** (setpoints, tap
-     positions, switch open, terminal p/q) is still copied by the columnar stores
-     (`NumericVariantStore`/`TerminalVariantStore`/`SwitchVariantStore`) and the per-object variant
-     arrays. Converting those to copy-on-write over the parentage (the `CowVariantColumn` model, per-row
-     to keep the read hot path cheap) is what makes the *whole* `STRUCTURAL` clone O(1). It touches the
-     performance-critical state read path, so it is the deliberate, larger increment.
+   - ✅ **Measured at the real use case (N-1 contingency analysis).** `VariantScopedSplitBenchmarkTest`
+     (`compareManyContingenciesToManyCopies`): **40 contingencies** (each removes a different line) as
+     structural variants on **one** network vs 40 full `NetworkSerDe.copy` networks, on a 4 000-line grid:
+
+     | approach | time | retained |
+     |---|---|---|
+     | 40 structural variants (one network) | ~170–210 ms | ~41 MB |
+     | 40 full copies | ~4 200–4 300 ms | ~837 MB |
+     | **payoff** | **~20–25× faster** | **~20× less memory** |
+
+     The structural network shares the base object graph once and pays only per-variant *state* + a tiny
+     structural delta per contingency; copies duplicate the whole network 40 times. This is where the
+     feature earns its keep.
+
+   - ⏳ **Bulk state O(1)** — the remaining, larger part, and a deliberate core change (not a spike
+     increment). Even in the result above, each structural variant still costs ~1 MB of eager per-variant
+     **state**: the columnar stores (`NumericVariantStore`/`TerminalVariantStore`/`SwitchVariantStore`)
+     copy the whole source band on `VariantColumnStore.extend` (O(rows) per clone), and the per-object
+     variant arrays likewise. Copy-on-write over the parentage removes that:
+     - **Read** `getDouble(variant, col, row)` resolves the variant to its nearest *materialised* ancestor
+       through `parentVariant`, for structural variants only; normal variants stay dense (a single gate
+       check on the hot path, so no-cost when no structural variant exists).
+     - **Clone** aliases the child band to the parent (O(1), copies nothing).
+     - **Write** materialises copy-on-write: writing a structural variant's row copies that row from the
+       parent first (per-row, so only touched rows cost anything); and — for snapshot correctness — writing
+       a *parent* that still has aliased children first freezes the affected row into them. This last point
+       is the crux: it is a check on the write hot path, and it is the same price network-store pays by
+       resolving every read against the variant. Because it is a correctness-critical change to the
+       performance-critical columnar engine (the `VariantColumnStore` implementations + the per-object
+       `MultiVariantObject` arrays), it warrants its own design review rather than being rushed — this is
+       the tier scored as the most invasive in `structural-variant-generic-design.md`.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class

@@ -110,6 +110,71 @@ class VariantScopedSplitBenchmarkTest {
         return Math.max(0, after - before);
     }
 
+    @Test
+    void compareManyContingenciesToManyCopies() {
+        // The real use case: N-1 contingency analysis. K structural variants on ONE shared network vs K
+        // full copies. The structural network shares the base object graph once; copies duplicate it K
+        // times. (Storage is still eager per-variant state; Phase 2's columnar copy-on-write would remove
+        // the remaining per-variant state duplication too.)
+        assumeTrue(Boolean.getBoolean("benchmark"), "measurement harness; enable with -Dbenchmark=true");
+
+        int size = 4_000;
+        int k = 40;
+        LOGGER.info("contingencies={} on a {}-line network", k, size);
+        LOGGER.info("approach   | time(ms) | retained(MB)");
+        LOGGER.info("-----------+----------+-------------");
+
+        // warm up
+        contingenciesAsStructuralVariants(buildChain(size), Math.min(k, 5));
+        contingenciesAsCopies(buildChain(size), Math.min(k, 5));
+
+        Network base1 = buildChain(size);
+        long m0 = usedMemory();
+        long t0 = System.nanoTime();
+        Network structural = contingenciesAsStructuralVariants(base1, k);
+        double structuralMs = (System.nanoTime() - t0) / 1e6;
+        long structuralMem = Math.max(0, usedMemory() - m0);
+        blackhole(structural);
+
+        Network base2 = buildChain(size);
+        long m1 = usedMemory();
+        long t1 = System.nanoTime();
+        List<Network> copies = contingenciesAsCopies(base2, k);
+        double copiesMs = (System.nanoTime() - t1) / 1e6;
+        long copiesMem = Math.max(0, usedMemory() - m1);
+        blackhole(copies);
+        blackhole(base2);
+
+        LOGGER.info(String.format("structural | %8.1f | %11.2f", structuralMs, structuralMem / 1e6));
+        LOGGER.info(String.format("copies     | %8.1f | %11.2f", copiesMs, copiesMem / 1e6));
+        LOGGER.info(String.format("            speed-up %.1fx, memory %.1fx", copiesMs / structuralMs,
+                (double) copiesMem / structuralMem));
+        assertTrue(structuralMem < copiesMem, "K structural variants should retain less than K copies");
+    }
+
+    /** K contingencies as structural variants of one network (each removes a different line). */
+    private static Network contingenciesAsStructuralVariants(Network base, int k) {
+        VariantManager vm = base.getVariantManager();
+        for (int i = 0; i < k; i++) {
+            vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "c" + i, VariantCloneStrategy.STRUCTURAL);
+            vm.setWorkingVariant("c" + i);
+            base.getLine("L" + i).remove();
+        }
+        vm.setWorkingVariant(VariantManagerConstants.INITIAL_VARIANT_ID);
+        return base;
+    }
+
+    /** K contingencies as K full copies (each removes a different line). */
+    private static List<Network> contingenciesAsCopies(Network base, int k) {
+        List<Network> copies = new ArrayList<>(k);
+        for (int i = 0; i < k; i++) {
+            Network c = NetworkSerDe.copy(base);
+            c.getLine("L" + i).remove();
+            copies.add(c);
+        }
+        return copies;
+    }
+
     // --- variant-scoped split: a STRUCTURAL clone, then the same split sequence, all public API ---
     private static void applyVariantSplit(Network base) {
         VariantManager vm = base.getVariantManager();
