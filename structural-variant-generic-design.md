@@ -272,6 +272,19 @@ overstates the minimal step and understates the maximal one.
   variant is the context, and the split touches only variant-scoped state.** Full iidm-impl suite green
   (1032 tests).
 
+  **Type-agnostic across equipment (built, validated).** The whole point of the model is that existence
+  and membership are driven by ids and terminals, never by equipment type — so it generalises to every
+  connectable for free. `VariantScopedConnectableAdd.addInVariant(...)` adds *any* connectable so that it
+  exists only in a given variant, with **zero per-type code**: the caller supplies the ordinary adder
+  (`() -> vl.newGenerator()…add()`), and the utility clones the variant, opens a branch-attach window on
+  the endpoint VL(s), runs the adder (its terminal is intercepted into the variant's membership, never the
+  shared graph), and marks the new object `existOnlyInCurrentVariant`. `VariantScopedConnectableAddTest`
+  proves it for a **generator** and a **load** through the exact same path — a "what-if we add a unit"
+  scenario is a cloned variant; the base never sees it — and the dual, a **structural removal** ("unit
+  decommissioned in this scenario": hide the object + detach its terminal in one variant), which regular
+  IIDM variants cannot express. Generators were just one instance; the line split is another. Full
+  iidm-impl suite green (1014 tests).
+
   **Measured payoff.** `VariantScopedSplitBenchmarkTest` (in `iidm-serde`, gated behind `-Dbenchmark=true`)
   compares the turnkey variant-scoped split against the classic approach — `NetworkSerDe.copy(base)` then
   split on the copy (a whole second network) — on a synthetic bus/breaker chain:
