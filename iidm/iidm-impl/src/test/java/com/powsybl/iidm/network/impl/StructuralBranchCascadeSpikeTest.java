@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,12 +101,12 @@ class StructuralBranchCascadeSpikeTest {
         // --- FORWARD: outside the context (base view), it resolves to the base VLB ---
         assertSame(base.getVoltageLevel("VLB"), nearM.getVoltageLevel(), "in the base, M's near terminal is at VLB");
 
-        // --- REVERSE (near): VLB' gains M via the branch-attached set ---
-        assertTrue(context.branchAttachedTerminals(vlbBranch).contains(nearM));
-        // branch-view connectables of VLB' = its own (none yet) union the branch-attached terminals' connectables
-        Set<String> vlbBranchConnectables = connectableIds(vlbBranch.getConnectables());
-        context.branchAttachedTerminals(vlbBranch).forEach(t -> vlbBranchConnectables.add(t.getConnectable().getId()));
-        assertTrue(vlbBranchConnectables.contains("M"), "VLB' hosts M in the branch");
+        // --- REVERSE (near), through the public API: under the branch context VLB'.getConnectables()
+        //     unions in the rebound M; outside the context it does not ---
+        ThreadLocalBranchContext.run(context, () ->
+                assertTrue(connectableIds(vlbBranch.getConnectables()).contains("M"), "VLB' hosts M in the branch"));
+        assertFalse(connectableIds(vlbBranch.getConnectables()).contains("M"),
+                "outside the branch context VLB' does not claim M");
 
         // --- NO CASCADE: VLC is never materialised and still enumerates M unchanged ---
         assertSame(base.getVoltageLevel("VLC"), branch.getVoltageLevel("VLC"), "VLC is shared, not materialised");

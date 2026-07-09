@@ -147,8 +147,18 @@ The test materialises `VLB → VLB'`, rebinds `M`'s near (VLB-side) terminal ont
 
 Full `iidm-impl` suite (1011 tests) still passes: the hot-path change is transparent. The one
 load-bearing uncertainty — near-only rebind with no far-side touch and no cascade — is **retired**.
-Remaining before production: wire the reverse union into `VoltageLevel.getConnectables()` (phase 2),
-node-breaker (phase 4), and calculated-bus folding (risk below).
+
+**Reverse now wired through the public API (phase 2 done).** `AbstractTopologyModel`'s four
+connectable-enumeration methods route through a gated wrapper: a per-topology-model
+`branchAttachmentHint` (default false → the wrapper is exactly `getTerminals()`, so every normal
+voltage level is unchanged) unions in the active `BranchContext`'s branch-attached terminals for that
+voltage level. The spike now asserts, through the public `VoltageLevel.getConnectables()`: under the
+branch context `VLB'` hosts `M`; outside it, `VLB'` does not claim `M` — consistent with the forward
+direction (`M` at `VLB'` in-branch, `VLB` in-base). Full suite still 1011 green.
+
+Remaining before production: node-breaker (phase 4, same override with node instead of bus),
+calculated-bus folding (risk below), branch-scoped `move` + removing the `BranchLineSplit` guard, and
+the branch-access contract (traversal of branch objects must run within `ThreadLocalBranchContext.run`).
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
