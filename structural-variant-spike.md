@@ -75,10 +75,23 @@ change at the registry level on a real network (`EurostagTutorialExample1`):
   - `OverlayNetworkIndex.replace(baseObj, branchCopy)` installs a same-id copy visible only in the
     branch; `NetworkImplStructuralBranchTest` shows through the public API that the branch resolves
     the id to its copy while the base keeps the original, counts unchanged, base untouched.
-  Full `iidm-impl` suite (1006 tests) still passes.
-  - *Next in 2b:* a VoltageLevel-level overlay so a COW'd endpoint VL differs from the base by exactly
-    one terminal (−L, +L1) with its node/switch graph shared — then route the existing
-    `ConnectVoltageLevelOnLine` modification onto branch-materialised objects so it runs **unchanged**,
-    as its own oracle against a full-copy-then-modify baseline.
+  Then, **materialize mode**: while set, the branch's own adders may reconstruct objects that carry
+  base ids, shadowing the base (`checkAndAdd`/`contains` cooperate so the standard adder
+  uniqueness check passes). This lets the branch rebuild the *dirty region* (the endpoint voltage
+  levels + the line) as branch-owned copies, after which the write path runs against those copies —
+  `line.remove()` and `newLine()` hit the branch, not the base. Removing a materialised object leaves
+  a tombstone so the shadowed base object stays hidden.
+
+  **End to end (`StructuralBranchLineSplitTest`, green):** on `VLA --L-- VLB`, branch it, materialise
+  the dirty region, then split the line on the branch with the ordinary public API — remove the line,
+  add a fictitious mid VL and two half-lines. The branch reflects the split (`L` gone, `L1`/`L2`/`Vf`
+  present, `getLineCount()==2`) while the base is byte-for-byte unchanged (still `VLA --L-- VLB`).
+  This is the exact sequence `ConnectVoltageLevelOnLine` performs; it is mirrored in the test because
+  that modification lives in a downstream module (iidm-modification). Full `iidm-impl` suite (1007
+  tests) passes.
+  - *Next in 2b:* generalise materialisation to the cascade case (endpoint VLs that host other
+    through-lines and injections — copy their contents / bound the reference rebinding) and expose a
+    single `branch.splitLine(...)` entry point; then drive the literal `ConnectVoltageLevelOnLine`
+    from a module that can see both it and the branch factory.
 - **Phase 3:** per-branch state column (marry to the columnar variant work), extensions/listeners on
   copied objects, branch disposal in O(delta), serialization.
