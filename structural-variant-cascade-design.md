@@ -220,10 +220,18 @@ and `iidm-serde`) exports the base and a branch to XIIDM:
   (b) make the serializer's ownership predicate branch-aware. A branch is primarily an in-memory
   compute structure (e.g. short-circuit); to *persist* one, flatten it.
 
-Remaining before production: serialization (above); node-breaker path in `BranchLineSplit` (it is still
-bus/breaker only, and now rebinds bus/breaker through-lines); a per-branch **state** column (fold the
-variant index into `BranchContext` so a branch also carries its own operating point); disposal and
-extensions/listeners on rebound/materialised objects.
+**Node-breaker split path done.** `BranchLineSplit` now dispatches by topology kind: it copies a
+node/breaker endpoint's graph (busbar sections + switches by node, kind/open/retained preserved),
+re-homes injections by node (via `InjectionAdder`), rebinds through-connectables with a node override,
+and attaches the half-lines at the freed feeder nodes (mixed node/bus lines to the bus/breaker
+fictitious VL). `StructuralBranchLineSplitTest` proves a node/breaker `VLA--L--VLB` split: the branch
+has L1/L2, VLA is a node/breaker copy with its busbar, base untouched. Full `iidm-impl` suite (1014
+tests) passes.
+
+Remaining before production: serialization (flatten-on-write); a per-branch **state** column (fold the
+variant index into `BranchContext` so a branch also carries its own operating point); reactive
+capability curves and remaining connectable types in materialisation; extensions/listeners on
+rebound/materialised objects.
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
