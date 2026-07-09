@@ -220,11 +220,23 @@ overstates the minimal step and understates the maximal one.
   column via `extendVariantArraySize`/`allocateVariantArrayElement` exactly as it does tap positions —
   cloning `faulted`→`faulted2` inherits the hide, cloning the pristine `INITIAL` does not. The `NetworkIndex`
   hook is **null-gated** (an unset `existence` field ⇒ the exact former hot path), so all 1026 iidm-impl
-  tests pass unchanged. Proven by `VariantScopedExistenceTest`. *Scope of the prototype:* it de-risks the
-  novel piece — variant-scoped existence resolved at the index and cloned by the real variant machinery.
-  Folding terminal *membership* into the same per-variant existence (so the enumeration/bus-view folds
-  read the variant instead of the context) is the remaining wiring; v2 already showed those folds can be
-  driven by an ambient selector, and v2.1a simply makes that selector the active variant.
+  tests pass unchanged. Proven by `VariantScopedExistenceTest`.
+
+  **Membership folded in too (prototype extended).** `VariantScopedMembership` (also a `MultiVariantObject`)
+  moves v2's `attached`/`detached` terminal delta out of the ambient `BranchContext` and into per-variant
+  state: a VL's terminal set enumerated by `getConnectables` becomes `graph − detached(activeVariant) +
+  attached(activeVariant)`. The `AbstractTopologyModel` enumeration folds now read this variant-scoped
+  membership **ahead of** the `BranchContext` (v2 remains the fallback when membership is not enabled), so
+  the same folds v2 drove from a thread-local context now read the **working variant** — no
+  `ThreadLocalBranchContext.run`. It rides the real clone identically: `VariantScopedMembershipTest`
+  shows `getConnectables` moving a terminal between VLs purely by `setWorkingVariant`, and the move being
+  inherited by a clone of `faulted` but not by a clone of `INITIAL`. Together, existence + membership mean
+  a split can be expressed as **pure variant state on a single network** — the branch is a cloned variant,
+  the working variant is the context. *Remaining:* the bus-view folds (`MergedBus`/`CalculatedBusImpl`)
+  still read the context for their connected-terminal filtering; pointing them at the variant-scoped
+  membership is the same mechanical swap the enumeration fold demonstrates, and the split operation +
+  branch-attach intercept would record into `VariantScopedMembership`/`VariantScopedExistence` instead of
+  `BranchContext` to make the single-network split turnkey. Full iidm-impl suite green (1028 tests).
 - **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
   pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant

@@ -36,6 +36,10 @@ class NetworkIndex {
     // variant. Null for every normal network, so get/getAll/contains keep their exact hot path.
     private VariantScopedExistence existence;
 
+    // Spike v2.1a: variant-scoped terminal membership. Not consulted by the index (the topology-model
+    // folds read it); held here only so the real variant lifecycle grows/copies its per-variant maps.
+    private VariantScopedMembership membership;
+
     void setVariantScopedExistence(VariantScopedExistence existence) {
         this.existence = existence;
         this.statefulObjectsCache = null;
@@ -43,6 +47,15 @@ class NetworkIndex {
 
     VariantScopedExistence getVariantScopedExistence() {
         return existence;
+    }
+
+    void setVariantScopedMembership(VariantScopedMembership membership) {
+        this.membership = membership;
+        this.statefulObjectsCache = null;
+    }
+
+    VariantScopedMembership getVariantScopedMembership() {
+        return membership;
     }
 
     static void checkId(String id) {
@@ -156,9 +169,13 @@ class NetworkIndex {
                     stateful.add(multiVariantObject);
                 }
             }
-            // v2.1a: existence is variant state too — the real clone must grow/copy its column with the rest
+            // v2.1a: existence and membership are variant state too — the real clone must grow/copy their
+            // columns with the rest
             if (existence != null) {
                 stateful.add(existence);
+            }
+            if (membership != null) {
+                stateful.add(membership);
             }
             statefulObjectsCache = stateful;
         }
