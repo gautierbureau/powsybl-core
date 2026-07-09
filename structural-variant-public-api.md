@@ -237,6 +237,19 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      the design risk of the live conversion — porting `NumericVariantStore`/`TerminalVariantStore`/
      `SwitchVariantStore` (and the per-object arrays) onto this model, gated so a network with no
      structural variant stays byte-for-byte dense — without performing that hot-path change here.
+
+     **Gating de-risked too (prototype built).** The remaining risk was not the algorithm but *coexistence*:
+     the conversion must cost **nothing** for the networks (all of them today) that never use a structural
+     variant, and stay correct where a copy-on-write variant is forked from a **dense** one.
+     `CowGatedColumnarStore` models both storage modes in one store — dense variants (initial + `STATE_ONLY`)
+     own every row (today's eager behaviour, unchanged); copy-on-write variants (`STRUCTURAL`) own only
+     diverged rows and fall through the parentage — behind a single `cowActive` gate flipped on the first
+     structural clone. `CowGatedColumnarStoreTest` proves: with no structural variant the store stays on the
+     plain dense **fast path** (`isFastPath()`), a `STRUCTURAL` clone from a dense parent is **O(1)** (stores
+     zero rows) yet **reads through** to the dense band, and a write to a **dense parent after a structural
+     fork** still **freezes** the row into the copy-on-write child (snapshot across the dense→sparse
+     boundary). With this, the live columnar port is a mechanical application of a fully de-risked design —
+     algorithm, gating, and boundary correctness all proven in isolation.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class
