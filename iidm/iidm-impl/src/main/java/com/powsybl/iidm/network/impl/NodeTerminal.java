@@ -44,7 +44,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException("Cannot access node of removed equipment " + connectable.id);
             }
-            return node;
+            return resolveBranchNode(node);
         }
 
         @Override

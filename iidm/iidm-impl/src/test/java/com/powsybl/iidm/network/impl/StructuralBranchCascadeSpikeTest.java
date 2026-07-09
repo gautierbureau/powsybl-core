@@ -162,12 +162,17 @@ class StructuralBranchCascadeSpikeTest {
 
         Line m = base.getLine("M");
         TerminalExt nearM = terminalOn(m, "VLB");
+        int baseNode = nearM.getNodeBreakerView().getNode(); // node 2 in base VLB
         BranchContext context = new BranchContext();
-        context.rebind(nearM, vlbBranch);
+        context.rebind(nearM, vlbBranch, 5); // rebound onto VLB', at node 5
 
-        // forward: same shared M, two views
+        // forward (voltage level): same shared M, two views
         ThreadLocalBranchContext.run(context, () -> assertSame(vlbBranch, nearM.getVoltageLevel()));
         assertSame(base.getVoltageLevel("VLB"), nearM.getVoltageLevel());
+
+        // forward (node): resolves to the branch node under the context, the base node outside it
+        ThreadLocalBranchContext.run(context, () -> assertEquals(5, nearM.getNodeBreakerView().getNode()));
+        assertEquals(baseNode, nearM.getNodeBreakerView().getNode());
 
         // reverse through the public API: VLB' hosts M under the context, not outside
         ThreadLocalBranchContext.run(context, () ->
