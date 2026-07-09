@@ -8,6 +8,7 @@
 package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.PowsyblException;
+import com.powsybl.iidm.network.Branch;
 import com.powsybl.iidm.network.Bus;
 import com.powsybl.iidm.network.Connectable;
 import com.powsybl.iidm.network.Generator;
@@ -17,6 +18,7 @@ import com.powsybl.iidm.network.MinMaxReactiveLimits;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.Switch;
+import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VoltageLevel;
 
@@ -59,11 +61,13 @@ final class BranchLineSplit {
         NetworkImpl branch = NetworkImpl.createStructuralBranch(base, branchId);
         OverlayNetworkIndex overlay = (OverlayNetworkIndex) branch.getIndex();
 
-        // 1. copy-on-write materialise the dirty region (both endpoints) as branch-owned copies
+        // 1. copy-on-write materialise the dirty region (both endpoints) as branch-owned copies;
+        //    through-connectables at an endpoint are rebound onto the branch copy (no cascade)
         Set<String> materializedSubs = new HashSet<>();
+        BranchContext context = branch.getBranchContext();
         overlay.beginMaterialize();
-        materializeVoltageLevel(branch, vl1, lineId, materializedSubs);
-        materializeVoltageLevel(branch, vl2, lineId, materializedSubs);
+        materializeVoltageLevel(branch, vl1, lineId, materializedSubs, context);
+        materializeVoltageLevel(branch, vl2, lineId, materializedSubs, context);
         overlay.endMaterialize();
 
         // 2. hide the original line in the branch (the base still has it)
@@ -82,7 +86,7 @@ final class BranchLineSplit {
     }
 
     private static void materializeVoltageLevel(NetworkImpl branch, VoltageLevel baseVl, String skipLineId,
-                                                Set<String> materializedSubs) {
+                                                Set<String> materializedSubs, BranchContext context) {
         if (baseVl.getTopologyKind() != TopologyKind.BUS_BREAKER) {
             throw new PowsyblException("splitLine spike: only bus/breaker voltage levels are supported ("
                     + baseVl.getId() + ")");
@@ -115,6 +119,13 @@ final class BranchLineSplit {
                 copyLoad(vlB, load);
             } else if (c instanceof Generator generator) {
                 copyGenerator(vlB, generator);
+            } else if (c instanceof Branch<?> throughBranch) {
+                // A through-connectable (a second line/transformer): do not recreate it or touch its far
+                // side. Rebind only its near terminal onto the branch copy of this voltage level; the
+                // branch view is then correct under the branch context, with no cascade.
+                Terminal near = throughBranch.getTerminal1().getVoltageLevel() == baseVl
+                        ? throughBranch.getTerminal1() : throughBranch.getTerminal2();
+                context.rebind((TerminalExt) near, (VoltageLevelExt) vlB);
             } else {
                 throw new PowsyblException("splitLine spike: endpoint " + baseVl.getId()
                         + " hosts a connectable not yet supported for branch materialisation: " + c.getId()
