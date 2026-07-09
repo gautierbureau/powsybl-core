@@ -44,6 +44,15 @@ abstract class AbstractTerminal implements TerminalExt {
 
     protected boolean removed = false;
 
+    // Spike (structural-variant branching): when true, this terminal has been rebound onto a branch's
+    // voltage level, so getVoltageLevel consults the active BranchContext. Default false -> the common
+    // path stays a direct field read; see structural-variant-cascade-design.md.
+    private boolean branchAttachmentOverride = false;
+
+    void setBranchAttachmentOverride(boolean branchAttachmentOverride) {
+        this.branchAttachmentOverride = branchAttachmentOverride;
+    }
+
     AbstractTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber) {
         if (side != null && terminalNumber != null) {
             throw new IllegalStateException("cannot have both side and number");
@@ -86,6 +95,15 @@ abstract class AbstractTerminal implements TerminalExt {
     public VoltageLevelExt getVoltageLevel() {
         if (removed) {
             throw new PowsyblException("Cannot access voltage level of removed equipment " + connectable.id);
+        }
+        if (branchAttachmentOverride) {
+            BranchContext context = ThreadLocalBranchContext.get();
+            if (context != null) {
+                VoltageLevelExt override = context.resolveVoltageLevel(this);
+                if (override != null) {
+                    return override;
+                }
+            }
         }
         return voltageLevel;
     }

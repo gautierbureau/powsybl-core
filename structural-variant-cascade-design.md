@@ -128,6 +128,28 @@ override with no far-side touch) for ~1–2 days before committing.
 5. Per-branch **state** column: fold the variant index into `BranchContext` so a branch also carries
    its own operating point for shared objects — the marriage with the columnar variant work.
 
+## 7b. De-risking spike — RESULT (done)
+
+Implemented and green (`StructuralBranchCascadeSpikeTest`), on exactly `VLA --L-- VLB --M-- VLC`:
+- `BranchContext` (per-terminal voltage-level override + per-VL branch-attached set) and
+  `ThreadLocalBranchContext` (thread-scoped active context, sibling of the variant context);
+- a **guarded** hook in `AbstractTerminal.getVoltageLevel()` — a per-terminal `branchAttachmentOverride`
+  flag (default false) gates a lookup of the active `BranchContext`; when no terminal is rebound and no
+  context is active (all normal use) the path is the unchanged direct field read.
+
+The test materialises `VLB → VLB'`, rebinds `M`'s near (VLB-side) terminal onto `VLB'`, and asserts:
+- **forward** through the public `Terminal.getVoltageLevel()` — under the branch context `M`'s near
+  terminal resolves to `VLB'`; outside it, to the base `VLB` (same shared `M` object, two views);
+- **reverse (near)** — `VLB'` gains `M` via the branch-attached set;
+- **no cascade** — `VLC` is the shared base instance (`assertSame`), never materialised, and still
+  enumerates `M`;
+- **base intact** — `M` still connects `VLB -- VLC` and base `VLB` still hosts `M`.
+
+Full `iidm-impl` suite (1011 tests) still passes: the hot-path change is transparent. The one
+load-bearing uncertainty — near-only rebind with no far-side touch and no cascade — is **retired**.
+Remaining before production: wire the reverse union into `VoltageLevel.getConnectables()` (phase 2),
+node-breaker (phase 4), and calculated-bus folding (risk below).
+
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
   through the union (audit `getTerminals`/`getConnectableStream`/bus views). A missed path = a branch

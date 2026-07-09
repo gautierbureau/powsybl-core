@@ -1,0 +1,53 @@
+/**
+ * Copyright (c) 2026, RTE (http://www.rte-france.com)
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+package com.powsybl.iidm.network.impl;
+
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * <p><b>Spike — structural variant / copy-on-write branching, cascade de-risking.</b> See
+ * {@code structural-variant-cascade-design.md}.</p>
+ *
+ * <p>A structural branch's <em>terminal-attachment overrides</em>. When a line is split at a voltage
+ * level that also hosts a through-connectable, the through-connectable is not recreated: only its
+ * <em>near</em> terminal is rebound onto the branch-owned copy of the split voltage level. Its far
+ * terminal is untouched, so nothing cascades into the far voltage level.</p>
+ *
+ * <p>This context records, per rebound terminal, the branch voltage level it resolves to (forward
+ * direction), and per branch voltage level the set of shared terminals rebound onto it (reverse
+ * direction). It is consulted only while active on the current thread (see
+ * {@link ThreadLocalBranchContext}) and only for terminals flagged as rebound, so the base view and
+ * the hot path are unaffected.</p>
+ *
+ * @author Claude
+ */
+final class BranchContext {
+
+    private final Map<TerminalExt, VoltageLevelExt> voltageLevelOverride = new HashMap<>();
+    private final Map<VoltageLevelExt, Set<TerminalExt>> branchAttached = new HashMap<>();
+
+    /** Rebind a shared terminal onto a branch-owned voltage level, for this branch only. */
+    void rebind(TerminalExt terminal, VoltageLevelExt branchVoltageLevel) {
+        voltageLevelOverride.put(terminal, branchVoltageLevel);
+        branchAttached.computeIfAbsent(branchVoltageLevel, k -> new LinkedHashSet<>()).add(terminal);
+        ((AbstractTerminal) terminal).setBranchAttachmentOverride(true);
+    }
+
+    /** Forward: the branch voltage level a rebound terminal resolves to, or {@code null} if not rebound. */
+    VoltageLevelExt resolveVoltageLevel(TerminalExt terminal) {
+        return voltageLevelOverride.get(terminal);
+    }
+
+    /** Reverse: the shared terminals rebound onto {@code voltageLevel} in this branch. */
+    Set<TerminalExt> branchAttachedTerminals(VoltageLevelExt voltageLevel) {
+        return branchAttached.getOrDefault(voltageLevel, Set.of());
+    }
+}
