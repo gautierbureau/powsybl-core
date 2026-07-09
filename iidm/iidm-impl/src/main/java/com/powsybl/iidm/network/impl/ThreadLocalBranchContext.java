@@ -1,0 +1,45 @@
+/**
+ * Copyright (c) 2026, RTE (http://www.rte-france.com)
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+package com.powsybl.iidm.network.impl;
+
+/**
+ * <p><b>Spike — structural variant / copy-on-write branching, cascade de-risking.</b></p>
+ *
+ * <p>Thread-scoped active {@link BranchContext}, mirroring {@code ThreadLocalMultiVariantContext} for
+ * variants: a branch is "entered" on a thread, and structural resolution (a rebound terminal's
+ * voltage level) consults the active context. When no context is active — the default for all normal
+ * use — resolution falls back to the base, so behaviour is unchanged.</p>
+ *
+ * @author Claude
+ */
+final class ThreadLocalBranchContext {
+
+    private static final ThreadLocal<BranchContext> CONTEXT = new ThreadLocal<>();
+
+    private ThreadLocalBranchContext() {
+    }
+
+    static BranchContext get() {
+        return CONTEXT.get();
+    }
+
+    /** Run {@code action} with {@code context} active on this thread, restoring the previous context after. */
+    static void run(BranchContext context, Runnable action) {
+        BranchContext previous = CONTEXT.get();
+        CONTEXT.set(context);
+        try {
+            action.run();
+        } finally {
+            if (previous != null) {
+                CONTEXT.set(previous);
+            } else {
+                CONTEXT.remove();
+            }
+        }
+    }
+}
