@@ -57,7 +57,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     private ValidationLevel validationLevel = ValidationLevel.STEADY_STATE_HYPOTHESIS;
     private ValidationLevel minValidationLevel = ValidationLevel.STEADY_STATE_HYPOTHESIS;
 
-    private final NetworkIndex index = new NetworkIndex();
+    private final NetworkIndex index;
 
     private final Map<String, VoltageAngleLimit> voltageAngleLimitsIndex = new LinkedHashMap<>();
 
@@ -137,7 +137,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     private final BusViewImpl busView = new BusViewImpl();
 
     NetworkImpl(String id, String name, String sourceFormat) {
+        this(id, name, sourceFormat, new NetworkIndex());
+    }
+
+    NetworkImpl(String id, String name, String sourceFormat, NetworkIndex index) {
         super(id, name, sourceFormat);
+        this.index = index;
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
@@ -151,6 +156,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         // the variant array is requested
         index.checkAndAdd(this);
         dcTopologyModel = new DcTopologyModel(ref, subnetworkRef);
+    }
+
+    /**
+     * Spike (structural-variant / copy-on-write branching): create a structural branch of
+     * {@code base}. The branch shares {@code base}'s whole object registry by reference through an
+     * {@link OverlayNetworkIndex}, and is a fully traversable {@code Network}; structural additions to
+     * the branch land in the overlay delta and leave {@code base} untouched. See
+     * {@code structural-variant-spike.md}.
+     */
+    static NetworkImpl createStructuralBranch(NetworkImpl base, String branchId) {
+        return new NetworkImpl(branchId, branchId, base.getSourceFormat(), new OverlayNetworkIndex(base.getIndex()));
     }
 
     static Network merge(String id, String name, Network... networks) {
