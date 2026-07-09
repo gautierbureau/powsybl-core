@@ -284,6 +284,29 @@ overstates the minimal step and understates the maximal one.
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant
   with O(1) branching — but it rewrites the variant lifecycle shared by every multi-variant object.
 
+  **Core mechanism de-risked (prototype built).** `CowVariantColumn<T>` over a `CowVariantParentage`
+  stores one variant-dependent field copy-on-write: a variant holds a value only where it has *diverged*,
+  else a read falls through the parent chain. This is the storage every `MultiVariantObject` would adopt.
+  It settles the two hard questions:
+  - **Forking is O(1) and copies nothing** — `CowVariantParentage.fork` records a parent pointer; the test
+    forks 1 000 variants and the column's stored-entry count stays at **1**. This is exactly what v2.1a
+    (and the benchmark) could not achieve: there `cloneVariant` extends *every* object's array, an O(N)
+    copy — the source of v2.1a's ~12–15× (but still O(N)) memory. v2.1b makes branch creation independent
+    of network size.
+  - **IIDM snapshot semantics are preserved** — the subtle part. `cloneVariant` is a point-in-time copy, so
+    a later change to a parent variant must *not* leak into a variant forked earlier. `CowVariantColumn`
+    keeps this by moving the copy to the **write** side: before a variant's value diverges, the current
+    value is frozen into the children that still inherit it (`CowVariantColumnTest` asserts the no-leak
+    case directly). Cost therefore moves from fork (was O(objects)) to a write of a *shared* variant (now
+    O(inheriting children), per column) — the right trade when branches are created far more often than a
+    base variant is mutated after forking.
+
+  *Scope of the prototype:* it proves the CoW column algorithm — O(1) fork, correct snapshot semantics,
+  storage O(divergences) not O(variants). The full v2.1b is still the large change scored below: swapping
+  every one of the 57 `MultiVariantObject` classes' dense per-variant arrays for this column and making
+  `VariantManagerImpl.cloneVariant` fork the parentage instead of allocating slots. The prototype retires
+  the design risk of that change; it does not perform it. Full iidm-impl suite green (1037 tests).
+
 ### Grounded blast radius (measured on this tree)
 
 | surface | v1 / v2 | v2.1a (existence-only) | v2.1b (full parity) |
