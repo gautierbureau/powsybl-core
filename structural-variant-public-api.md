@@ -250,6 +250,29 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      fork** still **freezes** the row into the copy-on-write child (snapshot across the dense→sparse
      boundary). With this, the live columnar port is a mechanical application of a fully de-risked design —
      algorithm, gating, and boundary correctness all proven in isolation.
+
+     **Live columnar port — plan, and why it is one indivisible core change.** Tracing the live lifecycle
+     establishes that the port is **all-or-nothing** and must be its own reviewed change, not a spike step:
+     - Per-variant state is spread across **~52 owners** — the 3 flat-array stores *plus ~49
+       `MultiVariantObject` classes* that still keep their own per-variant arrays. A `cloneVariant` copies
+       all of them.
+     - **No measurable win until nearly complete**: the clone cost is the *sum* of every owner's eager copy,
+       so converting one store leaves the clone O(N). The O(1) win appears only once essentially all owners
+       are converted.
+     - **The lifecycle carries no structural signal**: `VariantManagerImpl.cloneVariant` →
+       `MultiVariantObject.extendVariantArraySize` / `VariantColumnStore.extend` is generic (same path for
+       `STATE_ONLY` and `STRUCTURAL`), and the flat arrays are dense, indexed by variant — a structural
+       variant with no dense band can't be expressed without changing these signatures and the index→slot
+       mapping.
+
+     Sequence, when done as its own change: (1) add a structural-clone signal — a `STRUCTURAL`-aware clone
+     path that marks the child + parentage before driving owners, plus lifecycle hooks on
+     `MultiVariantObject`/`VariantColumnStore` whose **defaults delegate to the existing eager copy** so every
+     unconverted owner stays correct; (2) convert each owner to the gated copy-on-write model proven by
+     `CowGatedColumnarStore` (stores first, then the ~49 arrays), keeping the `cowActive` gate so
+     non-structural networks stay byte-for-byte dense; (3) flip reads/writes to the gated resolve with
+     freeze-on-parent-write. The three prototypes make each step mechanical; the spike's job — prove the
+     feature works and pays off (~20× on the eager storage it has today) and de-risk the O(1) path — is done.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class
