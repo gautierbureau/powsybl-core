@@ -182,9 +182,18 @@ raw field). The spike now asserts both directions agree: under the branch contex
 terminal's bus-view bus *is* `VLB'`'s bus (same id as the bus that folds `M` in). Full `iidm-impl`
 suite (1013 tests) passes.
 
-Remaining before production: the same two folds for node/breaker (`CalculatedBus` terminal set, and
-`NodeTerminal` bus-view resolution); branch-scoped `move` + removing the `BranchLineSplit` guard; and
-the branch-access contract (traversal of branch objects must run within `ThreadLocalBranchContext.run`).
+**Node/breaker bus view done — bus view now complete for both topology kinds.** The same two folds are
+in place for node/breaker: `CalculatedBusImpl`'s connected-terminal methods union in the branch-attached
+terminals whose branch node is in the bus's node set (`BranchContext.branchAttachedTerminalsOnNodes`),
+and `NodeTerminal.getTopologyModel()`/bus-view `getBus()` resolve through `resolveVoltageLevel()` and
+`resolveBranchNode(node)` so a rebound terminal's bus follows the branch context. The spike proves it on
+a node/breaker `VLB'` (busbar node 0, feeder node 5): under the context `VLB'`'s calculated bus folds in
+`M` and `M`'s bus-view bus is that same bus. Full `iidm-impl` suite (1013 tests) passes.
+
+Remaining before production: branch-scoped `move` (record the rebind through the existing move API) +
+removing the `BranchLineSplit` guard to wire the split end-to-end through a branch; the branch-access
+contract (traversal of branch objects must run within `ThreadLocalBranchContext.run`); and a per-branch
+state column (fold the variant index into `BranchContext`).
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go

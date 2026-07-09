@@ -57,7 +57,9 @@ class NodeTerminal extends AbstractTerminal {
     };
 
     private NodeBreakerTopologyModel getTopologyModel() {
-        return (NodeBreakerTopologyModel) voltageLevel.getTopologyModel();
+        // resolveVoltageLevel (not the raw field) so a rebound terminal's bus resolution follows the
+        // active branch context to the branch voltage level; unchanged for non-rebound terminals.
+        return (NodeBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final BusBreakerViewExt busBreakerView = new BusBreakerViewExt() {
@@ -67,7 +69,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(node);
+            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(resolveBranchNode(node));
         }
 
         @Override
@@ -75,7 +77,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(node);
+            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(resolveBranchNode(node));
         }
 
         @Override
@@ -105,7 +107,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getBus(node);
+            return getTopologyModel().getCalculatedBusTopology().getBus(resolveBranchNode(node));
         }
 
         @Override
@@ -113,7 +115,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(node);
+            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(resolveBranchNode(node));
         }
 
     };
