@@ -260,6 +260,25 @@ overstates the minimal step and understates the maximal one.
   node/breaker. This is the payoff of the v2.1a direction: **the branch is a cloned variant, the working
   variant is the context, and the split touches only variant-scoped state.** Full iidm-impl suite green
   (1032 tests).
+
+  **Measured payoff.** `VariantScopedSplitBenchmarkTest` (in `iidm-serde`, gated behind `-Dbenchmark=true`)
+  compares the turnkey variant-scoped split against the classic approach — `NetworkSerDe.copy(base)` then
+  split on the copy (a whole second network) — on a synthetic bus/breaker chain:
+
+  | lines | copy+split | variant split | speed-up | copy retained | variant retained | memory |
+  |---|---|---|---|---|---|---|
+  | 1 000 | ~40 ms | ~2.4 ms | ~16–20× | ~5.5 MB | ~0.4 MB | ~15× |
+  | 4 000 | ~70–110 ms | ~4 ms | ~17–27× | ~22 MB | ~1.2–1.8 MB | ~12–19× |
+  | 10 000 | ~240–270 ms | ~13–15 ms | ~18× | ~55 MB | ~4.6 MB | ~12× |
+
+  So a structural branch is created **~15–20× faster and holds ~12–15× less memory** than duplicating the
+  network. *Honest nuance:* the variant split is **not O(1)** — `cloneVariant` extends the per-variant
+  array of every stateful object, so its cost still grows with network size; the win is a far smaller
+  constant (a tiny per-variant slot vs a full object copy), not a different complexity class. (Caveats:
+  synthetic chain; `Runtime`-based retained-heap is approximate; `NetworkSerDe.copy` is the real
+  copy-a-network cost, including serialize+deserialize. Numbers are indicative, not a benchmark contract.)
+  This quantifies why the whole line of work matters: for scenario/contingency workloads that spin up many
+  structural branches, not copying the network is a large, measurable saving.
 - **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
   pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant
