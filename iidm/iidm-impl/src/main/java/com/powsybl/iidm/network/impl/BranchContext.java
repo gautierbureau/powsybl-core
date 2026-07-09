@@ -7,8 +7,10 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -70,5 +72,25 @@ final class BranchContext {
     /** Reverse: the shared terminals rebound onto {@code voltageLevel} in this branch. */
     Set<TerminalExt> branchAttachedTerminals(VoltageLevelExt voltageLevel) {
         return branchAttached.getOrDefault(voltageLevel, Set.of());
+    }
+
+    /**
+     * Reverse (bus view): the connected terminals rebound onto {@code voltageLevel} whose configured
+     * bus is one of {@code busIds} — i.e. the branch-attached terminals that a merged bus over those
+     * configured buses must include.
+     */
+    List<TerminalExt> branchAttachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
+        Set<TerminalExt> attached = branchAttached.get(voltageLevel);
+        if (attached == null || attached.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : attached) {
+            if (terminal instanceof BusTerminal busTerminal
+                    && busIds.contains(busTerminal.getConnectableBusId()) && busTerminal.isConnected()) {
+                result.add(terminal);
+            }
+        }
+        return result;
     }
 }

@@ -49,22 +49,41 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
         return bus.isPresent() && bus.get().isInMainSynchronousComponent();
     }
 
+    // Spike (structural-variant branching): under an active branch context, a merged bus over
+    // branch-owned configured buses also includes the terminals rebound onto them. No active context
+    // (all normal use) -> empty, so behaviour is unchanged.
+    private List<TerminalExt> branchAttachedConnectedTerminals() {
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context == null) {
+            return List.of();
+        }
+        VoltageLevelExt voltageLevel = (VoltageLevelExt) buses.iterator().next().getVoltageLevel();
+        Set<String> busIds = new HashSet<>();
+        buses.forEach(b -> busIds.add(b.getId()));
+        return context.branchAttachedConnectedTerminals(voltageLevel, busIds);
+    }
+
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
-        return buses.stream().mapToInt(ConfiguredBus::getConnectedTerminalCount).sum();
+        return buses.stream().mapToInt(ConfiguredBus::getConnectedTerminalCount).sum()
+                + branchAttachedConnectedTerminals().size();
     }
 
     @Override
     public Iterable<TerminalExt> getConnectedTerminals() {
         checkValidity();
-        return buses.stream().map(ConfiguredBus::getConnectedTerminals).reduce(Iterables::concat).orElse(Collections.emptyList());
+        Iterable<TerminalExt> own = buses.stream().map(ConfiguredBus::getConnectedTerminals)
+                .reduce(Iterables::concat).orElse(Collections.emptyList());
+        List<TerminalExt> attached = branchAttachedConnectedTerminals();
+        return attached.isEmpty() ? own : Iterables.concat(own, attached);
     }
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        return buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream);
+        return Stream.concat(buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream),
+                branchAttachedConnectedTerminals().stream());
     }
 
     @Override
