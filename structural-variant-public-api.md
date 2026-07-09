@@ -157,17 +157,22 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      variant-scoped layers).
    - ✅ **`remove()` auto-scopes** — `AbstractConnectable.remove()` tombstones (hide + detach terminals)
      when the working variant is structural; network-wide otherwise (backward-compatible).
-   - ✅ **`add()` of a connectable auto-scopes** — the topology-model branch-attach intercept, under a
-     structural variant, records the new object's terminals in that variant's membership and marks the
-     object existence-scoped; ordinary `newGenerator().add()` / `newLine().add()` "just work". Proven by
-     `StructuralVariantRemoveTest` (add, remove, add+remove compose, two coexisting contingencies, and the
-     `STATE_ONLY` backward-compat case) and the reworked `StructuralVariantApiExampleTest` (examples 1 & 3
-     now call the real API).
-   - ⏳ **Container-creating operations** (a split that adds a new *voltage level* `Vf`, not just
-     connectables) — the new VL/bus/substation existence must be variant-scoped too. Not yet auto-scoped
-     (containers add no terminal, so the connectable intercept doesn't see them); the `iidm-modification`
-     split family still runs via the internal helper for now. Next Phase-1 increment.
-   - ⏳ **`NetworkSerDe` resolved-view write** — not yet wired.
+   - ✅ **`add()` auto-scopes, connectables *and* containers** — a connectable's terminals are recorded in
+     the active variant's membership by the topology-model branch-attach intercept, and existence-scoping
+     of *every* added object (a connectable, or a container VL/bus/substation) is handled centrally in
+     `NetworkIndex.checkAndAdd`. So ordinary `newGenerator().add()` / `newLine().add()` *and*
+     `newSubstation()/newVoltageLevel()/newBus()` "just work".
+   - ✅ **Container-creating operations** — a fault-on-line split that adds a new fictitious voltage level
+     runs entirely through the public API (`remove()` + `newSubstation()/newVoltageLevel()/newBus()` +
+     `newLine()` under a `STRUCTURAL` variant). Proven by `StructuralVariantSplitViaApiTest` (bus/breaker
+     and node/breaker). With this, the internal operation helpers (`VariantScopedLineSplit`,
+     `VariantScopedConnectableAdd`) are **deleted** — the public API is the only path. Coverage now via
+     `StructuralVariantRemoveTest`, `StructuralVariantSplitViaApiTest`, `StructuralVariantTypeAgnosticTest`
+     (generator + load), and the reworked `StructuralVariantApiExampleTest` (all three examples call the
+     real API). The `VariantScopedSplitBenchmarkTest` also splits via the public API now.
+   - ⏳ **`NetworkSerDe` resolved-view write** — the last Phase-1 item. A structural variant is not yet
+     serialized to its resolved view. (Enumeration/query all resolve correctly in-memory; only on-disk
+     write of a structural variant remains.)
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class

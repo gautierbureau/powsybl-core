@@ -76,28 +76,37 @@ class StructuralVariantApiExampleTest {
 
     @Test
     void example2ShortCircuitFaultOnLine() {
-        NetworkImpl n = smallGrid();
+        Network n = smallGrid();
 
-        // ===== PROPOSED PUBLIC API (Phase 1 remaining: this split CREATES a new voltage level Vf, whose
-        //       existence must be variant-scoped too — the container-add case not yet auto-scoped): =======
-        //   vm.cloneVariant("InitialState", "fault", VariantCloneStrategy.STRUCTURAL);
-        //   vm.setWorkingVariant("fault");
-        //   new CreateVoltageLevelOnLine(40, ..., "LINE12", "HALF_A", "HALF_B", "Vf", ...).apply(n);
-        // (add/remove of connectables already scope automatically — see examples 1 and 3 and
-        //  StructuralVariantRemoveTest; container-creating splits run today via the internal helper:)
-        VariantScopedLineSplit.split(n, "fault", "LINE12", 40.0, "SFx", "Vf", "busF", "HALF_A", "HALF_B");
+        // ===== the real public API — a STRUCTURAL clone, then the ordinary split sequence (a modification
+        //       such as CreateVoltageLevelOnLine performs it): remove the line, add a fictitious mid VL,
+        //       add the two half-lines — all scoped to "fault", including the new voltage level ===========
+        VariantManager vm = n.getVariantManager();
+        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.setWorkingVariant("fault");
+        n.getLine("LINE12").remove();
+        Substation sf = n.newSubstation().setId("SFx").setFictitious(true).add();
+        sf.newVoltageLevel().setId("Vf").setNominalV(400).setFictitious(true)
+                .setTopologyKind(TopologyKind.BUS_BREAKER).add().getBusBreakerView().newBus().setId("busF").add();
+        halfLine(n, "HALF_A", "VL1", "b1", "Vf", "busF");
+        halfLine(n, "HALF_B", "Vf", "busF", "VL2", "b2");
+        // ================================================================================================
 
-        // the "fault" variant shows the line split at a mid-line fictitious voltage level
-        n.getVariantManager().setWorkingVariant("fault");
         assertNull(n.getLine("LINE12"));
         assertNotNull(n.getLine("HALF_A"));
         assertNotNull(n.getLine("HALF_B"));
         assertNotNull(n.getVoltageLevel("Vf"));
 
         // the intact network is preserved in the base variant
-        n.getVariantManager().setWorkingVariant(INITIAL);
+        vm.setWorkingVariant(INITIAL);
         assertNotNull(n.getLine("LINE12"));
         assertNull(n.getVoltageLevel("Vf"));
+    }
+
+    private static void halfLine(Network n, String id, String vl1, String bus1, String vl2, String bus2) {
+        n.newLine().setId(id).setVoltageLevel1(vl1).setConnectableBus1(bus1).setBus1(bus1)
+                .setVoltageLevel2(vl2).setConnectableBus2(bus2).setBus2(bus2)
+                .setR(0.5).setX(5).setG1(0).setB1(0).setG2(0).setB2(0).add();
     }
 
     @Test

@@ -48,6 +48,11 @@ final class VariantScopedExistence implements MultiVariantObject {
         }
     }
 
+    /** Whether the working variant is a structural one (so a newly-added object should exist only in it). */
+    boolean isCurrentVariantStructural() {
+        return holder.getVariantManager().isCurrentVariantStructural();
+    }
+
     /** True if {@code id} is hidden (does not exist) in the network's current working variant. */
     boolean isHidden(String id) {
         if (!anyHidden) {

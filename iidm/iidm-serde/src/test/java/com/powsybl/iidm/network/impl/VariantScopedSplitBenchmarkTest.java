@@ -11,6 +11,9 @@ import com.powsybl.iidm.network.Line;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
+import com.powsybl.iidm.network.VariantManager;
+import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
+import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.serde.NetworkSerDe;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -53,8 +56,7 @@ class VariantScopedSplitBenchmarkTest {
                 Network warm = buildChain(size);
                 Network c = NetworkSerDe.copy(warm);
                 applyCopySplit(c);
-                VariantScopedLineSplit.split((NetworkImpl) buildChain(size), "faulted", "L0", 40.0,
-                        "SFx", "Vfx", "busFx", "HALF_A", "HALF_B");
+                applyVariantSplit(buildChain(size));
             }
 
             // --- time (median of RUNS; fresh base each run) ---
@@ -68,9 +70,9 @@ class VariantScopedSplitBenchmarkTest {
                 return dt;
             });
             double variantMs = medianMs(() -> {
-                NetworkImpl base = (NetworkImpl) buildChain(size);
+                Network base = buildChain(size);
                 long t0 = System.nanoTime();
-                VariantScopedLineSplit.split(base, "faulted", "L0", 40.0, "SFx", "Vfx", "busFx", "HALF_A", "HALF_B");
+                applyVariantSplit(base);
                 long dt = System.nanoTime() - t0;
                 blackhole(base);
                 return dt;
@@ -99,14 +101,21 @@ class VariantScopedSplitBenchmarkTest {
             applyCopySplit(copy);
             result = copy;
         } else {
-            VariantScopedLineSplit.split((NetworkImpl) base, "faulted", "L0", 40.0,
-                    "SFx", "Vfx", "busFx", "HALF_A", "HALF_B");
+            applyVariantSplit(base);
             result = base;
         }
         long after = usedMemory();
         blackhole(result);
         blackhole(base);
         return Math.max(0, after - before);
+    }
+
+    // --- variant-scoped split: a STRUCTURAL clone, then the same split sequence, all public API ---
+    private static void applyVariantSplit(Network base) {
+        VariantManager vm = base.getVariantManager();
+        vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "faulted", VariantCloneStrategy.STRUCTURAL);
+        vm.setWorkingVariant("faulted");
+        applyCopySplit(base); // remove L0 + add fictitious VL + half-lines, now scoped to "faulted"
     }
 
     // --- classic fault-on-line split on a plain (fully copied) network, via the public API ---
