@@ -32,9 +32,22 @@ final class ThreadLocalBranchContext {
     static void run(BranchContext context, Runnable action) {
         BranchContext previous = CONTEXT.get();
         CONTEXT.set(context);
+        // Enter the branch's operating point: switch the base's working variant to the branch's state
+        // column for the duration, so shared objects read/write the branch's variant state. Restored
+        // after, so the base's own operating point is untouched.
+        String savedVariant = null;
+        boolean switched = false;
+        if (context != null && context.getStateVariant() != null && context.getBase() != null) {
+            savedVariant = context.getBase().getVariantManager().getWorkingVariantId();
+            context.getBase().getVariantManager().setWorkingVariant(context.getStateVariant());
+            switched = true;
+        }
         try {
             action.run();
         } finally {
+            if (switched) {
+                context.getBase().getVariantManager().setWorkingVariant(savedVariant);
+            }
             if (previous != null) {
                 CONTEXT.set(previous);
             } else {

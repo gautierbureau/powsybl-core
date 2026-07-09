@@ -37,6 +37,34 @@ final class BranchContext {
     private final Map<TerminalExt, Integer> nodeOverride = new HashMap<>();
     private final Map<VoltageLevelExt, Set<TerminalExt>> branchAttached = new HashMap<>();
 
+    // Per-branch state column: the base whose working variant is switched while this context is active,
+    // and the base variant id the branch operates in. A branch reads/writes a shared object's variant
+    // state (switch open, terminal p/q, tap positions, regulation setpoints...) in this variant, so it
+    // carries its own operating point over the shared structure without materialising those objects.
+    private final NetworkImpl base;
+    private String stateVariantId;
+
+    BranchContext() {
+        this(null);
+    }
+
+    BranchContext(NetworkImpl base) {
+        this.base = base;
+    }
+
+    /** Fold a per-branch operating point (a base variant) into this context; null clears it. */
+    void setStateVariant(String baseVariantId) {
+        this.stateVariantId = baseVariantId;
+    }
+
+    String getStateVariant() {
+        return stateVariantId;
+    }
+
+    NetworkImpl getBase() {
+        return base;
+    }
+
     /** Rebind a shared terminal onto a branch-owned voltage level (bus/breaker, or node/breaker with no node change). */
     void rebind(TerminalExt terminal, VoltageLevelExt branchVoltageLevel) {
         rebind(terminal, branchVoltageLevel, null);

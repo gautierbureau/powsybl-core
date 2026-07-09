@@ -171,7 +171,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
      */
     static NetworkImpl createStructuralBranch(NetworkImpl base, String branchId) {
         NetworkImpl branch = new NetworkImpl(branchId, branchId, base.getSourceFormat(), new OverlayNetworkIndex(base.getIndex()));
-        branch.branchContext = new BranchContext();
+        branch.branchContext = new BranchContext(base);
         return branch;
     }
 
