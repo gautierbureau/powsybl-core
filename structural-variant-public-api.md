@@ -170,9 +170,17 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      `StructuralVariantRemoveTest`, `StructuralVariantSplitViaApiTest`, `StructuralVariantTypeAgnosticTest`
      (generator + load), and the reworked `StructuralVariantApiExampleTest` (all three examples call the
      real API). The `VariantScopedSplitBenchmarkTest` also splits via the public API now.
-   - ⏳ **`NetworkSerDe` resolved-view write** — the last Phase-1 item. A structural variant is not yet
-     serialized to its resolved view. (Enumeration/query all resolve correctly in-memory; only on-disk
-     write of a structural variant remains.)
+   - ✅ **`NetworkSerDe` resolved-view write** — writing while a structural variant is the working variant
+     serializes its resolved view (base − tombstoned + added), with **no special flatten step**. In the
+     single-network variant model every object's parent is the one network (unlike the earlier two-network
+     overlay, where shared objects' parent was the base and were dropped), and every collection accessor
+     resolves against the active variant — so the serializer needs no change. Proven by
+     `StructuralVariantSerializationTest`: `NetworkSerDe.copy` of the `fault` variant round-trips to the
+     split network, of `INITIAL` to the intact base, both plain networks.
+
+   **Phase 1 is functionally complete**: a `STRUCTURAL` clone plus the ordinary IIDM API (`add`, `remove`,
+   the split sequence) plus serialization all work end-to-end. Storage is still the eager per-variant
+   arrays (structural clone is O(N)); Phase 2 (`CowVariantColumn`) makes it O(1).
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class
