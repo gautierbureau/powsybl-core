@@ -181,6 +181,27 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
    **Phase 1 is functionally complete**: a `STRUCTURAL` clone plus the ordinary IIDM API (`add`, `remove`,
    the split sequence) plus serialization all work end-to-end. Storage is still the eager per-variant
    arrays (structural clone is O(N)); Phase 2 (`CowVariantColumn`) makes it O(1).
+
+3. **Phase 2 — copy-on-write / O(1). Started on this branch:**
+   - ✅ **Variant parentage foundation** — `VariantManagerImpl` records a clone parent pointer for every
+     variant (`parentVariant(index)`), maintained across recycling and re-parented on `removeVariant`.
+     This is the structure every copy-on-write step reads (the `CowVariantParentage` prototype validated
+     the algorithm; this is it wired into the live variant manager).
+   - ✅ **Object *addition* is now O(1)** — `existOnlyInCurrentVariant` was O(variants) (it hid the new
+     object in every other variant eagerly; a split adds ~5 objects, each O(variants)). It is now a single
+     global `id → variant-it-was-added-in` entry, resolved at read time through the parentage: an added
+     object is visible in that variant and its **descendants** only. Snapshot-correct by construction
+     (the parentage encodes fork order), and `removeVariant` cleans it up (the object disappears
+     everywhere; the index can be recycled). Proven by `StructuralVariantParentageTest` (descendant
+     inheritance, sibling/ancestor invisibility, remove-variant cleanup). All 1025 iidm-impl + 305 serde
+     tests pass.
+   - ⏳ **Bulk state O(1)** — the remaining, larger part: object *removal* existence and terminal
+     *membership* still eager-copy at clone (small); and the per-field **state** (setpoints, tap
+     positions, switch open, terminal p/q) is still copied by the columnar stores
+     (`NumericVariantStore`/`TerminalVariantStore`/`SwitchVariantStore`) and the per-object variant
+     arrays. Converting those to copy-on-write over the parentage (the `CowVariantColumn` model, per-row
+     to keep the read hot path cheap) is what makes the *whole* `STRUCTURAL` clone O(1). It touches the
+     performance-critical state read path, so it is the deliberate, larger increment.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class
