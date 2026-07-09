@@ -61,4 +61,81 @@ class StructuralBranchStateTest {
         // ...while the branch sees its own state
         ThreadLocalBranchContext.run(ctx, () -> assertTrue(sw.isOpen(), "branch operating point: switch open"));
     }
+
+    @Test
+    void unifiedOperatingPointCoversSharedAndBranchOwnedObjects() {
+        // base: a shared switch, closed
+        Network base = Network.create("base", "test");
+        Substation s = base.newSubstation().setId("S").add();
+        VoltageLevel vl = s.newVoltageLevel().setId("VL").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vl.getBusBreakerView().newBus().setId("b1").add();
+        vl.getBusBreakerView().newBus().setId("b2").add();
+        vl.getBusBreakerView().newSwitch().setId("S_shared").setBus1("b1").setBus2("b2").setOpen(false).add();
+
+        NetworkImpl branch = NetworkImpl.createStructuralBranch((NetworkImpl) base, "branch");
+        // a branch-owned switch, closed
+        Substation sb = branch.newSubstation().setId("SB").add();
+        VoltageLevel vlb = sb.newVoltageLevel().setId("VLB").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vlb.getBusBreakerView().newBus().setId("c1").add();
+        vlb.getBusBreakerView().newBus().setId("c2").add();
+        vlb.getBusBreakerView().newSwitch().setId("S_branch").setBus1("c1").setBus2("c2").setOpen(false).add();
+
+        BranchContext ctx = branch.getBranchContext();
+        ctx.allocateOperatingPoint("op");
+
+        Switch shared = base.getSwitch("S_shared");
+        Switch owned = branch.getSwitch("S_branch");
+
+        // open both in the branch's operating point
+        ThreadLocalBranchContext.run(ctx, () -> {
+            shared.setOpen(true);
+            owned.setOpen(true);
+        });
+
+        // the operating point holds both; the defaults hold neither
+        ThreadLocalBranchContext.run(ctx, () -> {
+            assertTrue(shared.isOpen(), "shared object open in the operating point");
+            assertTrue(owned.isOpen(), "branch-owned object open in the operating point");
+        });
+        assertFalse(shared.isOpen(), "shared object closed in the base default variant");
+        assertFalse(owned.isOpen(), "branch-owned object closed in the branch default variant");
+    }
+
+    @Test
+    void concurrentBranchesHaveIsolatedOperatingPoints() throws InterruptedException {
+        // base with a shared switch; two branches each with their own operating point, run on two threads
+        Network base = Network.create("base", "test");
+        Substation s = base.newSubstation().setId("S").add();
+        VoltageLevel vl = s.newVoltageLevel().setId("VL").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vl.getBusBreakerView().newBus().setId("b1").add();
+        vl.getBusBreakerView().newBus().setId("b2").add();
+        vl.getBusBreakerView().newSwitch().setId("SW").setBus1("b1").setBus2("b2").setOpen(false).add();
+
+        NetworkImpl b1 = NetworkImpl.createStructuralBranch((NetworkImpl) base, "branch1");
+        NetworkImpl b2 = NetworkImpl.createStructuralBranch((NetworkImpl) base, "branch2");
+        b1.getBranchContext().allocateOperatingPoint("op1");
+        b2.getBranchContext().allocateOperatingPoint("op2");
+
+        Switch sw = base.getSwitch("SW");
+        boolean[] seenByT1 = new boolean[1];
+        boolean[] seenByT2 = new boolean[1];
+        Thread t1 = new Thread(() -> ThreadLocalBranchContext.run(b1.getBranchContext(), () -> {
+            sw.setOpen(true);
+            seenByT1[0] = sw.isOpen();
+        }));
+        Thread t2 = new Thread(() -> ThreadLocalBranchContext.run(b2.getBranchContext(), () -> {
+            sw.setOpen(false);
+            seenByT2[0] = sw.isOpen();
+        }));
+        t1.start();
+        t2.start();
+        t1.join();
+        t2.join();
+
+        // each thread saw its own operating point despite mutating the same shared switch concurrently
+        assertTrue(seenByT1[0], "op1 (thread 1): switch open");
+        assertFalse(seenByT2[0], "op2 (thread 2): switch closed");
+        // the base default variant is untouched by either branch
+        assertFalse(sw.isOpen(), "base default variant: switch still closed");
+    }
 }

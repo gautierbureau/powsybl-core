@@ -7,6 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * <p><b>Spike — structural variant / copy-on-write branching, cascade de-risking.</b></p>
  *
@@ -32,21 +35,24 @@ final class ThreadLocalBranchContext {
     static void run(BranchContext context, Runnable action) {
         BranchContext previous = CONTEXT.get();
         CONTEXT.set(context);
-        // Enter the branch's operating point: switch the base's working variant to the branch's state
-        // column for the duration, so shared objects read/write the branch's variant state. Restored
-        // after, so the base's own operating point is untouched.
-        String savedVariant = null;
-        boolean switched = false;
-        if (context != null && context.getStateVariant() != null && context.getBase() != null) {
-            savedVariant = context.getBase().getVariantManager().getWorkingVariantId();
-            context.getBase().getVariantManager().setWorkingVariant(context.getStateVariant());
-            switched = true;
+        // Enter the branch's operating point: switch the base's working variant (shared objects) and,
+        // for a unified operating point, the branch's working variant (branch-owned objects) to the
+        // branch's column for the duration. Thread-safe when the managers are in thread-local variant
+        // mode (see BranchContext.allocateOperatingPoint), so concurrent branches don't interfere.
+        List<Runnable> restorers = new ArrayList<>(2);
+        if (context != null) {
+            if (context.getStateVariant() != null && context.getBase() != null) {
+                restorers.add(enterVariant(context.getBase(), context.getStateVariant()));
+            }
+            if (context.getBranchVariant() != null && context.getBranch() != null) {
+                restorers.add(enterVariant(context.getBranch(), context.getBranchVariant()));
+            }
         }
         try {
             action.run();
         } finally {
-            if (switched) {
-                context.getBase().getVariantManager().setWorkingVariant(savedVariant);
+            for (int i = restorers.size() - 1; i >= 0; i--) {
+                restorers.get(i).run();
             }
             if (previous != null) {
                 CONTEXT.set(previous);
@@ -54,5 +60,22 @@ final class ThreadLocalBranchContext {
                 CONTEXT.remove();
             }
         }
+    }
+
+    /** Switch a network's working variant, returning a restorer that undoes it (both variant modes). */
+    private static Runnable enterVariant(NetworkImpl network, String variantId) {
+        VariantContext variantContext = network.getVariantManager().getVariantContext();
+        boolean wasSet = variantContext.isIndexSet();
+        String saved = wasSet ? network.getVariantManager().getWorkingVariantId() : null;
+        network.getVariantManager().setWorkingVariant(variantId);
+        int enteredIndex = variantContext.getVariantIndex();
+        return () -> {
+            if (wasSet) {
+                network.getVariantManager().setWorkingVariant(saved);
+            } else {
+                // thread-local mode with no prior variant on this thread: clear it back
+                variantContext.resetIfVariantIndexIs(enteredIndex);
+            }
+        };
     }
 }

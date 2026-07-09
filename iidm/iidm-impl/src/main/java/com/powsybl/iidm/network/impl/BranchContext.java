@@ -7,6 +7,8 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.iidm.network.VariantManagerConstants;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -42,7 +44,11 @@ final class BranchContext {
     // state (switch open, terminal p/q, tap positions, regulation setpoints...) in this variant, so it
     // carries its own operating point over the shared structure without materialising those objects.
     private final NetworkImpl base;
+    private NetworkImpl branch;
+    // A unified operating point pairs a base variant (for shared objects) with a branch variant (for
+    // branch-owned objects), both under the same id, entered together in ThreadLocalBranchContext.run.
     private String stateVariantId;
+    private String branchVariantId;
 
     BranchContext() {
         this(null);
@@ -52,17 +58,53 @@ final class BranchContext {
         this.base = base;
     }
 
-    /** Fold a per-branch operating point (a base variant) into this context; null clears it. */
+    void setBranch(NetworkImpl branch) {
+        this.branch = branch;
+    }
+
+    /** Fold a per-branch operating point (a base variant only) into this context; null clears it. */
     void setStateVariant(String baseVariantId) {
         this.stateVariantId = baseVariantId;
+    }
+
+    /**
+     * Allocate a <em>unified</em> operating point: a variant of the same id in both the base (holding
+     * the shared objects' state) and the branch (holding the branch-owned objects' state), each cloned
+     * from its initial variant. Both networks are switched to thread-local variant access, so several
+     * branches can hold distinct operating points concurrently on different threads. Entering the
+     * context (run) then selects this operating point for the whole branch — shared and owned alike.
+     */
+    void allocateOperatingPoint(String operatingPointId) {
+        cloneIfAbsent(base, operatingPointId);
+        base.getVariantManager().allowVariantMultiThreadAccess(true);
+        stateVariantId = operatingPointId;
+        if (branch != null) {
+            cloneIfAbsent(branch, operatingPointId);
+            branch.getVariantManager().allowVariantMultiThreadAccess(true);
+            branchVariantId = operatingPointId;
+        }
+    }
+
+    private static void cloneIfAbsent(NetworkImpl network, String variantId) {
+        if (!network.getVariantManager().getVariantIds().contains(variantId)) {
+            network.getVariantManager().cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, variantId);
+        }
     }
 
     String getStateVariant() {
         return stateVariantId;
     }
 
+    String getBranchVariant() {
+        return branchVariantId;
+    }
+
     NetworkImpl getBase() {
         return base;
+    }
+
+    NetworkImpl getBranch() {
+        return branch;
     }
 
     /** Rebind a shared terminal onto a branch-owned voltage level (bus/breaker, or node/breaker with no node change). */
