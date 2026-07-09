@@ -215,10 +215,15 @@ and `iidm-serde`) exports the base and a branch to XIIDM:
   `isElementWrittenInsideNetwork`, which returns `n.equals(element.getParentNetwork())`. A shared base
   object's parent network is the *base*, not the branch, so it fails the filter and is skipped. (The
   branch context is irrelevant here — the shared object is never even visited.)
-- **Fixes:** (a) flatten-on-write — present the branch to the serializer as a plain self-contained
-  network (a full copy with the split applied; fine because export is O(network) regardless), or
-  (b) make the serializer's ownership predicate branch-aware. A branch is primarily an in-memory
-  compute structure (e.g. short-circuit); to *persist* one, flatten it.
+- **Fix — flatten-on-write, done.** `BranchFlattener.flatten(branch)` rebuilds the branch's view
+  (under its context, so rebinds apply) into a plain, self-contained network: every object is owned by
+  it, so `getParentNetwork()` passes the serializer's filter and it exports fully. `getParentNetwork()`
+  itself has no clean branch-aware seam (it's on the hot `getNetwork()` path), so flatten is the right
+  answer — and export is O(network) regardless. `StructuralBranchFlattenTest` proves the flat network
+  contains the shared `VLC` and through-line `M` with `parentNetwork == flat`; the bench
+  `BranchExportProbe` confirms the flattened branch exports to a complete XIIDM (4 VLs / 3 lines) where
+  the raw branch dropped the shared objects. Spike scope: the connectable types a fault-on-line split
+  produces (buses, busbars, switches, loads, generators, lines); other types are rejected loudly.
 
 **Node-breaker split path done.** `BranchLineSplit` now dispatches by topology kind: it copies a
 node/breaker endpoint's graph (busbar sections + switches by node, kind/open/retained preserved),
