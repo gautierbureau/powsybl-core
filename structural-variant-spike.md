@@ -56,13 +56,21 @@ change at the registry level on a real network (`EurostagTutorialExample1`):
 
 ## Status / next phases
 
-- **Phase 1 (this spike, done):** measured envelope + `OverlayNetworkIndex` registry-level proof.
-- **Phase 2:** wire the overlay into `NetworkImpl`/`VariantContext` so a branch is a fully traversable
-  `Network` (reads fall through, structural writes copy-on-write only the dirty region — the two
-  endpoint VLs, whose *internal* topology is unchanged, only one terminal reference rebinds). Then a
-  branch runs the existing `ConnectVoltageLevelOnLine` modification unchanged, as its own oracle
-  against a full-copy-then-modify baseline.
-- **Phase 3:** extensions/listeners on copied objects, branch disposal in O(delta), serialization.
-
-The `OverlayNetworkIndex` class is not yet referenced by `NetworkImpl`; it is exercised only by its
-test, by design for the spike.
+- **Phase 1 (done):** measured envelope + `OverlayNetworkIndex` registry-level proof.
+- **Phase 2a (done):** the overlay is now a drop-in `NetworkIndex` subclass, so `NetworkImpl`'s ~50
+  `index.xxx` call sites work against it unchanged. `NetworkImpl.createStructuralBranch(base, id)`
+  builds a branch whose index is an `OverlayNetworkIndex` over the base's index. The branch is a
+  **fully traversable `Network`**: `NetworkImplStructuralBranchTest` drives it through the public
+  `Network` API and shows reads fall through to the shared base (same counts, same instances),
+  structural additions via the branch's own adders (`newSubstation`/`newVoltageLevel`) are isolated
+  to the branch, a tombstoned base object disappears from the branch's public-API views, and the base
+  is never mutated. The full `iidm-impl` suite (1005 tests) still passes — the constructor change
+  (inject the index; the no-arg path delegates to `new NetworkIndex()`) is behaviour-preserving.
+- **Phase 2b (next):** the write path — route a base object's `remove()` and the endpoint VLs'
+  structural edits through copy-on-write so the branch can run the existing
+  `ConnectVoltageLevelOnLine` modification **unchanged**, as its own oracle against a
+  full-copy-then-modify baseline. The hard part is owning-network back-references: a shared object's
+  operations must resolve to the branch, which means COW-materialising the dirty region (the two
+  endpoint VLs — internal topology unchanged, one terminal reference rebinds).
+- **Phase 3:** per-branch state column (marry to the columnar variant work), extensions/listeners on
+  copied objects, branch disposal in O(delta), serialization.
