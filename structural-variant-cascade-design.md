@@ -228,10 +228,23 @@ fictitious VL). `StructuralBranchLineSplitTest` proves a node/breaker `VLA--L--V
 has L1/L2, VLA is a node/breaker copy with its busbar, base untouched. Full `iidm-impl` suite (1014
 tests) passes.
 
-Remaining before production: serialization (flatten-on-write); a per-branch **state** column (fold the
-variant index into `BranchContext` so a branch also carries its own operating point); reactive
-capability curves and remaining connectable types in materialisation; extensions/listeners on
-rebound/materialised objects.
+**Per-branch state column done — marries the structural branch with the columnar variant work.** The
+`BranchContext` now folds in a base variant (`setStateVariant`), and `ThreadLocalBranchContext.run`
+switches the base's working variant to it for the duration (restored after). A shared object resolves
+its per-variant state (switch open, terminal p/q, tap positions, regulation setpoints…) via its owner's
+(base's) variant index, so under the branch context it reads/writes the branch's column — the branch
+carries its own operating point over the shared structure **without materialising** those objects.
+`StructuralBranchStateTest` proves it: a shared switch opened under the branch context is open in the
+branch's operating point and still closed in the base's, and the base's working variant is restored.
+
+Two honest caveats: it uses save/restore of the base's working variant, so concurrent branches on
+different threads need the base in thread-local variant mode; and branch-*owned* objects use the
+branch's own variant manager (a separate column), so a single unified operating point across shared and
+materialised objects is future coordination work.
+
+Remaining before production: serialization (flatten-on-write); the thread-local variant mode + unified
+operating point (above); reactive capability curves and remaining connectable types in materialisation;
+extensions/listeners on rebound/materialised objects.
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
