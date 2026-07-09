@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,6 +90,29 @@ class NetworkImplStructuralBranchTest {
         // ...while the base still has it.
         assertNotNull(base.getLine("NHV1_NHV2_1"));
         assertEquals(baseLineCount, base.getLineCount());
+    }
+
+    @Test
+    void copyOnWriteReplaceShadowsBaseWithBranchCopy() {
+        // The write-path primitive: materialise a base object into the branch as a same-id copy, so it
+        // can be mutated in the branch without touching the shared base.
+        NetworkImpl base = (NetworkImpl) EurostagTutorialExample1Factory.create();
+        int baseVlCount = base.getVoltageLevelCount();
+        NetworkImpl branch = NetworkImpl.createStructuralBranch(base, "branch");
+
+        VoltageLevel baseVl = base.getVoltageLevel("VLHV1");
+        // a branch-local copy carrying the same id (minted here in a donor network)
+        VoltageLevel branchCopy = ((NetworkImpl) EurostagTutorialExample1Factory.create()).getVoltageLevel("VLHV1");
+        assertNotSame(baseVl, branchCopy);
+
+        ((OverlayNetworkIndex) branch.getIndex()).replace(baseVl, branchCopy);
+
+        // the branch resolves the id to its own copy; the base still resolves to the original
+        assertSame(branchCopy, branch.getVoltageLevel("VLHV1"));
+        assertSame(baseVl, base.getVoltageLevel("VLHV1"));
+        // a replacement changes which instance answers, not the counts
+        assertEquals(baseVlCount, branch.getVoltageLevelCount());
+        assertEquals(baseVlCount, base.getVoltageLevelCount());
     }
 
     @Test

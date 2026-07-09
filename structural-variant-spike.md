@@ -66,11 +66,19 @@ change at the registry level on a real network (`EurostagTutorialExample1`):
   to the branch, a tombstoned base object disappears from the branch's public-API views, and the base
   is never mutated. The full `iidm-impl` suite (1005 tests) still passes — the constructor change
   (inject the index; the no-arg path delegates to `new NetworkIndex()`) is behaviour-preserving.
-- **Phase 2b (next):** the write path — route a base object's `remove()` and the endpoint VLs'
-  structural edits through copy-on-write so the branch can run the existing
-  `ConnectVoltageLevelOnLine` modification **unchanged**, as its own oracle against a
-  full-copy-then-modify baseline. The hard part is owning-network back-references: a shared object's
-  operations must resolve to the branch, which means COW-materialising the dirty region (the two
-  endpoint VLs — internal topology unchanged, one terminal reference rebinds).
+- **Phase 2b (in progress) — the write path.** The object model has no interception seam: a shared
+  base object's `remove()`/mutators run against *its* owning network (the base) via its `ref`. So the
+  irreducible primitive is **copy-on-write replacement** — install a branch-local copy that shadows
+  the base object under the same id. Done in this step:
+  - overlay lookups reordered so a branch-local object *shadows* the base (added → tombstone → base),
+    making replacement, not just addition/removal, first-class;
+  - `OverlayNetworkIndex.replace(baseObj, branchCopy)` installs a same-id copy visible only in the
+    branch; `NetworkImplStructuralBranchTest` shows through the public API that the branch resolves
+    the id to its copy while the base keeps the original, counts unchanged, base untouched.
+  Full `iidm-impl` suite (1006 tests) still passes.
+  - *Next in 2b:* a VoltageLevel-level overlay so a COW'd endpoint VL differs from the base by exactly
+    one terminal (−L, +L1) with its node/switch graph shared — then route the existing
+    `ConnectVoltageLevelOnLine` modification onto branch-materialised objects so it runs **unchanged**,
+    as its own oracle against a full-copy-then-modify baseline.
 - **Phase 3:** per-branch state column (marry to the columnar variant work), extensions/listeners on
   copied objects, branch disposal in O(delta), serialization.
