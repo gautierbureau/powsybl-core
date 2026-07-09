@@ -95,6 +95,8 @@ change at the registry level on a real network (`EurostagTutorialExample1`):
   the fictitious mid VL and the two impedance-split half-lines. `StructuralBranchLineSplitTest` proves
   it on an endpoint that also hosts a **load**: the branch gets the split with the load preserved on
   the materialised endpoint (`R` split 40/60) while the base — line, load and all — is untouched.
+  Endpoint **generators** are re-homed too (core fields + min/max reactive limits) — the fault-current
+  source a short-circuit study needs — with a test.
   - The one honest boundary is made **loud, not silent**: an endpoint hosting another
     *through-connectable* (a second line/transformer, e.g. `VLA --L-- VLB --M-- VLC`) throws, because
     materialising that VL would cascade into its far VL. A test asserts the rejection. This is the

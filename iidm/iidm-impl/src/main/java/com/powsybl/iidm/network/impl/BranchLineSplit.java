@@ -10,8 +10,10 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Bus;
 import com.powsybl.iidm.network.Connectable;
+import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.Line;
 import com.powsybl.iidm.network.Load;
+import com.powsybl.iidm.network.MinMaxReactiveLimits;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.Switch;
@@ -111,6 +113,8 @@ final class BranchLineSplit {
             }
             if (c instanceof Load load) {
                 copyLoad(vlB, load);
+            } else if (c instanceof Generator generator) {
+                copyGenerator(vlB, generator);
             } else {
                 throw new PowsyblException("splitLine spike: endpoint " + baseVl.getId()
                         + " hosts a connectable not yet supported for branch materialisation: " + c.getId()
@@ -123,6 +127,24 @@ final class BranchLineSplit {
         String bus = load.getTerminal().getBusBreakerView().getConnectableBus().getId();
         vlB.newLoad().setId(load.getId()).setConnectableBus(bus).setBus(bus)
                 .setLoadType(load.getLoadType()).setP0(load.getP0()).setQ0(load.getQ0()).add();
+    }
+
+    private static void copyGenerator(VoltageLevel vlB, Generator g) {
+        String bus = g.getTerminal().getBusBreakerView().getConnectableBus().getId();
+        var adder = vlB.newGenerator().setId(g.getId()).setConnectableBus(bus).setBus(bus)
+                .setEnergySource(g.getEnergySource())
+                .setMinP(g.getMinP()).setMaxP(g.getMaxP())
+                .setTargetP(g.getTargetP()).setTargetV(g.getTargetV()).setTargetQ(g.getTargetQ())
+                .setVoltageRegulatorOn(g.isVoltageRegulatorOn());
+        if (!Double.isNaN(g.getRatedS())) {
+            adder.setRatedS(g.getRatedS());
+        }
+        Generator gB = adder.add();
+        // Copy min/max reactive limits (the short-circuit-relevant common case); a reactive capability
+        // curve would need per-point copy, out of scope for this slice.
+        if (g.getReactiveLimits() instanceof MinMaxReactiveLimits limits) {
+            gB.newMinMaxReactiveLimits().setMinQ(limits.getMinQ()).setMaxQ(limits.getMaxQ()).add();
+        }
     }
 
     private static void newLine(Network n, String id, String vl1, String b1, String vl2, String b2, double r, double x) {
