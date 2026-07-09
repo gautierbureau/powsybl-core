@@ -203,9 +203,26 @@ and the base is intact. Full `iidm-impl` suite (1013 tests) passes.
 inside `ThreadLocalBranchContext.run(branch.getBranchContext(), …)`. (Rebind-free branches — the
 cascade-free split cases — are correct without it.)
 
-Remaining before production: node-breaker path in `BranchLineSplit` (it is still bus/breaker only, and
-now rebinds bus/breaker through-lines); a per-branch **state** column (fold the variant index into
-`BranchContext` so a branch also carries its own operating point); disposal, serialization, and
+**Serialization — tested, and it is a known gap (measured).** A `BranchExportProbe` (in package
+`com.powsybl.iidm.network.impl`, run from the bench so it can reach both the package-private branch API
+and `iidm-serde`) exports the base and a branch to XIIDM:
+- **Base exports correctly** — 3 VLs, lines `L` + `M`, as expected.
+- **A branch does NOT export correctly.** The branch's getters are right (`getVoltageLevels` →
+  `[VLC,VLA,VLB,Vf]`, `getLines` → `[M,L1,L2]`), but the XIIDM output silently **drops every shared
+  base object** — no `S_VLC`, no line `M` — writing only the branch-owned delta (materialised VLA/VLB,
+  new SF/Vf/L1/L2). The result is an invalid network.
+- **Root cause:** `NetworkSerDe.writeSubstations`/`writeLines` filter each element through
+  `isElementWrittenInsideNetwork`, which returns `n.equals(element.getParentNetwork())`. A shared base
+  object's parent network is the *base*, not the branch, so it fails the filter and is skipped. (The
+  branch context is irrelevant here — the shared object is never even visited.)
+- **Fixes:** (a) flatten-on-write — present the branch to the serializer as a plain self-contained
+  network (a full copy with the split applied; fine because export is O(network) regardless), or
+  (b) make the serializer's ownership predicate branch-aware. A branch is primarily an in-memory
+  compute structure (e.g. short-circuit); to *persist* one, flatten it.
+
+Remaining before production: serialization (above); node-breaker path in `BranchLineSplit` (it is still
+bus/breaker only, and now rebinds bus/breaker through-lines); a per-branch **state** column (fold the
+variant index into `BranchContext` so a branch also carries its own operating point); disposal and
 extensions/listeners on rebound/materialised objects.
 
 ## 8. Risks & open questions
