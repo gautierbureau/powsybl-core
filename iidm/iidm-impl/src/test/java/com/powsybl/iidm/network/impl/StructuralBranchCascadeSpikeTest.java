@@ -22,6 +22,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -167,13 +168,17 @@ class StructuralBranchCascadeSpikeTest {
         BranchContext context = new BranchContext();
         context.rebind(nearM, vlbBranch);
 
-        // under the branch context, VLB''s bus-view bus includes both its own load and the rebound M
+        // under the branch context, VLB''s bus-view bus includes both its own load and the rebound M,
+        // and the terminal->bus direction agrees (M's bus-view bus is that same VLB' bus)
         ThreadLocalBranchContext.run(context, () -> {
             Bus bus = vlbBranch.getBusView().getBuses().iterator().next();
             Set<String> ids = new HashSet<>();
             bus.getConnectedTerminalStream().forEach(t -> ids.add(t.getConnectable().getId()));
             assertTrue(ids.contains("LDB"), "VLB' bus keeps its own load");
             assertTrue(ids.contains("M"), "VLB' bus folds in the rebound M");
+            Bus mBus = nearM.getBusView().getBus();
+            assertNotNull(mBus, "M's near terminal has a bus-view bus in the branch");
+            assertEquals(bus.getId(), mBus.getId(), "M's bus is VLB''s bus (both directions agree)");
         });
 
         // outside the context, VLB''s bus has only its own load, not M
