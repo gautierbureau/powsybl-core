@@ -154,11 +154,52 @@ Concretely, v2.1 would:
 - Make branching a variant clone (`cloneVariant`) that sets a parent pointer instead of copying the
   per-variant slots — the direct analogue of network-store's `fullVariantNum`, and O(1) like it.
 
-**Cost — and why it is not this spike's next step.** v2.1 changes the meaning of the most fundamental
-IIDM read: `network.getX(id)` becomes variant-dependent, and every `NetworkIndex` / `getConnectables` /
-bus-view path must consult the active variant to decide existence. That is a core-IIDM change touching
-the index, the variant manager, and every topology model — far beyond a spike, and a compatibility
-question for every downstream consumer that assumes object identity is variant-independent. v2 gets the
-genericity (zero per-type code) **without** that core change, by scoping the delta to terminal membership
-over shared VLs. v2.1 is the honest end-state if IIDM ever wants network-store's uniform model natively;
-v2 is the pragmatic reach of that model achievable inside iidm-impl today.
+### Two depth tiers (be precise about how far v2.1 goes)
+
+"Variant-scoped existence" splits into two genuinely different amounts of work; scoring them together
+overstates the minimal step and understates the maximal one.
+
+- **v2.1a — existence-only.** Make *which objects exist* variant-dependent, but leave per-field **state**
+  copied eagerly per variant exactly as today. Object existence resolves at the index and at the terminal-
+  membership fold sites against the active variant instead of an ambient `BranchContext`. This is the
+  minimal faithful step: it retires the "everything runs inside `ThreadLocalBranchContext.run`" contract
+  (a variant is self-consistent) while leaving the 57 state-array classes untouched.
+- **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
+  pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
+  parent's until first write. This is true parity — existence *and* state resolved uniformly per variant
+  with O(1) branching — but it rewrites the variant lifecycle shared by every multi-variant object.
+
+### Grounded blast radius (measured on this tree)
+
+| surface | v1 / v2 | v2.1a (existence-only) | v2.1b (full parity) |
+|---|---|---|---|
+| `NetworkIndex` existence reads (`get`, `getAll`) | side-car overlay, base untouched | **2 methods** become variant-aware | 2 methods, variant-aware |
+| variant lifecycle (`VariantManagerImpl`, `VariantContext`) | unchanged | **clone** sets an existence parent link | clone sets parent link **for state too** |
+| existence-deciding read paths (`getConnectables` ×12, bus-view/topology folds ×6) | context-gated union | **~18 sites** consult active variant | ~18 sites consult active variant |
+| per-field variant arrays (`MultiVariantObject` allocate/extend/reduce/delete) | eager, 1 slot/variant — **unchanged** | **unchanged** (state still eager) | **all 57 classes** move to lazy inherit-then-copy |
+| downstream contract: is `network.getX(id)` variant-independent? | yes | **no** | no |
+
+### Score (1 = worst, 5 = best on each axis)
+
+| axis | v1 | v2 | v2.1a | v2.1b |
+|---|:--:|:--:|:--:|:--:|
+| genericity (zero per-type code) | 2 | 5 | 5 | 5 |
+| fidelity to network-store model | 2 | 4 | 4 | **5** |
+| self-consistent objects (no ambient context) | **5** | 2 | **5** | **5** |
+| O(1) branch creation | 3 | 4 | 4 | **5** |
+| per-variant read cost | **5** | 4 | 4 | 3 |
+| blast radius (higher = smaller/safer) | **5** | 4 | 2 | **1** |
+| downstream compatibility (higher = safer) | **5** | **5** | 2 | 2 |
+| implementation effort (higher = cheaper) | 3 | 4 | 2 | **1** |
+| **fit as *this spike's* next step** | — | **5** | 3 | 1 |
+
+**Reading the score.** v2 is the sweet spot *for the spike*: it buys the full genericity win (5) at a
+small, self-contained blast radius (4) with no downstream-compatibility cost (5), paying only the stricter
+ambient-context contract (self-consistency drops to 2). v2.1a is the honest way to *retire* that one weak
+spot — it restores self-consistency to 5 — but only by making `network.getX(id)` variant-dependent, which
+craters downstream compatibility (5 → 2) and roughly triples the blast radius; it is a core-IIDM proposal,
+not a spike increment. v2.1b is the only column that reaches full network-store fidelity (5) and O(1)
+everything (5), but it is the most invasive change in the table — the 57-class lifecycle rewrite — and
+scores worst on effort and blast radius (1). The ordering is therefore deliberate: **v2 now; v2.1a only if
+IIDM commits to variant-scoped existence as a core feature; v2.1b only if it further commits to network-
+store's lazy-copy state model wholesale.**
