@@ -10,10 +10,15 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Branch;
 import com.powsybl.iidm.network.Bus;
+import com.powsybl.iidm.network.BusbarSection;
 import com.powsybl.iidm.network.Connectable;
 import com.powsybl.iidm.network.Generator;
+import com.powsybl.iidm.network.GeneratorAdder;
+import com.powsybl.iidm.network.InjectionAdder;
 import com.powsybl.iidm.network.Line;
+import com.powsybl.iidm.network.LineAdder;
 import com.powsybl.iidm.network.Load;
+import com.powsybl.iidm.network.LoadAdder;
 import com.powsybl.iidm.network.MinMaxReactiveLimits;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
@@ -31,17 +36,28 @@ import java.util.Set;
  * untouched. See {@code structural-variant-spike.md}.</p>
  *
  * <p>The dirty region — the two endpoint voltage levels and the line — is copy-on-write materialised
- * into the branch (its own adders rebuild them as branch-owned copies, shadowing the base). The split
- * then runs against those branch-owned objects. Endpoint <em>injections</em> (here: loads) are
- * re-homed into the branch copies; an endpoint hosting another <em>through-connectable</em> (a second
- * line/transformer) is rejected, because materialising it would cascade into its far voltage level —
- * the general reference-rebinding problem, out of scope for this slice.</p>
+ * into the branch (its own adders rebuild them as branch-owned copies, shadowing the base). Endpoint
+ * <em>injections</em> (loads, generators) are re-homed into the branch copies; an endpoint hosting
+ * another <em>through-connectable</em> (a second line/transformer) is not recreated — only its near
+ * terminal is rebound onto the branch copy (via the {@link BranchContext}), leaving the far side
+ * untouched so nothing cascades. Both bus/breaker and node/breaker endpoints are supported.</p>
  *
  * @author Claude
  */
 final class BranchLineSplit {
 
     private BranchLineSplit() {
+    }
+
+    /** Endpoint attachment of a half-line: a configured bus (bus/breaker) or a node (node/breaker). */
+    private record Attach(boolean nodeBreaker, String busId, int node) {
+        static Attach bus(String busId) {
+            return new Attach(false, busId, -1);
+        }
+
+        static Attach node(int node) {
+            return new Attach(true, null, node);
+        }
     }
 
     static NetworkImpl split(NetworkImpl base, String branchId, String lineId, double positionPercent,
@@ -52,8 +68,8 @@ final class BranchLineSplit {
         }
         VoltageLevel vl1 = baseLine.getTerminal1().getVoltageLevel();
         VoltageLevel vl2 = baseLine.getTerminal2().getVoltageLevel();
-        String bus1 = baseLine.getTerminal1().getBusBreakerView().getConnectableBus().getId();
-        String bus2 = baseLine.getTerminal2().getBusBreakerView().getConnectableBus().getId();
+        Attach a1 = attachmentOf(baseLine.getTerminal1());
+        Attach a2 = attachmentOf(baseLine.getTerminal2());
         double r = baseLine.getR();
         double x = baseLine.getX();
         double p = positionPercent / 100.0;
@@ -73,24 +89,43 @@ final class BranchLineSplit {
         // 2. hide the original line in the branch (the base still has it)
         overlay.tombstone(baseLine);
 
-        // 3. fictitious mid-line voltage level at the fault point
+        // 3. fictitious mid-line voltage level at the fault point (bus/breaker, one bus)
         Substation sf = branch.newSubstation().setId(fictSubId).setFictitious(true).add();
         VoltageLevel vf = sf.newVoltageLevel().setId(fictVlId).setNominalV(vl1.getNominalV()).setFictitious(true)
                 .setTopologyKind(TopologyKind.BUS_BREAKER).add();
         vf.getBusBreakerView().newBus().setId(fictBusId).add();
 
-        // 4. two half-lines, impedance split at positionPercent
-        newLine(branch, line1Id, vl1.getId(), bus1, fictVlId, fictBusId, r * p, x * p);
-        newLine(branch, line2Id, fictVlId, fictBusId, vl2.getId(), bus2, r * (1 - p), x * (1 - p));
+        // 4. two half-lines, impedance split at positionPercent, attached where the split line was
+        addHalfLine(branch, line1Id, vl1.getId(), a1, fictVlId, Attach.bus(fictBusId), r * p, x * p);
+        addHalfLine(branch, line2Id, fictVlId, Attach.bus(fictBusId), vl2.getId(), a2, r * (1 - p), x * (1 - p));
         return branch;
+    }
+
+    private static Attach attachmentOf(Terminal t) {
+        if (t.getVoltageLevel().getTopologyKind() == TopologyKind.NODE_BREAKER) {
+            return Attach.node(t.getNodeBreakerView().getNode());
+        }
+        return Attach.bus(t.getBusBreakerView().getConnectableBus().getId());
+    }
+
+    private static void addHalfLine(Network n, String id, String vlA, Attach a, String vlB, Attach b, double r, double x) {
+        LineAdder adder = n.newLine().setId(id).setVoltageLevel1(vlA).setVoltageLevel2(vlB)
+                .setR(r).setX(x).setG1(0).setB1(0).setG2(0).setB2(0);
+        if (a.nodeBreaker()) {
+            adder.setNode1(a.node());
+        } else {
+            adder.setConnectableBus1(a.busId()).setBus1(a.busId());
+        }
+        if (b.nodeBreaker()) {
+            adder.setNode2(b.node());
+        } else {
+            adder.setConnectableBus2(b.busId()).setBus2(b.busId());
+        }
+        adder.add();
     }
 
     private static void materializeVoltageLevel(NetworkImpl branch, VoltageLevel baseVl, String skipLineId,
                                                 Set<String> materializedSubs, BranchContext context) {
-        if (baseVl.getTopologyKind() != TopologyKind.BUS_BREAKER) {
-            throw new PowsyblException("splitLine spike: only bus/breaker voltage levels are supported ("
-                    + baseVl.getId() + ")");
-        }
         Substation baseSub = baseVl.getSubstation()
                 .orElseThrow(() -> new PowsyblException("splitLine spike: voltage level " + baseVl.getId()
                         + " has no substation"));
@@ -100,32 +135,30 @@ final class BranchLineSplit {
         } else {
             subB = branch.getSubstation(baseSub.getId());
         }
+        boolean nodeBreaker = baseVl.getTopologyKind() == TopologyKind.NODE_BREAKER;
         VoltageLevel vlB = subB.newVoltageLevel().setId(baseVl.getId()).setNominalV(baseVl.getNominalV())
-                .setFictitious(baseVl.isFictitious()).setTopologyKind(TopologyKind.BUS_BREAKER).add();
-        for (Bus bus : baseVl.getBusBreakerView().getBuses()) {
-            vlB.getBusBreakerView().newBus().setId(bus.getId()).add();
-        }
-        for (Switch sw : baseVl.getBusBreakerView().getSwitches()) {
-            Bus b1 = baseVl.getBusBreakerView().getBus1(sw.getId());
-            Bus b2 = baseVl.getBusBreakerView().getBus2(sw.getId());
-            vlB.getBusBreakerView().newSwitch().setId(sw.getId()).setBus1(b1.getId()).setBus2(b2.getId())
-                    .setOpen(sw.isOpen()).add();
+                .setFictitious(baseVl.isFictitious()).setTopologyKind(baseVl.getTopologyKind()).add();
+        if (nodeBreaker) {
+            copyNodeBreakerTopology(baseVl, vlB);
+        } else {
+            copyBusBreakerTopology(baseVl, vlB);
         }
         for (Connectable<?> c : baseVl.getConnectables()) {
-            if (c.getId().equals(skipLineId)) {
-                continue; // the line being split is replaced by the two half-lines
+            if (c.getId().equals(skipLineId) || c instanceof BusbarSection) {
+                continue; // the split line is replaced by the half-lines; busbars were copied above
             }
             if (c instanceof Load load) {
                 copyLoad(vlB, load);
             } else if (c instanceof Generator generator) {
                 copyGenerator(vlB, generator);
             } else if (c instanceof Branch<?> throughBranch) {
-                // A through-connectable (a second line/transformer): do not recreate it or touch its far
-                // side. Rebind only its near terminal onto the branch copy of this voltage level; the
-                // branch view is then correct under the branch context, with no cascade.
+                // A through-connectable: do not recreate it or touch its far side. Rebind only its near
+                // terminal onto the branch copy; the branch view is then correct under the branch
+                // context, with no cascade.
                 Terminal near = throughBranch.getTerminal1().getVoltageLevel() == baseVl
                         ? throughBranch.getTerminal1() : throughBranch.getTerminal2();
-                context.rebind((TerminalExt) near, (VoltageLevelExt) vlB);
+                Integer node = nodeBreaker ? near.getNodeBreakerView().getNode() : null;
+                context.rebind((TerminalExt) near, (VoltageLevelExt) vlB, node);
             } else {
                 throw new PowsyblException("splitLine spike: endpoint " + baseVl.getId()
                         + " hosts a connectable not yet supported for branch materialisation: " + c.getId()
@@ -134,15 +167,40 @@ final class BranchLineSplit {
         }
     }
 
+    private static void copyBusBreakerTopology(VoltageLevel baseVl, VoltageLevel vlB) {
+        for (Bus bus : baseVl.getBusBreakerView().getBuses()) {
+            vlB.getBusBreakerView().newBus().setId(bus.getId()).add();
+        }
+        for (Switch sw : baseVl.getBusBreakerView().getSwitches()) {
+            vlB.getBusBreakerView().newSwitch().setId(sw.getId())
+                    .setBus1(baseVl.getBusBreakerView().getBus1(sw.getId()).getId())
+                    .setBus2(baseVl.getBusBreakerView().getBus2(sw.getId()).getId())
+                    .setOpen(sw.isOpen()).add();
+        }
+    }
+
+    private static void copyNodeBreakerTopology(VoltageLevel baseVl, VoltageLevel vlB) {
+        for (BusbarSection bbs : baseVl.getNodeBreakerView().getBusbarSections()) {
+            vlB.getNodeBreakerView().newBusbarSection().setId(bbs.getId())
+                    .setNode(bbs.getTerminal().getNodeBreakerView().getNode()).add();
+        }
+        for (Switch sw : baseVl.getNodeBreakerView().getSwitches()) {
+            vlB.getNodeBreakerView().newSwitch().setId(sw.getId())
+                    .setNode1(baseVl.getNodeBreakerView().getNode1(sw.getId()))
+                    .setNode2(baseVl.getNodeBreakerView().getNode2(sw.getId()))
+                    .setKind(sw.getKind()).setOpen(sw.isOpen()).setRetained(sw.isRetained()).add();
+        }
+    }
+
     private static void copyLoad(VoltageLevel vlB, Load load) {
-        String bus = load.getTerminal().getBusBreakerView().getConnectableBus().getId();
-        vlB.newLoad().setId(load.getId()).setConnectableBus(bus).setBus(bus)
-                .setLoadType(load.getLoadType()).setP0(load.getP0()).setQ0(load.getQ0()).add();
+        LoadAdder adder = vlB.newLoad().setId(load.getId())
+                .setLoadType(load.getLoadType()).setP0(load.getP0()).setQ0(load.getQ0());
+        attach(adder, load.getTerminal());
+        adder.add();
     }
 
     private static void copyGenerator(VoltageLevel vlB, Generator g) {
-        String bus = g.getTerminal().getBusBreakerView().getConnectableBus().getId();
-        var adder = vlB.newGenerator().setId(g.getId()).setConnectableBus(bus).setBus(bus)
+        GeneratorAdder adder = vlB.newGenerator().setId(g.getId())
                 .setEnergySource(g.getEnergySource())
                 .setMinP(g.getMinP()).setMaxP(g.getMaxP())
                 .setTargetP(g.getTargetP()).setTargetV(g.getTargetV()).setTargetQ(g.getTargetQ())
@@ -150,6 +208,7 @@ final class BranchLineSplit {
         if (!Double.isNaN(g.getRatedS())) {
             adder.setRatedS(g.getRatedS());
         }
+        attach(adder, g.getTerminal());
         Generator gB = adder.add();
         // Copy min/max reactive limits (the short-circuit-relevant common case); a reactive capability
         // curve would need per-point copy, out of scope for this slice.
@@ -158,10 +217,13 @@ final class BranchLineSplit {
         }
     }
 
-    private static void newLine(Network n, String id, String vl1, String b1, String vl2, String b2, double r, double x) {
-        n.newLine().setId(id)
-                .setVoltageLevel1(vl1).setConnectableBus1(b1).setBus1(b1)
-                .setVoltageLevel2(vl2).setConnectableBus2(b2).setBus2(b2)
-                .setR(r).setX(x).setG1(0).setB1(0).setG2(0).setB2(0).add();
+    /** Attach an injection adder where its base terminal was — by node (node/breaker) or bus (bus/breaker). */
+    private static void attach(InjectionAdder<?, ?> adder, Terminal baseTerminal) {
+        if (baseTerminal.getVoltageLevel().getTopologyKind() == TopologyKind.NODE_BREAKER) {
+            adder.setNode(baseTerminal.getNodeBreakerView().getNode());
+        } else {
+            String bus = baseTerminal.getBusBreakerView().getConnectableBus().getId();
+            adder.setConnectableBus(bus).setBus(bus);
+        }
     }
 }

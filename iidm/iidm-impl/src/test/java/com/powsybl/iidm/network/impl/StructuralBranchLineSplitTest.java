@@ -230,4 +230,37 @@ class StructuralBranchLineSplitTest {
         assertNull(base.getVoltageLevel("Vf"));
         assertEquals(2, base.getLineCount());
     }
+
+    @Test
+    void splitLineApiHandlesNodeBreakerEndpoints() {
+        // Node/breaker endpoints: VLA --L-- VLB, each a busbar (node 0) with the line feeder at node 1
+        // via a disconnector. The split materialises the node/breaker graphs and attaches the half-lines
+        // at the freed feeder nodes.
+        Network base = Network.create("base", "test");
+        for (String vl : new String[] {"VLA", "VLB"}) {
+            Substation s = base.newSubstation().setId("S_" + vl).add();
+            VoltageLevel v = s.newVoltageLevel().setId(vl).setNominalV(400).setTopologyKind(TopologyKind.NODE_BREAKER).add();
+            v.getNodeBreakerView().newBusbarSection().setId("bbs_" + vl).setNode(0).add();
+            v.getNodeBreakerView().newDisconnector().setId("d_" + vl).setNode1(0).setNode2(1).add();
+        }
+        base.newLine().setId("L").setVoltageLevel1("VLA").setNode1(1).setVoltageLevel2("VLB").setNode2(1)
+                .setR(1).setX(10).setG1(0).setB1(0).setG2(0).setB2(0).add();
+
+        NetworkImpl branch = BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        // the branch reflects the split, endpoints materialised as node/breaker copies
+        assertNull(branch.getLine("L"));
+        assertNotNull(branch.getLine("L1"));
+        assertNotNull(branch.getLine("L2"));
+        assertEquals(TopologyKind.NODE_BREAKER, branch.getVoltageLevel("VLA").getTopologyKind());
+        assertNotNull(branch.getVoltageLevel("VLA").getNodeBreakerView().getBusbarSection("bbs_VLA"));
+        assertEquals(2, branch.getLineCount());
+
+        // base untouched
+        assertNotNull(base.getLine("L"));
+        assertNull(base.getVoltageLevel("Vf"));
+        assertEquals(1, base.getLineCount());
+        assertNotSame(base.getVoltageLevel("VLA"), branch.getVoltageLevel("VLA"));
+    }
 }
