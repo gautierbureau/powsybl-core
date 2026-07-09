@@ -173,12 +173,18 @@ branchAttachedConnectedTerminals`), gated on an active context so normal bus vie
 `StructuralBranchCascadeSpikeTest` proves it: under the branch context `VLB'`'s BusView bus lists both
 its own load and the rebound `M`; outside it, only the load. Full `iidm-impl` suite (1013 tests) passes.
 
-Remaining before production: the same fold for node/breaker `CalculatedBus` (a different mechanism from
-`MergedBus`/`ConfiguredBus`); the terminal→bus direction (`Terminal.getBusView().getBus()` on the
-rebound terminal should return `VLB'`'s bus — needs the terminal's bus-view/topology-model resolution
-to be branch-aware, symmetric to `getVoltageLevel`); branch-scoped `move` + removing the
-`BranchLineSplit` guard; and the branch-access contract (traversal of branch objects must run within
-`ThreadLocalBranchContext.run`).
+**Terminal→bus direction done (bus/breaker).** `AbstractTerminal.getVoltageLevel()` is refactored onto
+a `resolveVoltageLevel()` helper (the branch-override logic without the removed check), and
+`BusTerminal.getTopologyModel()` now resolves through it instead of the raw `voltageLevel` field — so a
+rebound terminal's bus resolution (`getBusView().getBus()`, `getConnectableBus()`, connect/traverse)
+follows the active context to the branch voltage level. Non-rebound terminals are unchanged (flag off →
+raw field). The spike now asserts both directions agree: under the branch context `M`'s near
+terminal's bus-view bus *is* `VLB'`'s bus (same id as the bus that folds `M` in). Full `iidm-impl`
+suite (1013 tests) passes.
+
+Remaining before production: the same two folds for node/breaker (`CalculatedBus` terminal set, and
+`NodeTerminal` bus-view resolution); branch-scoped `move` + removing the `BranchLineSplit` guard; and
+the branch-access contract (traversal of branch objects must run within `ThreadLocalBranchContext.run`).
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go

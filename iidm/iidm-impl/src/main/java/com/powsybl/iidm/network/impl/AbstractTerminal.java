@@ -110,6 +110,15 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access voltage level of removed equipment " + connectable.id);
         }
+        return resolveVoltageLevel();
+    }
+
+    /**
+     * The terminal's voltage level, resolved through the active branch context if this terminal was
+     * rebound (else the base voltage level). Unlike {@link #getVoltageLevel()} this has no removed
+     * check, so it can back internal resolution (e.g. the terminal's topology model / bus view).
+     */
+    VoltageLevelExt resolveVoltageLevel() {
         if (branchAttachmentOverride) {
             BranchContext context = ThreadLocalBranchContext.get();
             if (context != null) {

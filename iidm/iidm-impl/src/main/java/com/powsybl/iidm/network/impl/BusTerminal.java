@@ -27,7 +27,9 @@ import java.util.Set;
 class BusTerminal extends AbstractTerminal {
 
     private BusBreakerTopologyModel getTopologyModel() {
-        return (BusBreakerTopologyModel) voltageLevel.getTopologyModel();
+        // resolveVoltageLevel (not the raw field) so a rebound terminal's bus resolution follows the
+        // active branch context to the branch voltage level; unchanged for non-rebound terminals.
+        return (BusBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final NodeBreakerView nodeBreakerView = new NodeBreakerView() {
