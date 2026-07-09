@@ -17,12 +17,16 @@ import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Structural-variant spike, phase 2b: the write path, end to end. Split a line at a fictitious
@@ -181,19 +185,49 @@ class StructuralBranchLineSplitTest {
     }
 
     @Test
-    void splitLineApiRejectsUnsupportedThroughConnectableCascade() {
-        // A three-VL chain: VLA --L-- VLB --M-- VLC. Splitting L must materialise VLB, which hosts the
-        // through-line M -> not yet supported (would cascade into VLC). Must fail loudly, not silently.
+    void splitLineApiReHomesThroughConnectableWithoutCascade() {
+        // A three-VL chain: VLA --L-- VLB --M-- VLC. Splitting L materialises VLB, which also hosts the
+        // through-line M. M is not recreated: its near terminal is rebound onto VLB' (no cascade into
+        // VLC). The branch view is correct under the branch context.
         Network base = Network.create("base", "test");
         for (String vl : new String[] {"VLA", "VLB", "VLC"}) {
             Substation s = base.newSubstation().setId("S_" + vl).add();
-            VoltageLevel v = s.newVoltageLevel().setId(vl).setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
-            v.getBusBreakerView().newBus().setId("bus_" + vl).add();
+            s.newVoltageLevel().setId(vl).setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add()
+                    .getBusBreakerView().newBus().setId("bus_" + vl).add();
         }
         newLine(base, "L", "VLA", "bus_VLA", "VLB", "bus_VLB", 1.0, 10.0);
         newLine(base, "M", "VLB", "bus_VLB", "VLC", "bus_VLC", 1.0, 10.0);
 
-        assertThrows(com.powsybl.commons.PowsyblException.class, () ->
-                BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0, "SF", "Vf", "busF", "L1", "L2"));
+        NetworkImpl branch = BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0,
+                "SF", "Vf", "busF", "L1", "L2");
+        BranchContext context = branch.getBranchContext();
+
+        Line m = branch.getLine("M");
+        TerminalExt nearM = (TerminalExt) (m.getTerminal1().getVoltageLevel().getId().equals("VLB")
+                ? m.getTerminal1() : m.getTerminal2());
+        VoltageLevel vlbBranch = branch.getVoltageLevel("VLB");
+
+        // under the branch context: split applied and M rebound onto VLB'
+        ThreadLocalBranchContext.run(context, () -> {
+            assertNull(branch.getLine("L"));
+            assertNotNull(branch.getLine("L1"));
+            assertNotNull(branch.getLine("L2"));
+            assertSame(vlbBranch, nearM.getVoltageLevel());
+            Set<String> vlbIds = new HashSet<>();
+            vlbBranch.getConnectables().forEach(c -> vlbIds.add(c.getId()));
+            assertTrue(vlbIds.contains("M"), "VLB' hosts the rebound through-line M");
+        });
+
+        // no cascade: VLC is the shared base instance, still hosts M
+        assertSame(((NetworkImpl) base).getVoltageLevel("VLC"), branch.getVoltageLevel("VLC"));
+        Set<String> vlcIds = new HashSet<>();
+        base.getVoltageLevel("VLC").getConnectables().forEach(c -> vlcIds.add(c.getId()));
+        assertTrue(vlcIds.contains("M"));
+
+        // base intact: L and M both present, no fictitious VL
+        assertNotNull(base.getLine("L"));
+        assertNotNull(base.getLine("M"));
+        assertNull(base.getVoltageLevel("Vf"));
+        assertEquals(2, base.getLineCount());
     }
 }

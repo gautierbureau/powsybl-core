@@ -190,10 +190,23 @@ and `NodeTerminal.getTopologyModel()`/bus-view `getBus()` resolve through `resol
 a node/breaker `VLB'` (busbar node 0, feeder node 5): under the context `VLB'`'s calculated bus folds in
 `M` and `M`'s bus-view bus is that same bus. Full `iidm-impl` suite (1013 tests) passes.
 
-Remaining before production: branch-scoped `move` (record the rebind through the existing move API) +
-removing the `BranchLineSplit` guard to wire the split end-to-end through a branch; the branch-access
-contract (traversal of branch objects must run within `ThreadLocalBranchContext.run`); and a per-branch
-state column (fold the variant index into `BranchContext`).
+**Through-connectable split wired end-to-end (guard removed).** A structural branch now carries its
+own `BranchContext` (`NetworkImpl.createStructuralBranch` creates it; `getBranchContext()` exposes it).
+`BranchLineSplit` no longer rejects an endpoint that hosts a through-connectable: for a `Branch` other
+than the split line it rebinds only the near terminal onto the branch copy (`context.rebind`), leaving
+the far side untouched. `StructuralBranchLineSplitTest` replaces the old rejection test with a success
+one: split `L` on `VLA--L--VLB--M--VLC`; under the branch context the split is applied and `M` is at
+`VLB'` (`VLB'` lists `M` among its connectables), while `VLC` is the shared base instance (no cascade)
+and the base is intact. Full `iidm-impl` suite (1013 tests) passes.
+
+**Branch-access contract.** A branch with rebinds is only self-consistent under its context: read it
+inside `ThreadLocalBranchContext.run(branch.getBranchContext(), …)`. (Rebind-free branches — the
+cascade-free split cases — are correct without it.)
+
+Remaining before production: node-breaker path in `BranchLineSplit` (it is still bus/breaker only, and
+now rebinds bus/breaker through-lines); a per-branch **state** column (fold the variant index into
+`BranchContext` so a branch also carries its own operating point); disposal, serialization, and
+extensions/listeners on rebound/materialised objects.
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
