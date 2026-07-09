@@ -111,6 +111,60 @@ class StructuralBranchLineSplitV2Test {
         assertEquals("busF", branch.getLine("L1").getTerminal2().getBusBreakerView().getBus().getId());
     }
 
+    @Test
+    void splitWithoutMaterialisationHandlesNodeBreakerEndpoints() {
+        // Node/breaker chain: VLA --L-- VLB --M-- VLC. Each VL a busbar (node 0) with feeders via
+        // disconnectors: VLA[L@1], VLB[L@1, M@2], VLC[M@1]. Split L with NO materialisation.
+        NetworkImpl base = (NetworkImpl) Network.create("base", "test");
+        nodeBreakerVl(base, "VLA", 1);
+        nodeBreakerVl(base, "VLB", 2);
+        nodeBreakerVl(base, "VLC", 1);
+        nodeBreakerLine(base, "L", "VLA", 1, "VLB", 1);
+        nodeBreakerLine(base, "M", "VLB", 2, "VLC", 1);
+
+        NetworkImpl branch = BranchLineSplitV2.split(base, "branch", "L", 40.0,
+                "SF", "Vf", "busF", "L1", "L2");
+        BranchContext context = branch.getBranchContext();
+
+        VoltageLevel vlaBase = base.getVoltageLevel("VLA");
+        VoltageLevel vlbBase = base.getVoltageLevel("VLB");
+
+        // endpoint VLs are never copied — the branch sees the same shared node/breaker objects
+        assertSame(vlaBase, branch.getVoltageLevel("VLA"));
+        assertSame(vlbBase, branch.getVoltageLevel("VLB"));
+
+        ThreadLocalBranchContext.run(context, () -> {
+            assertNull(branch.getLine("L"));
+            assertNotNull(branch.getLine("L1"));
+            assertNotNull(branch.getLine("L2"));
+            // enumeration and the calculated-bus view both show the split; M stays on shared VLB, no rebind
+            assertEquals(List.of("L1"), BranchLineSplitV2.lineIdsInBranchView(vlaBase));
+            assertEquals(List.of("L1"), busViewLineIds(vlaBase));
+            assertEquals(List.of("L2", "M"), BranchLineSplitV2.lineIdsInBranchView(vlbBase));
+            assertEquals(List.of("L2", "M"), busViewLineIds(vlbBase));
+        });
+
+        // base untouched
+        assertEquals(List.of("L"), BranchLineSplitV2.lineIdsInBranchView(vlaBase));
+        assertEquals(List.of("L", "M"), BranchLineSplitV2.lineIdsInBranchView(vlbBase));
+        assertNull(base.getVoltageLevel("Vf"));
+        assertEquals(2, base.getLineCount());
+    }
+
+    private static void nodeBreakerVl(Network n, String id, int feederCount) {
+        Substation s = n.newSubstation().setId("S_" + id).add();
+        VoltageLevel v = s.newVoltageLevel().setId(id).setNominalV(400).setTopologyKind(TopologyKind.NODE_BREAKER).add();
+        v.getNodeBreakerView().newBusbarSection().setId("bbs_" + id).setNode(0).add();
+        for (int feeder = 1; feeder <= feederCount; feeder++) {
+            v.getNodeBreakerView().newDisconnector().setId("d_" + id + "_" + feeder).setNode1(0).setNode2(feeder).add();
+        }
+    }
+
+    private static void nodeBreakerLine(Network n, String id, String vl1, int node1, String vl2, int node2) {
+        n.newLine().setId(id).setVoltageLevel1(vl1).setNode1(node1).setVoltageLevel2(vl2).setNode2(node2)
+                .setR(1).setX(10).setG1(0).setB1(0).setG2(0).setB2(0).add();
+    }
+
     /** The line ids a shared VL's bus view exposes in the current (branch or base) view, sorted. */
     private static List<String> busViewLineIds(VoltageLevel vl) {
         return StreamSupport.stream(vl.getBusView().getBuses().spliterator(), false)

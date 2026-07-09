@@ -219,7 +219,7 @@ final class BranchContext {
         return branchDetached.getOrDefault(voltageLevel, Set.of());
     }
 
-    /** Bus view: the connected branch-detached terminals of {@code voltageLevel} whose bus is in {@code busIds}. */
+    /** Bus view (bus/breaker): the connected branch-detached terminals of {@code voltageLevel} whose bus is in {@code busIds}. */
     List<TerminalExt> branchDetachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
         Set<TerminalExt> detached = branchDetached.get(voltageLevel);
         if (detached == null || detached.isEmpty()) {
@@ -229,6 +229,22 @@ final class BranchContext {
         for (TerminalExt terminal : detached) {
             if (terminal instanceof BusTerminal busTerminal
                     && busIds.contains(busTerminal.getConnectableBusId()) && busTerminal.isConnected()) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    /** Bus view (node/breaker): the connected branch-detached terminals of {@code voltageLevel} on one of {@code nodes}. */
+    List<TerminalExt> branchDetachedTerminalsOnNodes(VoltageLevelExt voltageLevel, Set<Integer> nodes) {
+        Set<TerminalExt> detached = branchDetached.get(voltageLevel);
+        if (detached == null || detached.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : detached) {
+            if (terminal instanceof NodeTerminal nodeTerminal
+                    && nodes.contains(nodeTerminal.getNode()) && nodeTerminal.isConnected()) {
                 result.add(terminal);
             }
         }

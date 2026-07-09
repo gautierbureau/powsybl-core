@@ -104,8 +104,16 @@ instead of switching to a record model.
   `AbstractTopologyModel`'s enumeration and `MergedBus`'s bus view, and the `branchAttachIntercept` on
   `BusBreakerTopologyModel.attach`; proven by `StructuralBranchLineSplitV2Test`. This retires both new
   primitives (branch-detached + branch-scoped add) with zero per-type code, before rewriting the full
-  operation. Remaining for full v2: node/breaker endpoints (intercept + `CalculatedBusImpl` bus-view
-  subtraction), then replacing `BranchFlattener` with copy-then-replay.
+  operation.
+- **Node/breaker endpoints (built, validated).** The same two primitives extended to node/breaker:
+  the branch-attach intercept in `NodeBreakerTopologyModel.attach` (and its `checkTerminal` skips the
+  graph-occupancy check for a branch-attach target, since the split line's terminal legitimately still
+  holds the node in the shared graph), plus the `branch-detached` subtraction in `CalculatedBusImpl`'s
+  calculated-bus view (`branchDetachedTerminalsOnNodes`). A half-line branch-attaches at the split
+  line's freed feeder node without mutating the shared graph; the enumeration and calculated-bus folds
+  show `L1`/`L2` and keep the through-line `M` on the shared VL with no rebind. Both topology kinds now
+  pass `StructuralBranchLineSplitV2Test` (full iidm-impl suite green, 1021 tests). Remaining for full
+  v2: replacing `BranchFlattener` with copy-then-replay.
 
 ## Honest trade-off
 

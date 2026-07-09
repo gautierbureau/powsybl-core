@@ -1162,6 +1162,12 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
                             + ", a node connection should be specified instead of a bus connection");
         }
         int node = ((NodeTerminal) terminal).getNode();
+        // v2 (structural-variant branching): a branch-attach onto this shared VL is recorded in the
+        // branch context, not entered into this graph, so the node may legitimately still hold the
+        // (branch-detached) base terminal — neither add a vertex nor check occupancy against the graph.
+        if (isActiveBranchAttachTarget()) {
+            return;
+        }
         graph.addVertexIfNotPresent(node);
         if (graph.getVertexObject(node) != null) {
             throw new ValidationException(terminal.getConnectable(),
@@ -1180,6 +1186,10 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
     public void attach(TerminalExt terminal, boolean test) {
         checkTerminal(terminal);
         if (test) {
+            return;
+        }
+        // v2: record onto the branch context instead of mutating the shared graph (no-op in normal use).
+        if (branchAttachIntercept(terminal)) {
             return;
         }
         int node = ((NodeTerminal) terminal).getNode();

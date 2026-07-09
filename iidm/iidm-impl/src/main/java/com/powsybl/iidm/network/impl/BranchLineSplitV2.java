@@ -45,6 +45,17 @@ final class BranchLineSplitV2 {
     private BranchLineSplitV2() {
     }
 
+    /** Endpoint attachment of a half-line's outer terminal: a configured bus, or a node. */
+    private record Attach(boolean nodeBreaker, String busId, int node) {
+        static Attach bus(String busId) {
+            return new Attach(false, busId, -1);
+        }
+
+        static Attach node(int node) {
+            return new Attach(true, null, node);
+        }
+    }
+
     static NetworkImpl split(NetworkImpl base, String branchId, String lineId, double positionPercent,
                              String fictSubId, String fictVlId, String fictBusId, String line1Id, String line2Id) {
         Line baseLine = base.getLine(lineId);
@@ -53,11 +64,8 @@ final class BranchLineSplitV2 {
         }
         VoltageLevelExt vl1 = (VoltageLevelExt) baseLine.getTerminal1().getVoltageLevel();
         VoltageLevelExt vl2 = (VoltageLevelExt) baseLine.getTerminal2().getVoltageLevel();
-        if (vl1.getTopologyKind() != TopologyKind.BUS_BREAKER || vl2.getTopologyKind() != TopologyKind.BUS_BREAKER) {
-            throw new PowsyblException("splitLine v2 prototype: only bus/breaker endpoints are supported");
-        }
-        String bus1 = baseLine.getTerminal1().getBusBreakerView().getConnectableBus().getId();
-        String bus2 = baseLine.getTerminal2().getBusBreakerView().getConnectableBus().getId();
+        Attach a1 = attachmentOf(baseLine.getTerminal1());
+        Attach a2 = attachmentOf(baseLine.getTerminal2());
         double r = baseLine.getR();
         double x = baseLine.getX();
         double p = positionPercent / 100.0;
@@ -71,7 +79,7 @@ final class BranchLineSplitV2 {
         context.detach((TerminalExt) baseLine.getTerminal1(), vl1);
         context.detach((TerminalExt) baseLine.getTerminal2(), vl2);
 
-        // 2. fictitious mid-line voltage level at the fault point (branch-owned)
+        // 2. fictitious mid-line voltage level at the fault point (branch-owned, bus/breaker)
         Substation sf = branch.newSubstation().setId(fictSubId).setFictitious(true).add();
         VoltageLevel vf = sf.newVoltageLevel().setId(fictVlId).setNominalV(vl1.getNominalV()).setFictitious(true)
                 .setTopologyKind(TopologyKind.BUS_BREAKER).add();
@@ -82,8 +90,8 @@ final class BranchLineSplitV2 {
         ThreadLocalBranchContext.run(context, () -> {
             context.beginBranchAttach(List.of(vl1, vl2));
             try {
-                addHalfLine(branch, line1Id, vl1.getId(), bus1, fictVlId, fictBusId, r * p, x * p);
-                addHalfLine(branch, line2Id, fictVlId, fictBusId, vl2.getId(), bus2, r * (1 - p), x * (1 - p));
+                addHalfLine(branch, line1Id, vl1.getId(), a1, fictVlId, Attach.bus(fictBusId), r * p, x * p);
+                addHalfLine(branch, line2Id, fictVlId, Attach.bus(fictBusId), vl2.getId(), a2, r * (1 - p), x * (1 - p));
             } finally {
                 context.endBranchAttach();
             }
@@ -91,12 +99,28 @@ final class BranchLineSplitV2 {
         return branch;
     }
 
-    private static void addHalfLine(NetworkImpl n, String id, String vlA, String busA, String vlB, String busB,
+    private static Attach attachmentOf(Terminal t) {
+        if (t.getVoltageLevel().getTopologyKind() == TopologyKind.NODE_BREAKER) {
+            return Attach.node(t.getNodeBreakerView().getNode());
+        }
+        return Attach.bus(t.getBusBreakerView().getConnectableBus().getId());
+    }
+
+    private static void addHalfLine(NetworkImpl n, String id, String vlA, Attach a, String vlB, Attach b,
                                     double r, double x) {
-        n.newLine().setId(id).setVoltageLevel1(vlA).setVoltageLevel2(vlB)
-                .setConnectableBus1(busA).setBus1(busA).setConnectableBus2(busB).setBus2(busB)
-                .setR(r).setX(x).setG1(0).setB1(0).setG2(0).setB2(0)
-                .add();
+        var adder = n.newLine().setId(id).setVoltageLevel1(vlA).setVoltageLevel2(vlB)
+                .setR(r).setX(x).setG1(0).setB1(0).setG2(0).setB2(0);
+        if (a.nodeBreaker()) {
+            adder.setNode1(a.node());
+        } else {
+            adder.setConnectableBus1(a.busId()).setBus1(a.busId());
+        }
+        if (b.nodeBreaker()) {
+            adder.setNode2(b.node());
+        } else {
+            adder.setConnectableBus2(b.busId()).setBus2(b.busId());
+        }
+        adder.add();
     }
 
     /** Convenience for assertions: the ids of the connectables a shared VL exposes in the branch view. */
