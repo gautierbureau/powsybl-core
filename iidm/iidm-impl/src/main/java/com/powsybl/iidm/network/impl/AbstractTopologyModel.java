@@ -147,10 +147,11 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     }
 
     /**
-     * Branch-attach add: a connectable added onto this (shared) voltage level while a structural variant
-     * is the working one is recorded in that variant's membership (its terminal) and existence (the
-     * object exists only in that variant) instead of entering this VL's shared graph. Also used by the
-     * internal split helper via an explicit attach window. Returns {@code true} if handled.
+     * Branch-attach add: a connectable's terminal added onto this (shared) voltage level while a
+     * structural variant is the working one is recorded in that variant's membership instead of entering
+     * this VL's shared graph. The object's existence-scoping is handled centrally in
+     * {@code NetworkIndex.checkAndAdd}. Also used by the internal split helper via an explicit attach
+     * window. Returns {@code true} if handled.
      */
     protected boolean branchAttachIntercept(TerminalExt terminal) {
         NetworkImpl network = getNetwork();
@@ -158,14 +159,9 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         if (membership == null) {
             return false;
         }
-        boolean structural = network.isCurrentVariantStructural();
-        if (membership.isAttachTarget(voltageLevel) || structural) {
+        if (membership.isAttachTarget(voltageLevel) || network.isCurrentVariantStructural()) {
             terminal.setVoltageLevel(voltageLevel);
             membership.attachInCurrentVariant(voltageLevel, terminal);
-            if (structural) {
-                // the object being added exists only in this structural variant
-                network.getVariantScopedExistence().existOnlyInCurrentVariant(terminal.getConnectable().getId());
-            }
             return true;
         }
         return false;

@@ -80,6 +80,13 @@ class NetworkIndex {
         Set<Identifiable<?>> all = objectsByClass.computeIfAbsent(obj.getClass(), k -> new LinkedHashSet<>());
         all.add(obj);
         statefulObjectsCache = null;
+
+        // Structural variant: an object added while a structural variant is the working one exists only in
+        // that variant (a connectable, a container VL/bus/substation — anything). Its terminal membership
+        // is handled separately by the topology-model branch-attach intercept.
+        if (existence != null && existence.isCurrentVariantStructural()) {
+            existence.existOnlyInCurrentVariant(obj.getId());
+        }
     }
 
     boolean addAlias(Identifiable<?> obj, String alias) {
