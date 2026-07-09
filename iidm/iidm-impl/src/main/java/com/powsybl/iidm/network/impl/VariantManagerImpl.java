@@ -42,6 +42,10 @@ public class VariantManagerImpl implements VariantManager {
     // while one of these is the working variant are scoped to it instead of applying network-wide.
     private final Set<Integer> structuralVariantIndexes = new HashSet<>();
 
+    // Phase 2: clone parentage (child variant index -> the variant it was cloned from). Drives
+    // copy-on-write existence resolution. Absent = a root variant.
+    private final Map<Integer, Integer> variantParent = new HashMap<>();
+
     private final NetworkImpl network;
 
     VariantManagerImpl(NetworkImpl network) {
@@ -172,6 +176,18 @@ public class VariantManagerImpl implements VariantManager {
             }
             LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
         }
+
+        // Phase 2 (copy-on-write existence): record the clone parentage so an object added in a structural
+        // variant resolves its visibility through the variant tree instead of being hidden in every other
+        // variant eagerly. The parentage follows every clone, whatever the strategy.
+        for (String targetVariantId : targetVariantIds) {
+            variantParent.put(id2index.get(targetVariantId), sourceIndex);
+        }
+    }
+
+    /** The variant a variant was cloned from, or {@code -1} for a root (the initial variant). */
+    int parentVariant(int index) {
+        return variantParent.getOrDefault(index, -1);
     }
 
     private void checkExistingVariantIds(List<String> targetVariantIds) {
@@ -230,6 +246,15 @@ public class VariantManagerImpl implements VariantManager {
         }
         int index = getVariantIndex(variantId);
         structuralVariantIndexes.remove(index);
+        // Phase 2: re-parent the removed variant's children onto its parent, forget its existence deltas
+        // (objects that existed only in it become invisible; its index may be recycled), drop its pointer.
+        int grandParent = variantParent.getOrDefault(index, -1);
+        variantParent.replaceAll((child, parent) -> parent == index ? grandParent : parent);
+        variantParent.remove(index);
+        VariantScopedExistence existence = networkIndex.getVariantScopedExistence();
+        if (existence != null) {
+            existence.forgetVariant(index);
+        }
         id2index.remove(variantId);
         LOGGER.debug("Removing variant '{}'", variantId);
         if (index == variantArraySize - 1) {

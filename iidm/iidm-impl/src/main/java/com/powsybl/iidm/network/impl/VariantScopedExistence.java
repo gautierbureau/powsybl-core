@@ -33,10 +33,16 @@ import java.util.Set;
  */
 final class VariantScopedExistence implements MultiVariantObject {
 
+    private static final int DEAD_VARIANT = -2;
+
     private final VariantManagerHolder holder;
-    // Per variant index, the ids hidden (tombstoned) in that variant. An id absent from the set exists in
-    // that variant; the vast majority of ids are in no set at all, so resolution is a single set lookup.
+    // Per variant index, the ids hidden (tombstoned) in that variant — a removal in a structural variant.
+    // Copied at clone (small, snapshot-correct). An id absent from the set exists in that variant.
     private final Map<Integer, Set<String>> hiddenByVariant = new HashMap<>();
+    // Phase 2 (copy-on-write): objects ADDED in a structural variant. id -> the variant it was added in;
+    // the object is visible in that variant and its descendants only. Global (not copied per variant), so
+    // an add is O(1) instead of O(variants); visibility resolves through the variant parentage.
+    private final Map<String, Integer> existsOnlyIn = new HashMap<>();
     private int variantArraySize;
     private boolean anyHidden;
 
@@ -58,8 +64,27 @@ final class VariantScopedExistence implements MultiVariantObject {
         if (!anyHidden) {
             return false;
         }
-        Set<String> hidden = hiddenByVariant.get(holder.getVariantIndex());
-        return hidden != null && hidden.contains(id);
+        int current = holder.getVariantIndex();
+        // removed in this variant (materialised per variant, copied at clone)
+        Set<String> hidden = hiddenByVariant.get(current);
+        if (hidden != null && hidden.contains(id)) {
+            return true;
+        }
+        // added in a structural variant: visible only in that variant and its descendants
+        Integer addedIn = existsOnlyIn.get(id);
+        return addedIn != null && !isDescendantOrSelf(current, addedIn);
+    }
+
+    /** Walk the variant parentage from {@code variant} up to the roots, looking for {@code ancestor}. */
+    private boolean isDescendantOrSelf(int variant, int ancestor) {
+        int v = variant;
+        while (v != -1) {
+            if (v == ancestor) {
+                return true;
+            }
+            v = holder.getVariantManager().parentVariant(v);
+        }
+        return false;
     }
 
     /** True if any id is hidden in any variant — lets the index skip filtering entirely when nothing is. */
@@ -74,18 +99,22 @@ final class VariantScopedExistence implements MultiVariantObject {
     }
 
     /**
-     * Make {@code id} exist <em>only</em> in the current working variant: hide it in every other variant.
-     * Used for a branch-owned object (it is structurally present in the index, but should surface only in
-     * the branch's variant). Later clones inherit the right visibility via the variant-array copy.
+     * Make {@code id} exist <em>only</em> in the current working variant (and its descendants). O(1): one
+     * map entry, resolved through the variant parentage at read time — the copy-on-write model. Later
+     * clones of this variant inherit visibility by parentage; siblings and ancestors do not see it.
      */
     void existOnlyInCurrentVariant(String id) {
-        int current = holder.getVariantIndex();
-        for (Map.Entry<Integer, Set<String>> entry : hiddenByVariant.entrySet()) {
-            if (entry.getKey() != current) {
-                entry.getValue().add(id);
-            }
-        }
+        existsOnlyIn.put(id, holder.getVariantIndex());
         anyHidden = true;
+    }
+
+    /**
+     * Forget a removed variant: any object that existed only in it becomes invisible everywhere (its index
+     * may be recycled, so the mapping must not linger), and its removal set is dropped.
+     */
+    void forgetVariant(int index) {
+        existsOnlyIn.replaceAll((id, addedIn) -> addedIn == index ? DEAD_VARIANT : addedIn);
+        hiddenByVariant.remove(index);
     }
 
     /** Show {@code id} again in the current working variant. */
@@ -98,7 +127,7 @@ final class VariantScopedExistence implements MultiVariantObject {
     }
 
     private void recomputeAnyHidden() {
-        anyHidden = hiddenByVariant.values().stream().anyMatch(s -> !s.isEmpty());
+        anyHidden = !existsOnlyIn.isEmpty() || hiddenByVariant.values().stream().anyMatch(s -> !s.isEmpty());
     }
 
     // --- MultiVariantObject: existence rides the real variant lifecycle, exactly like state ---
