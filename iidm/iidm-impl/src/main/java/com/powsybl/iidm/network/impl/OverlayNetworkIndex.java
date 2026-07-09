@@ -62,16 +62,23 @@ class OverlayNetworkIndex extends NetworkIndex {
         return baseObj != null ? baseObj.getId() : idOrAlias;
     }
 
+    // An id is shadowed when the branch overrides the base's view of it: either a branch-local object
+    // carries that id (a new object or a copy-on-write replacement) or it has been tombstoned.
+    private boolean shadowed(String id) {
+        return addedById.containsKey(id) || tombstoned.contains(id);
+    }
+
     @Override
     Identifiable get(String idOrAlias) {
         NetworkIndex.checkId(idOrAlias);
         String id = resolveAlias(idOrAlias);
-        if (tombstoned.contains(id)) {
-            return null;
-        }
         Identifiable<?> added = addedById.get(id);
         if (added != null) {
+            // a branch-local object (new, or a copy-on-write replacement) shadows the base
             return added;
+        }
+        if (tombstoned.contains(id)) {
+            return null;
         }
         return base.get(id);
     }
@@ -99,7 +106,7 @@ class OverlayNetworkIndex extends NetworkIndex {
         }
         Set<Identifiable<?>> merged = new LinkedHashSet<>(baseAll.size() + (added == null ? 0 : added.size()));
         for (Identifiable<?> obj : baseAll) {
-            if (!tombstoned.contains(obj.getId())) {
+            if (!shadowed(obj.getId())) {
                 merged.add(obj);
             }
         }
@@ -116,7 +123,7 @@ class OverlayNetworkIndex extends NetworkIndex {
         }
         Set<Identifiable<?>> merged = new LinkedHashSet<>();
         for (Identifiable<?> obj : base.getAll()) {
-            if (!tombstoned.contains(obj.getId())) {
+            if (!shadowed(obj.getId())) {
                 merged.add(obj);
             }
         }
@@ -128,7 +135,7 @@ class OverlayNetworkIndex extends NetworkIndex {
     List<MultiVariantObject> getStatefulObjects() {
         List<MultiVariantObject> stateful = new ArrayList<>();
         for (MultiVariantObject obj : base.getStatefulObjects()) {
-            if (obj instanceof Identifiable<?> identifiable && !tombstoned.contains(identifiable.getId())) {
+            if (obj instanceof Identifiable<?> identifiable && !shadowed(identifiable.getId())) {
                 stateful.add(obj);
             }
         }
@@ -186,6 +193,30 @@ class OverlayNetworkIndex extends NetworkIndex {
             throw new PowsyblException("Object (" + obj.getClass().getName() + ") '" + id + "' not found");
         }
         tombstoned.add(id);
+    }
+
+    /**
+     * Copy-on-write replacement: shadow a base object with a branch-local copy carrying the same id.
+     * This is the write-path primitive — materialising a base object into the branch so it can be
+     * mutated there without touching the shared base. Reads for {@code baseObj.getId()} now resolve to
+     * {@code branchCopy} in this branch only.
+     */
+    void replace(Identifiable<?> baseObj, Identifiable<?> branchCopy) {
+        String id = baseObj.getId();
+        if (!id.equals(branchCopy.getId())) {
+            throw new PowsyblException("Copy-on-write replacement must keep the same id: '" + id
+                    + "' vs '" + branchCopy.getId() + "'");
+        }
+        if (base.get(id) == null) {
+            throw new PowsyblException("Object '" + id + "' is not in the base, nothing to replace");
+        }
+        if (addedById.containsKey(id)) {
+            throw new PowsyblException("Object '" + id + "' has already been replaced in this branch");
+        }
+        tombstoned.remove(id);
+        addedById.put(id, branchCopy);
+        branchCopy.getAliases().forEach(alias -> addedIdByAlias.put(alias, id));
+        addedByClass.computeIfAbsent(branchCopy.getClass(), k -> new LinkedHashSet<>()).add(branchCopy);
     }
 
     // --- spike-friendly aliases used by the index-level tests ---
