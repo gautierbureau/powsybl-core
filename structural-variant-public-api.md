@@ -226,6 +226,17 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
        performance-critical columnar engine (the `VariantColumnStore` implementations + the per-object
        `MultiVariantObject` arrays), it warrants its own design review rather than being rushed — this is
        the tier scored as the most invasive in `structural-variant-generic-design.md`.
+
+     **Mechanism de-risked in isolation (prototype built).** `CowColumnarStore` models the columnar-store
+     shape (a `rows × columns` grid per variant) made copy-on-write over the parentage, and
+     `CowColumnarStoreTest` proves both hard properties: **fork is O(1)** (100 forks add zero stored rows;
+     storage is O(diverged rows), not O(variants × rows)), and **snapshot is preserved** by freezing a row
+     into inheriting children on the write side (a change to a parent never leaks into a variant forked
+     earlier), **per row** so only touched rows cost anything. This is the same de-risking pattern used for
+     `CowVariantColumn` (state) and `OverlayNetworkIndex` (structure) before their integration: it retires
+     the design risk of the live conversion — porting `NumericVariantStore`/`TerminalVariantStore`/
+     `SwitchVariantStore` (and the per-object arrays) onto this model, gated so a network with no
+     structural variant stays byte-for-byte dense — without performing that hot-path change here.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class
