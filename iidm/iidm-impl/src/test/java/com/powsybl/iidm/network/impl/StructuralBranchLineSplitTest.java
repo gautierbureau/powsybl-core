@@ -15,6 +15,8 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VoltageLevel;
+import com.powsybl.iidm.network.extensions.GeneratorShortCircuit;
+import com.powsybl.iidm.network.extensions.GeneratorShortCircuitAdder;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -229,6 +231,44 @@ class StructuralBranchLineSplitTest {
         assertNotNull(base.getLine("M"));
         assertNull(base.getVoltageLevel("Vf"));
         assertEquals(2, base.getLineCount());
+    }
+
+    @Test
+    void splitPreservesGeneratorShortCircuitExtensionThroughSplitAndFlatten() {
+        // A generator carrying its short-circuit reactances (the fault-current data a fault-on-line
+        // study reads) must survive materialisation into the branch and the flatten for serialization.
+        Network base = Network.create("base", "test");
+        Substation sa = base.newSubstation().setId("SA").add();
+        VoltageLevel vla = sa.newVoltageLevel().setId("VLA").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vla.getBusBreakerView().newBus().setId("busA").add();
+        Generator g = vla.newGenerator().setId("G").setConnectableBus("busA").setBus("busA")
+                .setMinP(0).setMaxP(100).setTargetP(50).setTargetV(400).setVoltageRegulatorOn(true)
+                .setEnergySource(EnergySource.HYDRO).add();
+        g.newExtension(GeneratorShortCircuitAdder.class)
+                .withDirectTransX(2.0).withDirectSubtransX(1.5).withStepUpTransformerX(0.5).add();
+        Substation sb = base.newSubstation().setId("SB").add();
+        VoltageLevel vlb = sb.newVoltageLevel().setId("VLB").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vlb.getBusBreakerView().newBus().setId("busB").add();
+        newLine(base, "L", "VLA", "busA", "VLB", "busB", 1.0, 10.0);
+
+        NetworkImpl branch = BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        // the branch's materialised generator keeps the extension
+        GeneratorShortCircuit branchExt = branch.getGenerator("G").getExtension(GeneratorShortCircuit.class);
+        assertNotNull(branchExt);
+        assertEquals(2.0, branchExt.getDirectTransX(), 1e-9);
+        assertEquals(1.5, branchExt.getDirectSubtransX(), 1e-9);
+        assertEquals(0.5, branchExt.getStepUpTransformerX(), 1e-9);
+
+        // and it survives the flatten (serialization path)
+        GeneratorShortCircuit flatExt = BranchFlattener.flatten(branch).getGenerator("G")
+                .getExtension(GeneratorShortCircuit.class);
+        assertNotNull(flatExt);
+        assertEquals(2.0, flatExt.getDirectTransX(), 1e-9);
+
+        // base's own generator still has it too
+        assertNotNull(base.getGenerator("G").getExtension(GeneratorShortCircuit.class));
     }
 
     @Test

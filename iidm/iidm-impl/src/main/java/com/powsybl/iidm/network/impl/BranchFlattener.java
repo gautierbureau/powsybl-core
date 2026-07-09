@@ -133,6 +133,7 @@ final class BranchFlattener {
         if (g.getReactiveLimits() instanceof MinMaxReactiveLimits limits) {
             gB.newMinMaxReactiveLimits().setMinQ(limits.getMinQ()).setMaxQ(limits.getMaxQ()).add();
         }
+        BranchExtensionCopier.copy(g, gB);
     }
 
     private static void copyLine(Network flat, Line line) {

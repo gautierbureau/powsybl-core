@@ -264,9 +264,17 @@ Caveat retained: `allocateOperatingPoint` puts the base into IIDM's multi-thread
 documented mode), which then requires every thread accessing the base to set a working variant — opt-in
 and expected, but worth noting.
 
-Remaining before production: serialization (flatten-on-write); the thread-local variant mode + unified
-operating point (above); reactive capability curves and remaining connectable types in materialisation;
-extensions/listeners on rebound/materialised objects.
+**Extensions in materialisation — started (short-circuit first).** `BranchExtensionCopier.copy(source,
+target)` copies extensions onto a materialised branch-owned object; `GeneratorShortCircuit` (the
+fault-current reactances a fault-on-line study reads) is handled first, wired into both
+`BranchLineSplit` and `BranchFlattener` generator copies. `StructuralBranchLineSplitTest` proves a
+generator's short-circuit extension survives the split *and* the flatten (and stays on the base). IIDM
+has no generic extension deep-copy, so more types are added one at a time; the general answer —
+extensions as external attributes with their own tombstone + merge — is what network-store does.
+
+Remaining before production (all breadth, no new mechanism): remaining short-circuit + other extension
+types (per-type copy); reactive-capability curves and remaining connectable types (transformers,
+shunts, SVC, HVDC, tie lines) in materialisation; listener semantics on rebound/materialised objects.
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
