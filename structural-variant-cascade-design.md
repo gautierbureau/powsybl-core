@@ -248,10 +248,21 @@ carries its own operating point over the shared structure **without materialisin
 `StructuralBranchStateTest` proves it: a shared switch opened under the branch context is open in the
 branch's operating point and still closed in the base's, and the base's working variant is restored.
 
-Two honest caveats: it uses save/restore of the base's working variant, so concurrent branches on
-different threads need the base in thread-local variant mode; and branch-*owned* objects use the
-branch's own variant manager (a separate column), so a single unified operating point across shared and
-materialised objects is future coordination work.
+**Thread-local variant mode + unified operating point done.** `BranchContext.allocateOperatingPoint(id)`
+now allocates a variant of the same id in **both** the base (shared objects) and the branch
+(branch-owned objects), cloned from each network's initial variant, and switches both to thread-local
+variant access. `ThreadLocalBranchContext.run` enters both variants for the duration (thread-safe:
+save/restore per thread, resetting a thread that had none). So (a) a branch's operating point now covers
+shared *and* branch-owned objects uniformly, and (b) several branches hold distinct operating points
+concurrently on different threads without interference. Tests: `unifiedOperatingPointCoversSharedAndBranchOwnedObjects`
+(a shared switch and a branch-owned switch both isolated in the branch's column) and
+`concurrentBranchesHaveIsolatedOperatingPoints` (two threads mutate the same shared switch in two
+branches' operating points; each sees its own, base default untouched). Full `iidm-impl` suite (1018
+tests) passes.
+
+Caveat retained: `allocateOperatingPoint` puts the base into IIDM's multi-thread variant mode (a
+documented mode), which then requires every thread accessing the base to set a working variant — opt-in
+and expected, but worth noting.
 
 Remaining before production: serialization (flatten-on-write); the thread-local variant mode + unified
 operating point (above); reactive capability curves and remaining connectable types in materialisation;
