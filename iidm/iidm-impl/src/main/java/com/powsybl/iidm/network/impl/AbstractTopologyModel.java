@@ -140,18 +140,23 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         return context == null ? Set.of() : context.branchDetachedTerminals(voltageLevel);
     }
 
+    /** v2: this voltage level is a shared VL currently receiving a branch-attach add (context active). */
+    protected boolean isActiveBranchAttachTarget() {
+        BranchContext context = ThreadLocalBranchContext.get();
+        return context != null && context.isBranchAttachTarget(voltageLevel);
+    }
+
     /**
      * v2 branch-attach add: when a connectable-add targets this (shared) voltage level under an active
      * branch-attach window, record the just-created terminal as branch-attached in the context instead
      * of entering this VL's graph — the shared base is not mutated. Returns {@code true} if handled.
      */
     protected boolean branchAttachIntercept(TerminalExt terminal) {
-        BranchContext context = ThreadLocalBranchContext.get();
-        if (context == null || !context.isBranchAttachTarget(voltageLevel)) {
+        if (!isActiveBranchAttachTarget()) {
             return false;
         }
         terminal.setVoltageLevel(voltageLevel);
-        context.branchAttach(terminal, voltageLevel);
+        ThreadLocalBranchContext.get().branchAttach(terminal, voltageLevel);
         return true;
     }
 

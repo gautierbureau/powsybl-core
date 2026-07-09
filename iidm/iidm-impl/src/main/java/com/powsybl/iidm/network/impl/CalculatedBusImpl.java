@@ -82,34 +82,50 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
     }
 
     // Spike (structural-variant branching): under an active branch context, a calculated bus of a
-    // branch voltage level also includes the terminals rebound onto one of its nodes. No active
-    // context (all normal use) -> empty, so behaviour is unchanged.
+    // branch voltage level also includes the terminals rebound/branch-attached onto one of its nodes,
+    // and (v2) excludes the terminals branch-detached from them. No active context (all normal use) ->
+    // empty, so behaviour is unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
         BranchContext context = ThreadLocalBranchContext.get();
         if (context == null) {
             return List.of();
         }
+        return context.branchAttachedTerminalsOnNodes((VoltageLevelExt) super.getVoltageLevel(), nodeSet());
+    }
+
+    private List<TerminalExt> branchDetachedConnectedTerminals() {
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context == null) {
+            return List.of();
+        }
+        return context.branchDetachedTerminalsOnNodes((VoltageLevelExt) super.getVoltageLevel(), nodeSet());
+    }
+
+    private Set<Integer> nodeSet() {
         Set<Integer> nodeSet = new HashSet<>();
         for (int node : nodes) {
             nodeSet.add(node);
         }
-        return context.branchAttachedTerminalsOnNodes((VoltageLevelExt) super.getVoltageLevel(), nodeSet);
+        return nodeSet;
     }
 
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
-        return terminals.size() + branchAttachedConnectedTerminals().size();
+        return terminals.size() - branchDetachedConnectedTerminals().size()
+                + branchAttachedConnectedTerminals().size();
     }
 
     @Override
     public Collection<TerminalExt> getConnectedTerminals() {
         checkValidity();
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
         List<TerminalExt> attached = branchAttachedConnectedTerminals();
-        if (attached.isEmpty()) {
+        if (detached.isEmpty() && attached.isEmpty()) {
             return Collections.unmodifiableCollection(terminals);
         }
         List<TerminalExt> all = new ArrayList<>(terminals);
+        all.removeAll(detached);
         all.addAll(attached);
         return Collections.unmodifiableCollection(all);
     }
@@ -117,7 +133,12 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        return Stream.concat(terminals.stream().map(Function.identity()), branchAttachedConnectedTerminals().stream());
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
+        Stream<TerminalExt> own = terminals.stream().map(Function.identity());
+        if (!detached.isEmpty()) {
+            own = own.filter(t -> !detached.contains(t));
+        }
+        return Stream.concat(own, branchAttachedConnectedTerminals().stream());
     }
 
     @Override
