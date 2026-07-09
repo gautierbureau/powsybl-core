@@ -197,12 +197,15 @@ class StructuralBranchCascadeSpikeTest {
         NetworkImpl branch = NetworkImpl.createStructuralBranch(base, "branch");
         OverlayNetworkIndex overlay = (OverlayNetworkIndex) branch.getIndex();
 
-        // materialise VLB -> VLB' (a branch-owned node/breaker VL; a busbar suffices for this proof)
+        // materialise VLB -> VLB' (a branch-owned node/breaker VL: busbar at node 0, feeder node 5
+        // wired to it by a closed disconnector, so node 5 joins the busbar's calculated bus)
         overlay.beginMaterialize();
         Substation sbB = branch.newSubstation().setId("S_VLB").add();
         VoltageLevelExt vlbBranch = (VoltageLevelExt) sbB.newVoltageLevel().setId("VLB").setNominalV(400)
                 .setTopologyKind(TopologyKind.NODE_BREAKER).add();
         vlbBranch.getNodeBreakerView().newBusbarSection().setId("bbs_VLB").setNode(0).add();
+        vlbBranch.getNodeBreakerView().newDisconnector().setId("dFeeder").setNode1(0).setNode2(5).add();
+        vlbBranch.newLoad().setId("LDB").setNode(5).setP0(1).setQ0(0).add(); // a real feeder so VLB' has a bus-view bus
         overlay.endMaterialize();
 
         Line m = base.getLine("M");
@@ -223,6 +226,18 @@ class StructuralBranchCascadeSpikeTest {
         ThreadLocalBranchContext.run(context, () ->
                 assertTrue(connectableIds(vlbBranch.getConnectables()).contains("M")));
         assertFalse(connectableIds(vlbBranch.getConnectables()).contains("M"));
+
+        // bus view: under the context, VLB''s calculated bus (nodes 0 and 5) folds in M, and M's
+        // bus-view bus is that same bus (both directions agree)
+        ThreadLocalBranchContext.run(context, () -> {
+            Bus bus = vlbBranch.getBusView().getBuses().iterator().next();
+            Set<String> ids = new HashSet<>();
+            bus.getConnectedTerminalStream().forEach(t -> ids.add(t.getConnectable().getId()));
+            assertTrue(ids.contains("M"), "VLB' calculated bus folds in the rebound M");
+            Bus mBus = nearM.getBusView().getBus();
+            assertNotNull(mBus);
+            assertEquals(bus.getId(), mBus.getId());
+        });
 
         // no cascade: VLC shared, never materialised, still hosts M
         assertSame(base.getVoltageLevel("VLC"), branch.getVoltageLevel("VLC"));

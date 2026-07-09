@@ -93,4 +93,27 @@ final class BranchContext {
         }
         return result;
     }
+
+    /**
+     * Reverse (node/breaker bus view): the connected terminals rebound onto {@code voltageLevel} whose
+     * branch node is one of {@code nodes} — the branch-attached terminals a calculated bus over those
+     * nodes must include.
+     */
+    List<TerminalExt> branchAttachedTerminalsOnNodes(VoltageLevelExt voltageLevel, Set<Integer> nodes) {
+        Set<TerminalExt> attached = branchAttached.get(voltageLevel);
+        if (attached == null || attached.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : attached) {
+            if (terminal instanceof NodeTerminal nodeTerminal) {
+                Integer override = nodeOverride.get(terminal);
+                int branchNode = override != null ? override : nodeTerminal.getNode();
+                if (nodes.contains(branchNode) && nodeTerminal.isConnected()) {
+                    result.add(terminal);
+                }
+            }
+        }
+        return result;
+    }
 }
