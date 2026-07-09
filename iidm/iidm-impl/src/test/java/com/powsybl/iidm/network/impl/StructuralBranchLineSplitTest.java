@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Structural-variant spike, phase 2b: the write path, end to end. Split a line at a fictitious
@@ -100,5 +101,57 @@ class StructuralBranchLineSplitTest {
         assertNull(base.getVoltageLevel("Vf"));
         assertEquals(1, base.getLineCount());
         assertEquals("busA", base.getLine("L").getTerminal1().getBusBreakerView().getBus().getId());
+    }
+
+    @Test
+    void splitLineApiReHomesEndpointInjectionAndLeavesBaseUntouched() {
+        // VLA hosts a load in addition to the line; the load must be re-homed into the branch copy.
+        Network base = Network.create("base", "test");
+        Substation sa = base.newSubstation().setId("SA").add();
+        VoltageLevel vla = sa.newVoltageLevel().setId("VLA").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vla.getBusBreakerView().newBus().setId("busA").add();
+        vla.newLoad().setId("LD").setConnectableBus("busA").setBus("busA").setP0(10).setQ0(5).add();
+        Substation sb = base.newSubstation().setId("SB").add();
+        VoltageLevel vlb = sb.newVoltageLevel().setId("VLB").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vlb.getBusBreakerView().newBus().setId("busB").add();
+        newLine(base, "L", "VLA", "busA", "VLB", "busB", 1.0, 10.0);
+
+        NetworkImpl branch = BranchLineSplit.split((NetworkImpl) base, "branch", "L", 40.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        // branch: split applied, endpoint load preserved, impedance split 40/60
+        assertNull(branch.getLine("L"));
+        assertNotNull(branch.getLine("L1"));
+        assertNotNull(branch.getLine("L2"));
+        assertNotNull(branch.getVoltageLevel("Vf"));
+        assertEquals(2, branch.getLineCount());
+        assertNotNull(branch.getLoad("LD"));
+        assertEquals("busA", branch.getLoad("LD").getTerminal().getBusBreakerView().getConnectableBus().getId());
+        assertEquals(0.4, branch.getLine("L1").getR(), 1e-9);
+        assertEquals(0.6, branch.getLine("L2").getR(), 1e-9);
+
+        // base untouched: still VLA --L-- VLB, load intact
+        assertNotNull(base.getLine("L"));
+        assertNull(base.getVoltageLevel("Vf"));
+        assertEquals(1, base.getLineCount());
+        assertNotNull(base.getLoad("LD"));
+        assertNotSame(base.getLoad("LD"), branch.getLoad("LD"));
+    }
+
+    @Test
+    void splitLineApiRejectsUnsupportedThroughConnectableCascade() {
+        // A three-VL chain: VLA --L-- VLB --M-- VLC. Splitting L must materialise VLB, which hosts the
+        // through-line M -> not yet supported (would cascade into VLC). Must fail loudly, not silently.
+        Network base = Network.create("base", "test");
+        for (String vl : new String[] {"VLA", "VLB", "VLC"}) {
+            Substation s = base.newSubstation().setId("S_" + vl).add();
+            VoltageLevel v = s.newVoltageLevel().setId(vl).setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+            v.getBusBreakerView().newBus().setId("bus_" + vl).add();
+        }
+        newLine(base, "L", "VLA", "bus_VLA", "VLB", "bus_VLB", 1.0, 10.0);
+        newLine(base, "M", "VLB", "bus_VLB", "VLC", "bus_VLC", 1.0, 10.0);
+
+        assertThrows(com.powsybl.commons.PowsyblException.class, () ->
+                BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0, "SF", "Vf", "busF", "L1", "L2"));
     }
 }
