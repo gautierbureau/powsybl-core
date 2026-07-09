@@ -32,13 +32,26 @@ import java.util.Set;
 final class BranchContext {
 
     private final Map<TerminalExt, VoltageLevelExt> voltageLevelOverride = new HashMap<>();
+    private final Map<TerminalExt, Integer> nodeOverride = new HashMap<>();
     private final Map<VoltageLevelExt, Set<TerminalExt>> branchAttached = new HashMap<>();
 
-    /** Rebind a shared terminal onto a branch-owned voltage level, for this branch only. */
+    /** Rebind a shared terminal onto a branch-owned voltage level (bus/breaker, or node/breaker with no node change). */
     void rebind(TerminalExt terminal, VoltageLevelExt branchVoltageLevel) {
+        rebind(terminal, branchVoltageLevel, null);
+    }
+
+    /**
+     * Rebind a shared terminal onto a branch-owned voltage level, for this branch only. In node/breaker
+     * a {@code branchNode} gives the terminal's node within the branch voltage level's graph; pass
+     * {@code null} to keep the base node.
+     */
+    void rebind(TerminalExt terminal, VoltageLevelExt branchVoltageLevel, Integer branchNode) {
         voltageLevelOverride.put(terminal, branchVoltageLevel);
+        if (branchNode != null) {
+            nodeOverride.put(terminal, branchNode);
+        }
         branchAttached.computeIfAbsent(branchVoltageLevel, k -> new LinkedHashSet<>()).add(terminal);
-        // forward: the terminal now consults the context for its voltage level
+        // forward: the terminal now consults the context for its voltage level (and node)
         ((AbstractTerminal) terminal).setBranchAttachmentOverride(true);
         // reverse: the branch voltage level now unions branch-attached terminals in its enumeration
         ((VoltageLevelImpl) branchVoltageLevel).getTopologyModel().setBranchAttachmentHint(true);
@@ -47,6 +60,11 @@ final class BranchContext {
     /** Forward: the branch voltage level a rebound terminal resolves to, or {@code null} if not rebound. */
     VoltageLevelExt resolveVoltageLevel(TerminalExt terminal) {
         return voltageLevelOverride.get(terminal);
+    }
+
+    /** Forward (node/breaker): the branch node a rebound terminal resolves to, or {@code null} if unchanged. */
+    Integer resolveNode(TerminalExt terminal) {
+        return nodeOverride.get(terminal);
     }
 
     /** Reverse: the shared terminals rebound onto {@code voltageLevel} in this branch. */
