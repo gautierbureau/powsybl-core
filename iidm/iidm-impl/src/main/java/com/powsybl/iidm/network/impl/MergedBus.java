@@ -53,6 +53,12 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
     // branch-owned configured buses also includes the terminals rebound onto them, and (v2) excludes
     // the terminals branch-detached from them. No active context (all normal use) -> empty, unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
+        // v2.1a: variant-scoped membership (the active variant IS the context) takes precedence over v2's
+        // ambient BranchContext.
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null) {
+            return membership.attachedConnectedTerminals(voltageLevel(), busIds());
+        }
         BranchContext context = ThreadLocalBranchContext.get();
         if (context == null) {
             return List.of();
@@ -61,6 +67,10 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
     }
 
     private List<TerminalExt> branchDetachedConnectedTerminals() {
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null) {
+            return membership.detachedConnectedTerminals(voltageLevel(), busIds());
+        }
         BranchContext context = ThreadLocalBranchContext.get();
         if (context == null) {
             return List.of();

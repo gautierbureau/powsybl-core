@@ -7,8 +7,10 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -74,6 +76,54 @@ final class VariantScopedMembership implements MultiVariantObject {
     Set<TerminalExt> detachedTerminals(VoltageLevelExt voltageLevel) {
         return detachedByVariant.getOrDefault(holder.getVariantIndex(), Map.of())
                 .getOrDefault(voltageLevel, Set.of());
+    }
+
+    // Bus-view filters (current variant): the connected attached/detached terminals of a voltage level
+    // whose configured bus is one of {@code busIds} (bus/breaker) or whose node is one of {@code nodes}
+    // (node/breaker). Mirror the equivalent BranchContext filters so the bus-view folds read identically.
+
+    List<TerminalExt> attachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
+        return connectedOnBuses(attachedTerminals(voltageLevel), busIds);
+    }
+
+    List<TerminalExt> detachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
+        return connectedOnBuses(detachedTerminals(voltageLevel), busIds);
+    }
+
+    List<TerminalExt> attachedTerminalsOnNodes(VoltageLevelExt voltageLevel, Set<Integer> nodes) {
+        return connectedOnNodes(attachedTerminals(voltageLevel), nodes);
+    }
+
+    List<TerminalExt> detachedTerminalsOnNodes(VoltageLevelExt voltageLevel, Set<Integer> nodes) {
+        return connectedOnNodes(detachedTerminals(voltageLevel), nodes);
+    }
+
+    private static List<TerminalExt> connectedOnBuses(Set<TerminalExt> terminals, Set<String> busIds) {
+        if (terminals.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : terminals) {
+            if (terminal instanceof BusTerminal busTerminal
+                    && busIds.contains(busTerminal.getConnectableBusId()) && busTerminal.isConnected()) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    private static List<TerminalExt> connectedOnNodes(Set<TerminalExt> terminals, Set<Integer> nodes) {
+        if (terminals.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : terminals) {
+            if (terminal instanceof NodeTerminal nodeTerminal
+                    && nodes.contains(nodeTerminal.getNode()) && nodeTerminal.isConnected()) {
+                result.add(terminal);
+            }
+        }
+        return result;
     }
 
     // --- MultiVariantObject: membership rides the real variant lifecycle, exactly like state ---

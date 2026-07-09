@@ -232,11 +232,20 @@ overstates the minimal step and understates the maximal one.
   shows `getConnectables` moving a terminal between VLs purely by `setWorkingVariant`, and the move being
   inherited by a clone of `faulted` but not by a clone of `INITIAL`. Together, existence + membership mean
   a split can be expressed as **pure variant state on a single network** — the branch is a cloned variant,
-  the working variant is the context. *Remaining:* the bus-view folds (`MergedBus`/`CalculatedBusImpl`)
-  still read the context for their connected-terminal filtering; pointing them at the variant-scoped
-  membership is the same mechanical swap the enumeration fold demonstrates, and the split operation +
-  branch-attach intercept would record into `VariantScopedMembership`/`VariantScopedExistence` instead of
-  `BranchContext` to make the single-network split turnkey. Full iidm-impl suite green (1028 tests).
+  the working variant is the context.
+
+  **Every read path now variant-driven.** The bus-view folds (`MergedBus` bus/breaker,
+  `CalculatedBusImpl` node/breaker) read variant-scoped membership ahead of the `BranchContext` too, via
+  bus/node filters on `VariantScopedMembership` that mirror the `BranchContext` ones. So enumeration
+  (`getConnectables`) **and** both bus views resolve terminal membership against the working variant —
+  `VariantScopedMembershipTest` proves the bus-view subtraction flips a line off a bus by
+  `setWorkingVariant`, bus/breaker and node/breaker, with the initial variant untouched. (The attach
+  *direction* in the bus view needs a terminal bussed on the target VL — exactly what the real split
+  produces and what v2's `StructuralBranchLineSplitV2Test` already asserts through the same fold code;
+  a synthetic foreign-bus terminal is correctly rejected by the bus filter, so it is left to the turnkey
+  split.) Full iidm-impl suite green (1030 tests). *Remaining for a turnkey single-network split:* the
+  split operation + branch-attach intercept record into `VariantScopedMembership`/`VariantScopedExistence`
+  instead of `BranchContext` — mechanism-complete, just re-pointing what the operation writes.
 - **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
   pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant
