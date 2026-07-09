@@ -59,6 +59,10 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     private final NetworkIndex index;
 
+    // Spike (structural-variant branching): the branch's terminal-attachment overrides, when this
+    // network is a structural branch (see createStructuralBranch); null for a normal network.
+    private BranchContext branchContext;
+
     private final Map<String, VoltageAngleLimit> voltageAngleLimitsIndex = new LinkedHashMap<>();
 
     private final VariantManagerImpl variantManager;
@@ -166,7 +170,13 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
      * {@code structural-variant-spike.md}.
      */
     static NetworkImpl createStructuralBranch(NetworkImpl base, String branchId) {
-        return new NetworkImpl(branchId, branchId, base.getSourceFormat(), new OverlayNetworkIndex(base.getIndex()));
+        NetworkImpl branch = new NetworkImpl(branchId, branchId, base.getSourceFormat(), new OverlayNetworkIndex(base.getIndex()));
+        branch.branchContext = new BranchContext();
+        return branch;
+    }
+
+    BranchContext getBranchContext() {
+        return branchContext;
     }
 
     static Network merge(String id, String name, Network... networks) {
