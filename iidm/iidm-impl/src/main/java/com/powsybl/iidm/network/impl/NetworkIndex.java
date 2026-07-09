@@ -32,6 +32,19 @@ class NetworkIndex {
     // added or removed.
     private List<MultiVariantObject> statefulObjectsCache;
 
+    // Spike v2.1a (variant-scoped existence): when set, an object's existence is a function of the active
+    // variant. Null for every normal network, so get/getAll/contains keep their exact hot path.
+    private VariantScopedExistence existence;
+
+    void setVariantScopedExistence(VariantScopedExistence existence) {
+        this.existence = existence;
+        this.statefulObjectsCache = null;
+    }
+
+    VariantScopedExistence getVariantScopedExistence() {
+        return existence;
+    }
+
     static void checkId(String id) {
         if (id == null || id.isEmpty()) {
             throw new PowsyblException("Invalid id '" + id + "'");
@@ -102,7 +115,11 @@ class NetworkIndex {
     Identifiable get(String idOrAlias) {
         String id = idByAlias.getOrDefault(idOrAlias, idOrAlias);
         checkId(id);
-        return objectsById.get(id);
+        Identifiable<?> obj = objectsById.get(id);
+        if (obj != null && existence != null && existence.isHidden(id)) {
+            return null; // exists structurally, but hidden in the active variant
+        }
+        return obj;
     }
 
     <T extends Identifiable> T get(String id, Class<T> clazz) {
@@ -115,7 +132,16 @@ class NetworkIndex {
     }
 
     Collection<Identifiable<?>> getAll() {
-        return objectsById.values();
+        if (existence == null || !existence.anyHidden()) {
+            return objectsById.values();
+        }
+        List<Identifiable<?>> visible = new ArrayList<>(objectsById.size());
+        for (Map.Entry<String, Identifiable<?>> entry : objectsById.entrySet()) {
+            if (!existence.isHidden(entry.getKey())) {
+                visible.add(entry.getValue());
+            }
+        }
+        return visible;
     }
 
     /**
@@ -130,6 +156,10 @@ class NetworkIndex {
                     stateful.add(multiVariantObject);
                 }
             }
+            // v2.1a: existence is variant state too — the real clone must grow/copy its column with the rest
+            if (existence != null) {
+                stateful.add(existence);
+            }
             statefulObjectsCache = stateful;
         }
         return statefulObjectsCache;
@@ -140,13 +170,25 @@ class NetworkIndex {
         if (all == null) {
             return Collections.emptySet();
         }
-        return (Set<T>) all;
+        if (existence == null || !existence.anyHidden()) {
+            return (Set<T>) all;
+        }
+        Set<Identifiable<?>> visible = new LinkedHashSet<>(all.size());
+        for (Identifiable<?> obj : all) {
+            if (!existence.isHidden(obj.getId())) {
+                visible.add(obj);
+            }
+        }
+        return (Set<T>) visible;
     }
 
     boolean contains(String id) {
         String idFromPotentialAlias = idByAlias.getOrDefault(id, id);
         checkId(idFromPotentialAlias);
-        return objectsById.containsKey(idFromPotentialAlias);
+        if (!objectsById.containsKey(idFromPotentialAlias)) {
+            return false;
+        }
+        return existence == null || !existence.isHidden(idFromPotentialAlias);
     }
 
     void remove(Identifiable obj) {

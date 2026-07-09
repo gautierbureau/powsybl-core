@@ -211,6 +211,20 @@ overstates the minimal step and understates the maximal one.
   membership fold sites against the active variant instead of an ambient `BranchContext`. This is the
   minimal faithful step: it retires the "everything runs inside `ThreadLocalBranchContext.run`" contract
   (a variant is self-consistent) while leaving the 57 state-array classes untouched.
+
+  **Core claim de-risked (prototype built).** `VariantScopedExistence` (a `MultiVariantObject`) makes a
+  **single** network answer `getLine(id)` / `getIdentifiable` / `contains` / the counts differently per
+  **working variant** — no `OverlayNetworkIndex`, no ambient `BranchContext`; the "branch" is a cloned
+  variant and the working variant *is* the selector. Critically it rides the **real** `cloneVariant`:
+  it is in the index's stateful-objects list, so `VariantManagerImpl` grows and copies its hidden-id
+  column via `extendVariantArraySize`/`allocateVariantArrayElement` exactly as it does tap positions —
+  cloning `faulted`→`faulted2` inherits the hide, cloning the pristine `INITIAL` does not. The `NetworkIndex`
+  hook is **null-gated** (an unset `existence` field ⇒ the exact former hot path), so all 1026 iidm-impl
+  tests pass unchanged. Proven by `VariantScopedExistenceTest`. *Scope of the prototype:* it de-risks the
+  novel piece — variant-scoped existence resolved at the index and cloned by the real variant machinery.
+  Folding terminal *membership* into the same per-variant existence (so the enumeration/bus-view folds
+  read the variant instead of the context) is the remaining wiring; v2 already showed those folds can be
+  driven by an ambient selector, and v2.1a simply makes that selector the active variant.
 - **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
   pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant

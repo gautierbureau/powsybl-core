@@ -241,6 +241,21 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return index;
     }
 
+    /**
+     * Spike v2.1a (variant-scoped existence): enable — and return — the layer that makes an object's
+     * existence depend on the active variant, so a cloned variant is a structural "branch" of this same
+     * network. Idempotent. See {@code structural-variant-generic-design.md} (v2.1).
+     */
+    VariantScopedExistence enableVariantScopedExistence() {
+        VariantScopedExistence current = index.getVariantScopedExistence();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize());
+        index.setVariantScopedExistence(created);
+        return created;
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }
