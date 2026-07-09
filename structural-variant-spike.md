@@ -89,9 +89,20 @@ change at the registry level on a real network (`EurostagTutorialExample1`):
   This is the exact sequence `ConnectVoltageLevelOnLine` performs; it is mirrored in the test because
   that modification lives in a downstream module (iidm-modification). Full `iidm-impl` suite (1007
   tests) passes.
-  - *Next in 2b:* generalise materialisation to the cascade case (endpoint VLs that host other
-    through-lines and injections — copy their contents / bound the reference rebinding) and expose a
-    single `branch.splitLine(...)` entry point; then drive the literal `ConnectVoltageLevelOnLine`
-    from a module that can see both it and the branch factory.
+- **Phase 3 (in progress) — a reusable `splitLine` API + injection re-homing.** `BranchLineSplit.split(...)`
+  turns the manual dance into one call: create the branch, materialise both endpoint VLs (buses,
+  switches, and **re-home their injections** into the branch copies), tombstone the original line, add
+  the fictitious mid VL and the two impedance-split half-lines. `StructuralBranchLineSplitTest` proves
+  it on an endpoint that also hosts a **load**: the branch gets the split with the load preserved on
+  the materialised endpoint (`R` split 40/60) while the base — line, load and all — is untouched.
+  - The one honest boundary is made **loud, not silent**: an endpoint hosting another
+    *through-connectable* (a second line/transformer, e.g. `VLA --L-- VLB --M-- VLC`) throws, because
+    materialising that VL would cascade into its far VL. A test asserts the rejection. This is the
+    general reference-rebinding problem the design flagged as the multi-week core.
+  Full `iidm-impl` suite (1009 tests) passes.
+  - *Next:* bound the through-connectable cascade (rebind a shared branch's endpoint, or materialise to
+    a fixed depth); a per-branch state column (marry to the columnar variant work) so branches carry
+    their own operating point; then drive the literal `ConnectVoltageLevelOnLine` from a module that
+    can see both it and the branch factory.
 - **Phase 3:** per-branch state column (marry to the columnar variant work), extensions/listeners on
   copied objects, branch disposal in O(delta), serialization.
