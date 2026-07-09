@@ -253,6 +253,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return index.getVariantScopedMembership();
     }
 
+    VariantScopedExistence getVariantScopedExistence() {
+        return index.getVariantScopedExistence();
+    }
+
+    /** Whether structural mutations (add/remove) made now are scoped to the working (structural) variant. */
+    boolean isCurrentVariantStructural() {
+        return variantManager.isCurrentVariantStructural();
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }

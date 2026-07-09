@@ -19,14 +19,14 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The proposed public structural-variant API surface (see {@code structural-variant-public-api.md}): the
+ * The public structural-variant API surface (see {@code structural-variant-public-api.md}): the
  * {@code cloneVariant(..., VariantCloneStrategy)} overloads. {@code STATE_ONLY} is the historical
- * behaviour; {@code STRUCTURAL} is defined but not yet wired in the eager implementation, so it fails
- * loudly. This pins the API shape (backward-compatible default methods) ahead of the implementation.
+ * behaviour; {@code STRUCTURAL} (Phase 1) additionally lets the variant diverge structurally. Both
+ * produce a usable working variant. The scoping behaviour itself is covered by
+ * {@link StructuralVariantRemoveTest}.
  *
  * @author Claude
  */
@@ -53,19 +53,15 @@ class VariantCloneStrategyTest {
     }
 
     @Test
-    void structuralStrategyIsDefinedButNotYetImplemented() {
+    void structuralStrategyCreatesUsableVariants() {
         Network n = buildNetwork();
         VariantManager vm = n.getVariantManager();
 
-        UnsupportedOperationException single = assertThrows(UnsupportedOperationException.class,
-                () -> vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "structural", VariantCloneStrategy.STRUCTURAL));
-        assertTrue(single.getMessage().contains("structural-variant-public-api.md"));
+        vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "structural", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, List.of("s1", "s2"), VariantCloneStrategy.STRUCTURAL, false);
 
-        assertThrows(UnsupportedOperationException.class,
-                () -> vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, List.of("s1", "s2"),
-                        VariantCloneStrategy.STRUCTURAL, false));
-
-        // the failed clones did not create any variant
-        assertEquals(List.of(VariantManagerConstants.INITIAL_VARIANT_ID), List.copyOf(vm.getVariantIds()));
+        assertTrue(vm.getVariantIds().containsAll(List.of("structural", "s1", "s2")));
+        vm.setWorkingVariant("structural");
+        assertEquals("structural", vm.getWorkingVariantId());
     }
 }

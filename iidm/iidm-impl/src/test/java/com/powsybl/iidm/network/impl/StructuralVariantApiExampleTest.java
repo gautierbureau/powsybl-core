@@ -11,6 +11,8 @@ import com.powsybl.iidm.network.EnergySource;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
+import com.powsybl.iidm.network.VariantManager;
+import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -53,29 +55,22 @@ class StructuralVariantApiExampleTest {
     @Test
     void example1ExpansionPlanningAddAUnit() {
         NetworkImpl n = smallGrid();
-        VoltageLevelExt vl1 = (VoltageLevelExt) n.getVoltageLevel("VL1");
+        VoltageLevel vl1 = n.getVoltageLevel("VL1");
 
-        // ============================ PROPOSED PUBLIC API ============================
-        //   VariantManager vm = n.getVariantManager();
-        //   vm.cloneVariant("InitialState", "expansion", VariantCloneStrategy.STRUCTURAL);
-        //   vm.setWorkingVariant("expansion");
-        //   vl1.newGenerator().setId("NEW_CCGT").setConnectableBus("b1").setBus("b1")
-        //         .setMinP(0).setMaxP(400).setTargetP(350).setTargetV(400).setVoltageRegulatorOn(true)
-        //         .setEnergySource(EnergySource.THERMAL).add();          // scoped to "expansion"
-        // ============================================================================
-        // (runs today through the equivalent internal helper)
-        VariantScopedConnectableAdd.addInVariant(n, "expansion",
-                () -> vl1.newGenerator().setId("NEW_CCGT").setConnectableBus("b1").setBus("b1")
-                        .setMinP(0).setMaxP(400).setTargetP(350).setTargetV(400).setVoltageRegulatorOn(true)
-                        .setEnergySource(EnergySource.THERMAL).add(),
-                vl1);
+        // ===== the real public API — a STRUCTURAL clone, then the ordinary adder, scoped automatically ==
+        VariantManager vm = n.getVariantManager();
+        vm.cloneVariant(INITIAL, "expansion", VariantCloneStrategy.STRUCTURAL);
+        vm.setWorkingVariant("expansion");
+        vl1.newGenerator().setId("NEW_CCGT").setConnectableBus("b1").setBus("b1")
+                .setMinP(0).setMaxP(400).setTargetP(350).setTargetV(400).setVoltageRegulatorOn(true)
+                .setEnergySource(EnergySource.THERMAL).add();
+        // ================================================================================================
 
         // in the "expansion" variant the new unit exists (a load flow here would see the expanded grid)
-        n.getVariantManager().setWorkingVariant("expansion");
         assertNotNull(n.getGenerator("NEW_CCGT"));
 
         // the base scenario, on the SAME network, does not have it
-        n.getVariantManager().setWorkingVariant(INITIAL);
+        vm.setWorkingVariant(INITIAL);
         assertNull(n.getGenerator("NEW_CCGT"));
     }
 
@@ -83,12 +78,13 @@ class StructuralVariantApiExampleTest {
     void example2ShortCircuitFaultOnLine() {
         NetworkImpl n = smallGrid();
 
-        // ============================ PROPOSED PUBLIC API ============================
+        // ===== PROPOSED PUBLIC API (Phase 1 remaining: this split CREATES a new voltage level Vf, whose
+        //       existence must be variant-scoped too — the container-add case not yet auto-scoped): =======
         //   vm.cloneVariant("InitialState", "fault", VariantCloneStrategy.STRUCTURAL);
         //   vm.setWorkingVariant("fault");
-        //   // the ordinary iidm-modification, scoped to "fault":
         //   new CreateVoltageLevelOnLine(40, ..., "LINE12", "HALF_A", "HALF_B", "Vf", ...).apply(n);
-        // ============================================================================
+        // (add/remove of connectables already scope automatically — see examples 1 and 3 and
+        //  StructuralVariantRemoveTest; container-creating splits run today via the internal helper:)
         VariantScopedLineSplit.split(n, "fault", "LINE12", 40.0, "SFx", "Vf", "busF", "HALF_A", "HALF_B");
 
         // the "fault" variant shows the line split at a mid-line fictitious voltage level
@@ -107,26 +103,19 @@ class StructuralVariantApiExampleTest {
     @Test
     void example3ContingencyRemoveAUnit() {
         NetworkImpl n = smallGrid();
-        VoltageLevelExt vl1 = (VoltageLevelExt) n.getVoltageLevel("VL1");
-        VariantScopedExistence existence = n.enableVariantScopedExistence();
-        VariantScopedMembership membership = n.enableVariantScopedMembership();
-        TerminalExt gen1Terminal = (TerminalExt) n.getGenerator("GEN1").getTerminal();
 
-        // ============================ PROPOSED PUBLIC API ============================
-        //   vm.cloneVariant("InitialState", "n-1-gen1", VariantCloneStrategy.STRUCTURAL);
-        //   vm.setWorkingVariant("n-1-gen1");
-        //   n.getGenerator("GEN1").remove();                             // scoped to "n-1-gen1"
-        // ============================================================================
-        n.getVariantManager().cloneVariant(INITIAL, "n-1-gen1");
-        n.getVariantManager().setWorkingVariant("n-1-gen1");
-        existence.hideInCurrentVariant("GEN1");
-        membership.detachInCurrentVariant(vl1, gen1Terminal);
+        // ===== the real public API — a STRUCTURAL clone, then the ordinary remove(), scoped automatically
+        VariantManager vm = n.getVariantManager();
+        vm.cloneVariant(INITIAL, "n-1-gen1", VariantCloneStrategy.STRUCTURAL);
+        vm.setWorkingVariant("n-1-gen1");
+        n.getGenerator("GEN1").remove();
+        // ================================================================================================
 
         // GEN1 is out in the contingency variant (a structural removal, not just a disconnection)...
         assertNull(n.getGenerator("GEN1"));
 
         // ...and still present in the base scenario on the same network
-        n.getVariantManager().setWorkingVariant(INITIAL);
+        vm.setWorkingVariant(INITIAL);
         assertNotNull(n.getGenerator("GEN1"));
     }
 }

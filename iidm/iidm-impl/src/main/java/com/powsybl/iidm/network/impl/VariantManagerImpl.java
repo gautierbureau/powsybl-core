@@ -38,6 +38,10 @@ public class VariantManagerImpl implements VariantManager {
 
     private final Deque<Integer> unusedIndexes = new ArrayDeque<>();
 
+    // Variant indexes cloned with VariantCloneStrategy.STRUCTURAL: structural mutations (add/remove) made
+    // while one of these is the working variant are scoped to it instead of applying network-wide.
+    private final Set<Integer> structuralVariantIndexes = new HashSet<>();
+
     private final NetworkImpl network;
 
     VariantManagerImpl(NetworkImpl network) {
@@ -203,11 +207,29 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     @Override
+    public void cloneVariant(String sourceVariantId, List<String> targetVariantIds, VariantCloneStrategy strategy, boolean mayOverwrite) {
+        Objects.requireNonNull(strategy);
+        cloneVariant(sourceVariantId, targetVariantIds, mayOverwrite);
+        if (strategy == VariantCloneStrategy.STRUCTURAL) {
+            // the network resolves object existence and terminal membership against the active variant
+            network.enableVariantScopedExistence();
+            network.enableVariantScopedMembership();
+            targetVariantIds.forEach(id -> structuralVariantIndexes.add(getVariantIndex(id)));
+        }
+    }
+
+    /** Whether structural mutations (add/remove/reconnect) made now are scoped to the working variant. */
+    boolean isCurrentVariantStructural() {
+        return variantContext.isIndexSet() && structuralVariantIndexes.contains(variantContext.getVariantIndex());
+    }
+
+    @Override
     public void removeVariant(String variantId) {
         if (VariantManagerConstants.INITIAL_VARIANT_ID.equals(variantId)) {
             throw new PowsyblException("Removing initial variant is forbidden");
         }
         int index = getVariantIndex(variantId);
+        structuralVariantIndexes.remove(index);
         id2index.remove(variantId);
         LOGGER.debug("Removing variant '{}'", variantId);
         if (index == variantArraySize - 1) {
