@@ -7,7 +7,10 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.iidm.network.EnergySource;
+import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.Line;
+import com.powsybl.iidm.network.MinMaxReactiveLimits;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
@@ -15,6 +18,7 @@ import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -136,6 +140,44 @@ class StructuralBranchLineSplitTest {
         assertEquals(1, base.getLineCount());
         assertNotNull(base.getLoad("LD"));
         assertNotSame(base.getLoad("LD"), branch.getLoad("LD"));
+    }
+
+    @Test
+    void splitLineApiReHomesEndpointGenerator() {
+        // A generator at an endpoint: the fault-current source for a short-circuit study must survive
+        // materialisation into the branch.
+        Network base = Network.create("base", "test");
+        Substation sa = base.newSubstation().setId("SA").add();
+        VoltageLevel vla = sa.newVoltageLevel().setId("VLA").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vla.getBusBreakerView().newBus().setId("busA").add();
+        Generator g = vla.newGenerator().setId("G").setConnectableBus("busA").setBus("busA")
+                .setMinP(0).setMaxP(100).setTargetP(50).setTargetV(400).setVoltageRegulatorOn(true)
+                .setEnergySource(EnergySource.HYDRO).add();
+        g.newMinMaxReactiveLimits().setMinQ(-50).setMaxQ(50).add();
+        Substation sb = base.newSubstation().setId("SB").add();
+        VoltageLevel vlb = sb.newVoltageLevel().setId("VLB").setNominalV(400).setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vlb.getBusBreakerView().newBus().setId("busB").add();
+        newLine(base, "L", "VLA", "busA", "VLB", "busB", 1.0, 10.0);
+
+        NetworkImpl branch = BranchLineSplit.split((NetworkImpl) base, "branch", "L", 50.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        Generator gB = branch.getGenerator("G");
+        assertNotNull(gB);
+        assertNotSame(base.getGenerator("G"), gB);
+        assertEquals(50.0, gB.getTargetP(), 1e-9);
+        assertEquals(400.0, gB.getTargetV(), 1e-9);
+        assertEquals(EnergySource.HYDRO, gB.getEnergySource());
+        MinMaxReactiveLimits limits = assertInstanceOf(MinMaxReactiveLimits.class, gB.getReactiveLimits());
+        assertEquals(-50.0, limits.getMinQ(), 1e-9);
+        assertEquals(50.0, limits.getMaxQ(), 1e-9);
+        assertNull(branch.getLine("L"));
+        assertEquals(2, branch.getLineCount());
+
+        // base untouched
+        assertNotNull(base.getLine("L"));
+        assertNotNull(base.getGenerator("G"));
+        assertNull(base.getVoltageLevel("Vf"));
     }
 
     @Test
