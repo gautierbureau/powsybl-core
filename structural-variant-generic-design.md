@@ -112,8 +112,42 @@ instead of switching to a record model.
   calculated-bus view (`branchDetachedTerminalsOnNodes`). A half-line branch-attaches at the split
   line's freed feeder node without mutating the shared graph; the enumeration and calculated-bus folds
   show `L1`/`L2` and keep the through-line `M` on the shared VL with no rebind. Both topology kinds now
-  pass `StructuralBranchLineSplitV2Test` (full iidm-impl suite green, 1021 tests). Remaining for full
-  v2: replacing `BranchFlattener` with copy-then-replay.
+  pass `StructuralBranchLineSplitV2Test`.
+- **Generic flatten (built, validated).** The last per-type class, `BranchFlattener`, is replaced by a
+  flatten that carries **zero per-type code**: `BranchFlattenerV2.flatten` = a generic base copy +
+  replaying the branch's recorded structural delta. The base copy is an injected
+  `UnaryOperator<Network>` — in production `NetworkSerDe::copy` (all types + extensions, maintained by
+  IIDM), injected because `NetworkSerDe` lives in the downstream `iidm-serde` module while `iidm-impl`
+  depends only on `iidm-api`. The delta is recorded by the split operation as public-API mutations
+  (`BranchContext.recordStructuralDelta`/`replayStructuralDelta`): really remove the line, really add
+  the fictitious VL and half-lines. The result is a plain, self-contained network — the test asserts
+  every element's parent is the flat network (the exact bug the flatten fixes) — for both topology
+  kinds. Full iidm-impl suite green (1023 tests). **v2 is now complete: the split and its serialization
+  carry no per-type code.**
+
+## From spike to integration (naming is scaffolding)
+
+The `...V2` class names (`BranchLineSplitV2`, `BranchFlattenerV2`) and the parallel-to-v1 layout are
+**spike scaffolding**, kept only so v1 and v2 coexist while v2 is proven. A real integration into
+powsybl would carry none of them; it folds this behaviour into IIDM's existing design rather than adding
+a second lineage beside it:
+
+- **No `...V2` classes.** The don't-copy split becomes the implementation *of* the existing
+  line-splitting modification (`iidm-modification`'s `ConnectVoltageLevelOnLine` / split-line family),
+  not a sibling class. `BranchLineSplit` (v1) is retired in favour of it.
+- **The primitives become first-class, unconditional.** `branch-attached` / `branch-detached` terminal
+  membership and the branch-attach add stop being a spike side-channel gated by `branchAttachmentHint`
+  and become the sanctioned way a structural branch expresses a membership delta — reviewed as core
+  topology-model API, not a hint flag.
+- **Flatten wires to the real copier.** `BranchFlattenerV2`'s injected `UnaryOperator<Network>` is bound
+  to `NetworkSerDe::copy` at the serialization boundary (in `iidm-serde`, which already depends on
+  `iidm-impl`), so no `iidm-impl → iidm-serde` dependency is introduced; the recorded-delta replay stays
+  in core.
+- **The branch itself** (`OverlayNetworkIndex` + `BranchContext` + thread-local) is the piece that needs
+  a deliberate home and public contract — see the v2.1 discussion for how far that unification could go.
+
+In short: v2 proves the *mechanism* with throwaway names; integration is a rename-and-merge into the
+existing modification, topology-model, and serialization surfaces, not new parallel types.
 
 ## Honest trade-off
 

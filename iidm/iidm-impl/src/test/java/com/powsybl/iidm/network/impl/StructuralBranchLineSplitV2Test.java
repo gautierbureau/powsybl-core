@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Structural-variant spike <b>v2</b> (generic, don't-copy) de-risking prototype. See
@@ -149,6 +150,64 @@ class StructuralBranchLineSplitV2Test {
         assertEquals(List.of("L", "M"), BranchLineSplitV2.lineIdsInBranchView(vlbBase));
         assertNull(base.getVoltageLevel("Vf"));
         assertEquals(2, base.getLineCount());
+    }
+
+    @Test
+    void flattenIsGenericCopyPlusReplayAndSelfContained() {
+        // Generic flatten: copy(base) + replay the recorded structural delta, no per-type code. The
+        // injected copier stands in for NetworkSerDe::copy (which lives downstream of iidm-impl).
+        NetworkImpl base = (NetworkImpl) buildBase();
+        NetworkImpl branch = BranchLineSplitV2.split(base, "branch", "L", 40.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        Network flat = BranchFlattenerV2.flatten(branch, ignored -> buildBase());
+
+        // structure: the split is applied on a full network (base's through-line M preserved)
+        assertNull(flat.getLine("L"));
+        assertNotNull(flat.getLine("L1"));
+        assertNotNull(flat.getLine("L2"));
+        assertNotNull(flat.getVoltageLevel("Vf"));
+        assertEquals(List.of("L1"), BranchLineSplitV2.lineIdsInBranchView(flat.getVoltageLevel("VLA")));
+        assertEquals(List.of("L2", "M"), BranchLineSplitV2.lineIdsInBranchView(flat.getVoltageLevel("VLB")));
+        assertEquals(0.4, flat.getLine("L1").getR(), 1e-9);
+        assertEquals(0.6, flat.getLine("L2").getR(), 1e-9);
+
+        // self-contained: every element is owned by the flat network (the bug the flatten fixes — a
+        // structural branch shares base objects whose parent is the base, so they would be dropped).
+        assertTrue(flat.getVoltageLevelStream().allMatch(vl -> vl.getParentNetwork() == flat));
+        assertTrue(flat.getLineStream().allMatch(l -> l.getParentNetwork() == flat));
+        assertTrue(flat.getSubstationStream().allMatch(s -> s.getParentNetwork() == flat));
+
+        // the base instance is never mutated by the flatten
+        assertNotNull(base.getLine("L"));
+        assertNull(base.getVoltageLevel("Vf"));
+    }
+
+    @Test
+    void flattenHandlesNodeBreakerBranch() {
+        NetworkImpl base = (NetworkImpl) Network.create("base", "test");
+        nodeBreakerVl(base, "VLA", 1);
+        nodeBreakerVl(base, "VLB", 2);
+        nodeBreakerVl(base, "VLC", 1);
+        nodeBreakerLine(base, "L", "VLA", 1, "VLB", 1);
+        nodeBreakerLine(base, "M", "VLB", 2, "VLC", 1);
+        NetworkImpl branch = BranchLineSplitV2.split(base, "branch", "L", 50.0,
+                "SF", "Vf", "busF", "L1", "L2");
+
+        Network flat = BranchFlattenerV2.flatten(branch, ignored -> {
+            NetworkImpl copy = (NetworkImpl) Network.create("base", "test");
+            nodeBreakerVl(copy, "VLA", 1);
+            nodeBreakerVl(copy, "VLB", 2);
+            nodeBreakerVl(copy, "VLC", 1);
+            nodeBreakerLine(copy, "L", "VLA", 1, "VLB", 1);
+            nodeBreakerLine(copy, "M", "VLB", 2, "VLC", 1);
+            return copy;
+        });
+
+        assertNull(flat.getLine("L"));
+        assertEquals(List.of("L1"), BranchLineSplitV2.lineIdsInBranchView(flat.getVoltageLevel("VLA")));
+        assertEquals(List.of("L2", "M"), BranchLineSplitV2.lineIdsInBranchView(flat.getVoltageLevel("VLB")));
+        assertTrue(flat.getLineStream().allMatch(l -> l.getParentNetwork() == flat));
     }
 
     private static void nodeBreakerVl(Network n, String id, int feederCount) {
