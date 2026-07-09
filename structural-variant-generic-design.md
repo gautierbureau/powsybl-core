@@ -96,11 +96,16 @@ instead of switching to a record model.
 - Add: `branch-detached` set + its subtraction in the folds (small, symmetric to what exists); the
   adder **branch-attach mode**; rewrite `BranchLineSplit` to the shared-VL model; replace
   `BranchFlattener` with copy-then-replay.
-- **De-risking prototype (recommended first):** the branch-detached fold + branch-attach add, on the
-  existing `VLA--L--VLB--M--VLC`, splitting `L` with **no** materialisation — assert the branch shows
-  `VLA[busA]→L1`, `VLB[busB]→L2`, `M` still on the shared `VLB`, base untouched, and that the endpoint
-  VLs and their contents were never copied. That retires the one new primitive (branch-detached +
-  branch-scoped add) before rewriting the operation.
+- **De-risking prototype (built, validated).** The branch-detached fold + branch-attach add, on the
+  existing `VLA--L--VLB--M--VLC`, splitting `L` with **no** materialisation — the branch shows
+  `VLA[busA]→L1`, `VLB[busB]→L2`, `M` still on the shared `VLB`, base untouched, and the endpoint VLs
+  are the **same shared objects** (`assertSame`, not copies). Implemented as `BranchLineSplitV2` +
+  `BranchContext.detach`/`beginBranchAttach`/`branchAttach`, the `branch-detached` subtraction in
+  `AbstractTopologyModel`'s enumeration and `MergedBus`'s bus view, and the `branchAttachIntercept` on
+  `BusBreakerTopologyModel.attach`; proven by `StructuralBranchLineSplitV2Test`. This retires both new
+  primitives (branch-detached + branch-scoped add) with zero per-type code, before rewriting the full
+  operation. Remaining for full v2: node/breaker endpoints (intercept + `CalculatedBusImpl` bus-view
+  subtraction), then replacing `BranchFlattener` with copy-then-replay.
 
 ## Honest trade-off
 

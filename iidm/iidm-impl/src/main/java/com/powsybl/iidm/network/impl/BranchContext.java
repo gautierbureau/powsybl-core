@@ -10,7 +10,9 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.iidm.network.VariantManagerConstants;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,14 @@ final class BranchContext {
     private final Map<TerminalExt, VoltageLevelExt> voltageLevelOverride = new HashMap<>();
     private final Map<TerminalExt, Integer> nodeOverride = new HashMap<>();
     private final Map<VoltageLevelExt, Set<TerminalExt>> branchAttached = new HashMap<>();
+
+    // v2 (generic, don't-copy) machinery. branchDetached hides a base-graph terminal from a shared
+    // voltage level in the branch view (symmetric to branchAttached, which shows a new terminal on it);
+    // together they express a split as a terminal-membership delta over shared VLs, with no VL copy.
+    // branchAttachTargets are the shared VLs onto which the connectable-add currently in progress must
+    // branch-attach (record the new terminal in the context) instead of mutating the shared graph.
+    private final Map<VoltageLevelExt, Set<TerminalExt>> branchDetached = new HashMap<>();
+    private final Set<VoltageLevelExt> branchAttachTargets = new HashSet<>();
 
     // Per-branch state column: the base whose working variant is switched while this context is active,
     // and the base variant id the branch operates in. A branch reads/writes a shared object's variant
@@ -185,5 +195,71 @@ final class BranchContext {
             }
         }
         return result;
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // v2 (generic, don't-copy): branch-detached (hide a base terminal) + branch-attach add (add a
+    // branch-owned terminal onto a shared VL without mutating its graph). See
+    // structural-variant-generic-design.md.
+    // -------------------------------------------------------------------------------------------------
+
+    /**
+     * Hide {@code terminal} from {@code voltageLevel} in this branch's view — the branch-detached
+     * primitive. The terminal stays physically in the base graph; the folds subtract it. Used to remove
+     * a split line's terminals from the shared endpoint VLs without touching the base.
+     */
+    void detach(TerminalExt terminal, VoltageLevelExt voltageLevel) {
+        branchDetached.computeIfAbsent(voltageLevel, k -> new LinkedHashSet<>()).add(terminal);
+        // activate the folds on this shared VL (same hint the reverse union uses; empty when no context)
+        ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
+    }
+
+    /** The base-graph terminals hidden from {@code voltageLevel} in this branch. */
+    Set<TerminalExt> branchDetachedTerminals(VoltageLevelExt voltageLevel) {
+        return branchDetached.getOrDefault(voltageLevel, Set.of());
+    }
+
+    /** Bus view: the connected branch-detached terminals of {@code voltageLevel} whose bus is in {@code busIds}. */
+    List<TerminalExt> branchDetachedConnectedTerminals(VoltageLevelExt voltageLevel, Set<String> busIds) {
+        Set<TerminalExt> detached = branchDetached.get(voltageLevel);
+        if (detached == null || detached.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : detached) {
+            if (terminal instanceof BusTerminal busTerminal
+                    && busIds.contains(busTerminal.getConnectableBusId()) && busTerminal.isConnected()) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Open a branch-attach window over {@code sharedVoltageLevels}: while open, a connectable-add whose
+     * terminal targets one of these shared VLs records the terminal in this context (branch-attached)
+     * instead of entering the shared VL's graph. Terminals targeting other (branch-owned) VLs attach
+     * normally. Must be paired with {@link #endBranchAttach()}.
+     */
+    void beginBranchAttach(Collection<VoltageLevelExt> sharedVoltageLevels) {
+        branchAttachTargets.addAll(sharedVoltageLevels);
+    }
+
+    void endBranchAttach() {
+        branchAttachTargets.clear();
+    }
+
+    boolean isBranchAttachTarget(VoltageLevelExt voltageLevel) {
+        return branchAttachTargets.contains(voltageLevel);
+    }
+
+    /**
+     * Record {@code terminal} as branch-attached to the shared {@code voltageLevel} (reverse fold only:
+     * the terminal's own voltage-level field already points at {@code voltageLevel}, so the forward
+     * direction needs no override — unlike a rebind of a pre-existing shared terminal).
+     */
+    void branchAttach(TerminalExt terminal, VoltageLevelExt voltageLevel) {
+        branchAttached.computeIfAbsent(voltageLevel, k -> new LinkedHashSet<>()).add(terminal);
+        ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
     }
 }

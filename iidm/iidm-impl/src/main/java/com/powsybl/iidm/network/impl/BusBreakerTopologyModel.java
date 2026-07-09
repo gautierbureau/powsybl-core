@@ -904,6 +904,11 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
         if (test) {
             return;
         }
+        // v2 (structural-variant branching): a branch-owned connectable attaching onto a shared VL is
+        // recorded in the branch context, not added to the shared graph. No-op in all normal use.
+        if (branchAttachIntercept(terminal)) {
+            return;
+        }
         // create the link terminal -> voltage level
         terminal.setVoltageLevel(voltageLevel);
 

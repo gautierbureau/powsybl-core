@@ -50,23 +50,39 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
     }
 
     // Spike (structural-variant branching): under an active branch context, a merged bus over
-    // branch-owned configured buses also includes the terminals rebound onto them. No active context
-    // (all normal use) -> empty, so behaviour is unchanged.
+    // branch-owned configured buses also includes the terminals rebound onto them, and (v2) excludes
+    // the terminals branch-detached from them. No active context (all normal use) -> empty, unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
         BranchContext context = ThreadLocalBranchContext.get();
         if (context == null) {
             return List.of();
         }
-        VoltageLevelExt voltageLevel = (VoltageLevelExt) buses.iterator().next().getVoltageLevel();
+        return context.branchAttachedConnectedTerminals(voltageLevel(), busIds());
+    }
+
+    private List<TerminalExt> branchDetachedConnectedTerminals() {
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context == null) {
+            return List.of();
+        }
+        return context.branchDetachedConnectedTerminals(voltageLevel(), busIds());
+    }
+
+    private VoltageLevelExt voltageLevel() {
+        return (VoltageLevelExt) buses.iterator().next().getVoltageLevel();
+    }
+
+    private Set<String> busIds() {
         Set<String> busIds = new HashSet<>();
         buses.forEach(b -> busIds.add(b.getId()));
-        return context.branchAttachedConnectedTerminals(voltageLevel, busIds);
+        return busIds;
     }
 
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
         return buses.stream().mapToInt(ConfiguredBus::getConnectedTerminalCount).sum()
+                - branchDetachedConnectedTerminals().size()
                 + branchAttachedConnectedTerminals().size();
     }
 
@@ -75,6 +91,10 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
         checkValidity();
         Iterable<TerminalExt> own = buses.stream().map(ConfiguredBus::getConnectedTerminals)
                 .reduce(Iterables::concat).orElse(Collections.emptyList());
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
+        if (!detached.isEmpty()) {
+            own = Iterables.filter(own, t -> !detached.contains(t));
+        }
         List<TerminalExt> attached = branchAttachedConnectedTerminals();
         return attached.isEmpty() ? own : Iterables.concat(own, attached);
     }
@@ -82,8 +102,12 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        return Stream.concat(buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream),
-                branchAttachedConnectedTerminals().stream());
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
+        Stream<TerminalExt> own = buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream);
+        if (!detached.isEmpty()) {
+            own = own.filter(t -> !detached.contains(t));
+        }
+        return Stream.concat(own, branchAttachedConnectedTerminals().stream());
     }
 
     @Override

@@ -98,15 +98,29 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     }
 
     private Iterable<Terminal> terminalsWithBranchAttached() {
-        Iterable<Terminal> own = getTerminals();
         Set<TerminalExt> attached = branchAttachedTerminals();
-        return attached.isEmpty() ? own
-                : FluentIterable.from(own).append(FluentIterable.from(attached).transform(t -> (Terminal) t));
+        Set<TerminalExt> detached = branchDetachedTerminals();
+        if (attached.isEmpty() && detached.isEmpty()) {
+            return getTerminals();
+        }
+        FluentIterable<Terminal> result = FluentIterable.from(getTerminals());
+        if (!detached.isEmpty()) {
+            result = FluentIterable.from(result.filter(t -> !detached.contains(t)));
+        }
+        return attached.isEmpty() ? result
+                : result.append(FluentIterable.from(attached).transform(t -> (Terminal) t));
     }
 
     private Stream<Terminal> terminalStreamWithBranchAttached() {
-        Stream<Terminal> own = getTerminalStream();
         Set<TerminalExt> attached = branchAttachedTerminals();
+        Set<TerminalExt> detached = branchDetachedTerminals();
+        if (attached.isEmpty() && detached.isEmpty()) {
+            return getTerminalStream();
+        }
+        Stream<Terminal> own = getTerminalStream();
+        if (!detached.isEmpty()) {
+            own = own.filter(t -> !detached.contains(t));
+        }
         return attached.isEmpty() ? own : Stream.concat(own, attached.stream().map(t -> (Terminal) t));
     }
 
@@ -116,6 +130,29 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         }
         BranchContext context = ThreadLocalBranchContext.get();
         return context == null ? Set.of() : context.branchAttachedTerminals(voltageLevel);
+    }
+
+    private Set<TerminalExt> branchDetachedTerminals() {
+        if (!branchAttachmentHint) {
+            return Set.of();
+        }
+        BranchContext context = ThreadLocalBranchContext.get();
+        return context == null ? Set.of() : context.branchDetachedTerminals(voltageLevel);
+    }
+
+    /**
+     * v2 branch-attach add: when a connectable-add targets this (shared) voltage level under an active
+     * branch-attach window, record the just-created terminal as branch-attached in the context instead
+     * of entering this VL's graph — the shared base is not mutated. Returns {@code true} if handled.
+     */
+    protected boolean branchAttachIntercept(TerminalExt terminal) {
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context == null || !context.isBranchAttachTarget(voltageLevel)) {
+            return false;
+        }
+        terminal.setVoltageLevel(voltageLevel);
+        context.branchAttach(terminal, voltageLevel);
+        return true;
     }
 
     public <T extends Connectable> Iterable<T> getConnectables(Class<T> clazz) {
