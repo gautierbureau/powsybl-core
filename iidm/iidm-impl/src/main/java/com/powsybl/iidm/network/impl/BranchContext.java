@@ -7,6 +7,7 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.VariantManagerConstants;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * <p><b>Spike — structural variant / copy-on-write branching, cascade de-risking.</b> See
@@ -48,6 +50,11 @@ final class BranchContext {
     // branch-attach (record the new terminal in the context) instead of mutating the shared graph.
     private final Map<VoltageLevelExt, Set<TerminalExt>> branchDetached = new HashMap<>();
     private final Set<VoltageLevelExt> branchAttachTargets = new HashSet<>();
+
+    // The branch's structural delta as replayable operations on a plain full network, recorded by the
+    // operation that built the branch (see BranchLineSplitV2). Flatten = generic copy(base) + this
+    // replay via the public API — no per-type copy code (see BranchFlattenerV2).
+    private final List<Consumer<Network>> structuralDelta = new ArrayList<>();
 
     // Per-branch state column: the base whose working variant is switched while this context is active,
     // and the base variant id the branch operates in. A branch reads/writes a shared object's variant
@@ -277,5 +284,15 @@ final class BranchContext {
     void branchAttach(TerminalExt terminal, VoltageLevelExt voltageLevel) {
         branchAttached.computeIfAbsent(voltageLevel, k -> new LinkedHashSet<>()).add(terminal);
         ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
+    }
+
+    /** Record one structural-delta operation to replay (in order) on a plain copy of the base when flattening. */
+    void recordStructuralDelta(Consumer<Network> operation) {
+        structuralDelta.add(operation);
+    }
+
+    /** Replay the recorded structural delta on {@code target} (a full, plain copy of the base), via the public API. */
+    void replayStructuralDelta(Network target) {
+        structuralDelta.forEach(operation -> operation.accept(target));
     }
 }

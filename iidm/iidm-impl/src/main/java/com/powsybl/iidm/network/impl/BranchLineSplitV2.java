@@ -9,6 +9,7 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Line;
+import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.TopologyKind;
@@ -96,6 +97,20 @@ final class BranchLineSplitV2 {
                 context.endBranchAttach();
             }
         });
+
+        // 4. record the same split as a replayable structural delta on a plain full copy of the base
+        //    (for flatten-on-write): really remove the line and really add the fictitious VL + half-lines,
+        //    via the public API. Generic flatten = copy(base) + this replay (see BranchFlattenerV2).
+        double nominalV = vl1.getNominalV();
+        context.recordStructuralDelta(target -> {
+            target.getLine(lineId).remove();
+            Substation replaySf = target.newSubstation().setId(fictSubId).setFictitious(true).add();
+            replaySf.newVoltageLevel().setId(fictVlId).setNominalV(nominalV).setFictitious(true)
+                    .setTopologyKind(TopologyKind.BUS_BREAKER).add()
+                    .getBusBreakerView().newBus().setId(fictBusId).add();
+            addHalfLine(target, line1Id, vl1.getId(), a1, fictVlId, Attach.bus(fictBusId), r * p, x * p);
+            addHalfLine(target, line2Id, fictVlId, Attach.bus(fictBusId), vl2.getId(), a2, r * (1 - p), x * (1 - p));
+        });
         return branch;
     }
 
@@ -106,7 +121,7 @@ final class BranchLineSplitV2 {
         return Attach.bus(t.getBusBreakerView().getConnectableBus().getId());
     }
 
-    private static void addHalfLine(NetworkImpl n, String id, String vlA, Attach a, String vlB, Attach b,
+    private static void addHalfLine(Network n, String id, String vlA, Attach a, String vlB, Attach b,
                                     double r, double x) {
         var adder = n.newLine().setId(id).setVoltageLevel1(vlA).setVoltageLevel2(vlB)
                 .setR(r).setX(x).setG1(0).setB1(0).setG2(0).setB2(0);
