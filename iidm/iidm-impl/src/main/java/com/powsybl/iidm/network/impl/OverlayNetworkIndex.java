@@ -10,41 +10,36 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Identifiable;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Spike — structural variant / copy-on-write network branching.</b> Not yet wired into
- * {@link NetworkImpl}; exercised only by {@code OverlayNetworkIndexTest}. See
+ * <p><b>Spike — structural variant / copy-on-write network branching.</b> See
  * {@code structural-variant-spike.md}.</p>
  *
- * <p>Read-mostly overlay over a shared, read-only base {@link NetworkIndex}. A structural branch of a
- * network shares its parent's whole object registry by reference and records only a small
- * <em>delta</em> on top:</p>
- * <ul>
- *   <li><b>additions</b> — objects that exist only in the branch (e.g. the fictitious voltage level
- *       and the two half-lines created when a line is split at a fault point), and</li>
- *   <li><b>tombstones</b> — ids of base objects hidden in the branch (e.g. the original line that was
- *       split).</li>
- * </ul>
+ * <p>A {@link NetworkIndex} subclass that acts as a read-mostly <em>overlay</em> over a shared,
+ * read-only base index. Because it <em>is</em> a {@code NetworkIndex}, a {@link NetworkImpl} can hold
+ * one in place of a plain index (see {@link NetworkImpl#createStructuralBranch}) and all of its
+ * {@code index.xxx} call sites work unchanged — the branch becomes a traversable {@code Network}.</p>
  *
- * <p>Every read merges the delta over the base: a tombstoned id reads as absent, an added id shadows
- * the base, everything else falls through to the shared base. The base index is never mutated, so the
- * parent network and any sibling branch are unaffected — structural isolation without copying the
- * untouched graph. Memory is O(delta), not O(network).</p>
- *
- * <p>This mirrors the read surface of {@link NetworkIndex} used by {@code NetworkImpl}
- * ({@code get}, {@code get(id, class)}, {@code contains}, {@code getAll}, {@code getAll(class)}) plus
- * the two structural mutations a branch performs ({@code add}, {@code tombstone}).</p>
+ * <p>A structural branch shares the parent's whole object registry by reference and records only a
+ * small <em>delta</em> on top: <em>additions</em> (objects that exist only in the branch, e.g. the
+ * fictitious voltage level and the two half-lines when a line is split at a fault point) and
+ * <em>tombstones</em> (ids of base objects hidden in the branch, e.g. the original line). Every read
+ * merges the delta over the base; the inherited base-class storage is left unused, and the shared base
+ * index is never mutated — so the parent network and any sibling branch are unaffected. Memory is
+ * O(delta), not O(network).</p>
  *
  * @author Claude
  */
-class OverlayNetworkIndex {
+class OverlayNetworkIndex extends NetworkIndex {
 
     private final NetworkIndex base;
 
@@ -63,13 +58,12 @@ class OverlayNetworkIndex {
         if (viaAdded != null) {
             return viaAdded;
         }
-        // Fall through to the base's alias table by asking it to resolve; base.get(alias) already
-        // resolves aliases, but here we only need the canonical id, so probe the object.
         Identifiable<?> baseObj = base.get(idOrAlias);
         return baseObj != null ? baseObj.getId() : idOrAlias;
     }
 
-    Identifiable<?> get(String idOrAlias) {
+    @Override
+    Identifiable get(String idOrAlias) {
         NetworkIndex.checkId(idOrAlias);
         String id = resolveAlias(idOrAlias);
         if (tombstoned.contains(id)) {
@@ -82,6 +76,7 @@ class OverlayNetworkIndex {
         return base.get(id);
     }
 
+    @Override
     <T extends Identifiable> T get(String id, Class<T> clazz) {
         Identifiable<?> obj = get(id);
         if (obj != null && clazz.isAssignableFrom(obj.getClass())) {
@@ -90,10 +85,12 @@ class OverlayNetworkIndex {
         return null;
     }
 
+    @Override
     boolean contains(String idOrAlias) {
         return get(idOrAlias) != null;
     }
 
+    @Override
     <T extends Identifiable> Set<T> getAll(Class<T> clazz) {
         Set<? extends Identifiable> baseAll = base.getAll(clazz);
         Set<Identifiable<?>> added = addedByClass.get(clazz);
@@ -112,6 +109,7 @@ class OverlayNetworkIndex {
         return (Set<T>) merged;
     }
 
+    @Override
     Collection<Identifiable<?>> getAll() {
         if (tombstoned.isEmpty() && addedById.isEmpty()) {
             return base.getAll();
@@ -126,22 +124,53 @@ class OverlayNetworkIndex {
         return Collections.unmodifiableCollection(merged);
     }
 
-    /** Add an object that exists only in this branch. */
-    void add(Identifiable<?> obj) {
+    @Override
+    List<MultiVariantObject> getStatefulObjects() {
+        List<MultiVariantObject> stateful = new ArrayList<>();
+        for (MultiVariantObject obj : base.getStatefulObjects()) {
+            if (obj instanceof Identifiable<?> identifiable && !tombstoned.contains(identifiable.getId())) {
+                stateful.add(obj);
+            }
+        }
+        for (Identifiable<?> obj : addedById.values()) {
+            if (obj instanceof MultiVariantObject multiVariantObject) {
+                stateful.add(multiVariantObject);
+            }
+        }
+        return stateful;
+    }
+
+    @Override
+    void checkAndAdd(Identifiable<?> obj) {
         NetworkIndex.checkId(obj.getId());
         String id = obj.getId();
         if (get(id) != null) {
-            throw new PowsyblException("Object '" + id + "' already exists in the overlay");
+            throw new PowsyblException("Object (" + obj.getClass().getName() + ") '" + id + "' already exists");
         }
         // Re-adding a previously tombstoned id resurrects it as a branch-local object.
         tombstoned.remove(id);
         addedById.put(id, obj);
-        obj.getAliases().forEach(alias -> addedIdByAlias.put(alias, id));
+        obj.getAliases().forEach(alias -> addAlias(obj, alias));
         addedByClass.computeIfAbsent(obj.getClass(), k -> new LinkedHashSet<>()).add(obj);
     }
 
-    /** Hide an object from this branch. A base object becomes a tombstone; a branch-local one is dropped. */
-    void tombstone(Identifiable<?> obj) {
+    @Override
+    boolean addAlias(Identifiable<?> obj, String alias) {
+        if (get(alias) != null) {
+            throw new PowsyblException(String.format("Object (%s) with alias '%s' cannot be created because alias already exists",
+                    obj.getClass(), alias));
+        }
+        addedIdByAlias.put(alias, obj.getId());
+        return true;
+    }
+
+    @Override
+    public <I extends Identifiable<I>> void removeAlias(Identifiable<?> obj, String alias) {
+        addedIdByAlias.remove(alias);
+    }
+
+    @Override
+    void remove(Identifiable obj) {
         NetworkIndex.checkId(obj.getId());
         String id = obj.getId();
         Identifiable<?> added = addedById.remove(id);
@@ -154,9 +183,19 @@ class OverlayNetworkIndex {
             return;
         }
         if (base.get(id) == null) {
-            throw new PowsyblException("Object '" + id + "' not found to tombstone");
+            throw new PowsyblException("Object (" + obj.getClass().getName() + ") '" + id + "' not found");
         }
         tombstoned.add(id);
+    }
+
+    // --- spike-friendly aliases used by the index-level tests ---
+
+    void add(Identifiable<?> obj) {
+        checkAndAdd(obj);
+    }
+
+    void tombstone(Identifiable<?> obj) {
+        remove(obj);
     }
 
     /** Number of delta entries (additions + tombstones) — the branch's structural footprint. */
