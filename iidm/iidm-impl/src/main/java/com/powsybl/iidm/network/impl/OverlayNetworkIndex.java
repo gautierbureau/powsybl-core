@@ -49,8 +49,25 @@ class OverlayNetworkIndex extends NetworkIndex {
     // Ids (canonical, alias-resolved) of base objects hidden in this branch.
     private final Set<String> tombstoned = new HashSet<>();
 
+    // When set, checkAndAdd lets a branch-owned object shadow a same-id base object (copy-on-write
+    // materialisation of the dirty region), instead of rejecting it as a duplicate.
+    private boolean materializing;
+
     OverlayNetworkIndex(NetworkIndex base) {
         this.base = base;
+    }
+
+    /**
+     * Reconstruct part of the base into this branch as branch-owned copies: while this is set, the
+     * branch's own adders may recreate objects that carry base ids, shadowing the base. Use around the
+     * materialisation of the dirty region (the objects the write path is about to mutate).
+     */
+    void beginMaterialize() {
+        materializing = true;
+    }
+
+    void endMaterialize() {
+        materializing = false;
     }
 
     private String resolveAlias(String idOrAlias) {
@@ -94,6 +111,11 @@ class OverlayNetworkIndex extends NetworkIndex {
 
     @Override
     boolean contains(String idOrAlias) {
+        if (materializing) {
+            // During materialisation a base-only id is "free" so the branch's own adders can rebuild it
+            // (it will shadow the base in checkAndAdd). Only an already branch-local id is taken.
+            return addedById.containsKey(resolveAlias(idOrAlias));
+        }
         return get(idOrAlias) != null;
     }
 
@@ -152,7 +174,13 @@ class OverlayNetworkIndex extends NetworkIndex {
         NetworkIndex.checkId(obj.getId());
         String id = obj.getId();
         if (get(id) != null) {
-            throw new PowsyblException("Object (" + obj.getClass().getName() + ") '" + id + "' already exists");
+            // In materialize mode a branch-owned object may reconstruct (shadow) a base object with the
+            // same id — copy-on-write of the dirty region, so the branch's own adders rebuild the objects
+            // the write path is about to mutate. Outside that mode a visible id is a genuine duplicate.
+            boolean shadowingBase = materializing && !addedById.containsKey(id) && base.get(id) != null;
+            if (!shadowingBase) {
+                throw new PowsyblException("Object (" + obj.getClass().getName() + ") '" + id + "' already exists");
+            }
         }
         // Re-adding a previously tombstoned id resurrects it as a branch-local object.
         tombstoned.remove(id);
@@ -163,7 +191,7 @@ class OverlayNetworkIndex extends NetworkIndex {
 
     @Override
     boolean addAlias(Identifiable<?> obj, String alias) {
-        if (get(alias) != null) {
+        if (!materializing && get(alias) != null) {
             throw new PowsyblException(String.format("Object (%s) with alias '%s' cannot be created because alias already exists",
                     obj.getClass(), alias));
         }
@@ -186,6 +214,12 @@ class OverlayNetworkIndex extends NetworkIndex {
             Set<Identifiable<?>> byClass = addedByClass.get(added.getClass());
             if (byClass != null) {
                 byClass.remove(added);
+            }
+            // If this branch-local object was shadowing a base object with the same id (a copy-on-write
+            // materialisation), removing it must leave the base object hidden — otherwise it would
+            // reappear in the branch. Leave a tombstone.
+            if (base.get(id) != null) {
+                tombstoned.add(id);
             }
             return;
         }
