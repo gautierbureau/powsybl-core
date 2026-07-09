@@ -35,10 +35,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * one load-bearing claim — the same shared {@code M} resolves to {@code VLB'} in the branch and
  * {@code VLB} in the base, with {@code VLC} never materialised — is validated.</p>
  *
- * <p>Forward resolution goes through the public {@code Terminal.getVoltageLevel()} (guarded by the
- * per-terminal override flag + the active {@link BranchContext}); reverse resolution is asserted on the
- * branch-attached set the context records. Wiring the reverse union into
- * {@code VoltageLevel.getConnectables()} is the follow-on plumbing, not the risk this spike retires.</p>
+ * <p>Both directions go through the public API: forward via {@code Terminal.getVoltageLevel()} (guarded
+ * by the per-terminal override flag + the active {@link BranchContext}), reverse via
+ * {@code VoltageLevel.getConnectables()} (guarded by the per-topology-model branch-attachment hint).
+ * The same mechanism is exercised for bus/breaker and node/breaker voltage levels.</p>
  *
  * @author Claude
  */
@@ -60,6 +60,31 @@ class StructuralBranchCascadeSpikeTest {
         }
         newLine(n, "L", "VLA", "bus_VLA", "VLB", "bus_VLB");
         newLine(n, "M", "VLB", "bus_VLB", "VLC", "bus_VLC");
+        return n;
+    }
+
+    private static void nbLine(Network n, String id, String vl1, int node1, String vl2, int node2) {
+        n.newLine().setId(id)
+                .setVoltageLevel1(vl1).setNode1(node1)
+                .setVoltageLevel2(vl2).setNode2(node2)
+                .setR(1).setX(10).setG1(0).setB1(0).setG2(0).setB2(0).add();
+    }
+
+    private static Network buildNodeBreakerChain() {
+        // VLA --L-- VLB --M-- VLC, node/breaker; each VL a busbar at node 0, feeders via disconnectors.
+        Network n = Network.create("base", "test");
+        for (String vl : new String[] {"VLA", "VLB", "VLC"}) {
+            Substation s = n.newSubstation().setId("S_" + vl).add();
+            VoltageLevel v = s.newVoltageLevel().setId(vl).setNominalV(400).setTopologyKind(TopologyKind.NODE_BREAKER).add();
+            v.getNodeBreakerView().newBusbarSection().setId("bbs_" + vl).setNode(0).add();
+        }
+        VoltageLevel vlb = n.getVoltageLevel("VLB");
+        n.getVoltageLevel("VLA").getNodeBreakerView().newDisconnector().setId("dLA").setNode1(0).setNode2(1).add();
+        vlb.getNodeBreakerView().newDisconnector().setId("dLB").setNode1(0).setNode2(1).add();
+        vlb.getNodeBreakerView().newDisconnector().setId("dMB").setNode1(0).setNode2(2).add();
+        n.getVoltageLevel("VLC").getNodeBreakerView().newDisconnector().setId("dMC").setNode1(0).setNode2(1).add();
+        nbLine(n, "L", "VLA", 1, "VLB", 1);
+        nbLine(n, "M", "VLB", 2, "VLC", 1);
         return n;
     }
 
@@ -114,6 +139,46 @@ class StructuralBranchCascadeSpikeTest {
         assertTrue(connectableIds(vlc.getConnectables()).contains("M"), "VLC still hosts M");
 
         // --- BASE INTACT: M still connects VLB -- VLC, VLB still hosts M ---
+        assertEquals(Set.of("VLB", "VLC"),
+                Set.of(m.getTerminal1().getVoltageLevel().getId(), m.getTerminal2().getVoltageLevel().getId()));
+        assertTrue(connectableIds(base.getVoltageLevel("VLB").getConnectables()).contains("M"));
+    }
+
+    @Test
+    void rebindWorksForNodeBreakerVoltageLevelsToo() {
+        // The forward hook is terminal-type-agnostic and the reverse union lives in
+        // AbstractTopologyModel, so the same branch-scoped attachment works for node/breaker VLs.
+        NetworkImpl base = (NetworkImpl) buildNodeBreakerChain();
+        NetworkImpl branch = NetworkImpl.createStructuralBranch(base, "branch");
+        OverlayNetworkIndex overlay = (OverlayNetworkIndex) branch.getIndex();
+
+        // materialise VLB -> VLB' (a branch-owned node/breaker VL; a busbar suffices for this proof)
+        overlay.beginMaterialize();
+        Substation sbB = branch.newSubstation().setId("S_VLB").add();
+        VoltageLevelExt vlbBranch = (VoltageLevelExt) sbB.newVoltageLevel().setId("VLB").setNominalV(400)
+                .setTopologyKind(TopologyKind.NODE_BREAKER).add();
+        vlbBranch.getNodeBreakerView().newBusbarSection().setId("bbs_VLB").setNode(0).add();
+        overlay.endMaterialize();
+
+        Line m = base.getLine("M");
+        TerminalExt nearM = terminalOn(m, "VLB");
+        BranchContext context = new BranchContext();
+        context.rebind(nearM, vlbBranch);
+
+        // forward: same shared M, two views
+        ThreadLocalBranchContext.run(context, () -> assertSame(vlbBranch, nearM.getVoltageLevel()));
+        assertSame(base.getVoltageLevel("VLB"), nearM.getVoltageLevel());
+
+        // reverse through the public API: VLB' hosts M under the context, not outside
+        ThreadLocalBranchContext.run(context, () ->
+                assertTrue(connectableIds(vlbBranch.getConnectables()).contains("M")));
+        assertFalse(connectableIds(vlbBranch.getConnectables()).contains("M"));
+
+        // no cascade: VLC shared, never materialised, still hosts M
+        assertSame(base.getVoltageLevel("VLC"), branch.getVoltageLevel("VLC"));
+        assertTrue(connectableIds(base.getVoltageLevel("VLC").getConnectables()).contains("M"));
+
+        // base intact
         assertEquals(Set.of("VLB", "VLC"),
                 Set.of(m.getTerminal1().getVoltageLevel().getId(), m.getTerminal2().getVoltageLevel().getId()));
         assertTrue(connectableIds(base.getVoltageLevel("VLB").getConnectables()).contains("M"));
