@@ -8,7 +8,9 @@
 package com.powsybl.iidm.network.impl;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +44,9 @@ final class VariantScopedMembership implements MultiVariantObject {
     private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> attachedByVariant = new HashMap<>();
     private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> detachedByVariant = new HashMap<>();
     private int variantArraySize;
+    // Transient (not variant-scoped) branch-attach window: the shared VLs onto which a connectable-add in
+    // progress should record a branch-attach into the current variant instead of mutating the graph.
+    private final Set<VoltageLevelExt> attachTargets = new HashSet<>();
 
     VariantScopedMembership(VariantManagerHolder holder, int variantArraySize) {
         this.holder = holder;
@@ -76,6 +81,19 @@ final class VariantScopedMembership implements MultiVariantObject {
     Set<TerminalExt> detachedTerminals(VoltageLevelExt voltageLevel) {
         return detachedByVariant.getOrDefault(holder.getVariantIndex(), Map.of())
                 .getOrDefault(voltageLevel, Set.of());
+    }
+
+    /** Open a branch-attach window over {@code sharedVoltageLevels} for a connectable-add (see the topology-model intercept). */
+    void beginAttach(Collection<VoltageLevelExt> sharedVoltageLevels) {
+        attachTargets.addAll(sharedVoltageLevels);
+    }
+
+    void endAttach() {
+        attachTargets.clear();
+    }
+
+    boolean isAttachTarget(VoltageLevelExt voltageLevel) {
+        return attachTargets.contains(voltageLevel);
     }
 
     // Bus-view filters (current variant): the connected attached/detached terminals of a voltage level

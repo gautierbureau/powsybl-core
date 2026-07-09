@@ -150,24 +150,36 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         return context == null ? Set.of() : context.branchDetachedTerminals(voltageLevel);
     }
 
-    /** v2: this voltage level is a shared VL currently receiving a branch-attach add (context active). */
+    /** This voltage level is a shared VL currently receiving a branch-attach add (variant v2.1a, or v2 context). */
     protected boolean isActiveBranchAttachTarget() {
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null && membership.isAttachTarget(voltageLevel)) {
+            return true;
+        }
         BranchContext context = ThreadLocalBranchContext.get();
         return context != null && context.isBranchAttachTarget(voltageLevel);
     }
 
     /**
-     * v2 branch-attach add: when a connectable-add targets this (shared) voltage level under an active
-     * branch-attach window, record the just-created terminal as branch-attached in the context instead
-     * of entering this VL's graph — the shared base is not mutated. Returns {@code true} if handled.
+     * Branch-attach add: when a connectable-add targets this (shared) voltage level under an active
+     * branch-attach window, record the just-created terminal as branch-attached instead of entering this
+     * VL's graph — the shared graph is not mutated. v2.1a records into the active variant's membership;
+     * v2 records into the ambient {@link BranchContext}. Returns {@code true} if handled.
      */
     protected boolean branchAttachIntercept(TerminalExt terminal) {
-        if (!isActiveBranchAttachTarget()) {
-            return false;
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null && membership.isAttachTarget(voltageLevel)) {
+            terminal.setVoltageLevel(voltageLevel);
+            membership.attachInCurrentVariant(voltageLevel, terminal);
+            return true;
         }
-        terminal.setVoltageLevel(voltageLevel);
-        ThreadLocalBranchContext.get().branchAttach(terminal, voltageLevel);
-        return true;
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context != null && context.isBranchAttachTarget(voltageLevel)) {
+            terminal.setVoltageLevel(voltageLevel);
+            context.branchAttach(terminal, voltageLevel);
+            return true;
+        }
+        return false;
     }
 
     public <T extends Connectable> Iterable<T> getConnectables(Class<T> clazz) {
