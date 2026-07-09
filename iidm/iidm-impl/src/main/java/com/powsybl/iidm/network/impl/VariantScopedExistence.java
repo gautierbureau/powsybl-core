@@ -68,6 +68,21 @@ final class VariantScopedExistence implements MultiVariantObject {
         anyHidden = true;
     }
 
+    /**
+     * Make {@code id} exist <em>only</em> in the current working variant: hide it in every other variant.
+     * Used for a branch-owned object (it is structurally present in the index, but should surface only in
+     * the branch's variant). Later clones inherit the right visibility via the variant-array copy.
+     */
+    void existOnlyInCurrentVariant(String id) {
+        int current = holder.getVariantIndex();
+        for (Map.Entry<Integer, Set<String>> entry : hiddenByVariant.entrySet()) {
+            if (entry.getKey() != current) {
+                entry.getValue().add(id);
+            }
+        }
+        anyHidden = true;
+    }
+
     /** Show {@code id} again in the current working variant. */
     void showInCurrentVariant(String id) {
         Set<String> hidden = hiddenByVariant.get(holder.getVariantIndex());

@@ -243,9 +243,23 @@ overstates the minimal step and understates the maximal one.
   *direction* in the bus view needs a terminal bussed on the target VL — exactly what the real split
   produces and what v2's `StructuralBranchLineSplitV2Test` already asserts through the same fold code;
   a synthetic foreign-bus terminal is correctly rejected by the bus filter, so it is left to the turnkey
-  split.) Full iidm-impl suite green (1030 tests). *Remaining for a turnkey single-network split:* the
-  split operation + branch-attach intercept record into `VariantScopedMembership`/`VariantScopedExistence`
-  instead of `BranchContext` — mechanism-complete, just re-pointing what the operation writes.
+  split.) Full iidm-impl suite green (1030 tests).
+
+  **Turnkey single-network split (built, validated).** `VariantScopedLineSplit.split(n, "faulted", ...)`
+  performs a fault-on-line split as **pure variant state on one network** — no `OverlayNetworkIndex`, no
+  `BranchContext`, no `ThreadLocalBranchContext`. It clones the working variant into `faulted` and, in
+  that variant only: hides the split line (`VariantScopedExistence.hideInCurrentVariant`), detaches its
+  terminals from the shared endpoints (`VariantScopedMembership.detachInCurrentVariant`), adds the
+  fictitious VL and the two half-lines, and makes those branch-owned objects exist only in `faulted`
+  (`existOnlyInCurrentVariant`). The half-lines' outer terminals branch-attach onto the shared endpoints
+  through the **same** topology-model intercept as v2 — now re-pointed so that, when a
+  `VariantScopedMembership` attach window is open, it records into the active variant's membership instead
+  of a `BranchContext`. After the call, `setWorkingVariant("faulted")` shows the whole split — enumeration
+  **and** both bus views, `L1` on VLA's bus, `L2`/`M` on VLB's — while the source variant, on the same
+  network, is the untouched original; `VariantScopedLineSplitTest` asserts this for bus/breaker and
+  node/breaker. This is the payoff of the v2.1a direction: **the branch is a cloned variant, the working
+  variant is the context, and the split touches only variant-scoped state.** Full iidm-impl suite green
+  (1032 tests).
 - **v2.1b — full network-store parity.** Also make per-field state **lazy copy-on-write** behind a parent
   pointer (the direct `fullVariantNum` analogue): a cloned variant copies *no* slots and inherits the
   parent's until first write. This is true parity — existence *and* state resolved uniformly per variant
