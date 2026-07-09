@@ -128,6 +128,12 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         if (!branchAttachmentHint) {
             return Set.of();
         }
+        // v2.1a: variant-scoped membership (the active variant IS the context) takes precedence over the
+        // v2 ambient BranchContext.
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null) {
+            return membership.attachedTerminals(voltageLevel);
+        }
         BranchContext context = ThreadLocalBranchContext.get();
         return context == null ? Set.of() : context.branchAttachedTerminals(voltageLevel);
     }
@@ -135,6 +141,10 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     private Set<TerminalExt> branchDetachedTerminals() {
         if (!branchAttachmentHint) {
             return Set.of();
+        }
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        if (membership != null) {
+            return membership.detachedTerminals(voltageLevel);
         }
         BranchContext context = ThreadLocalBranchContext.get();
         return context == null ? Set.of() : context.branchDetachedTerminals(voltageLevel);

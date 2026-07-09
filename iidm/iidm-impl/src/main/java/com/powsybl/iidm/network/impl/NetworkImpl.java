@@ -256,6 +256,25 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return created;
     }
 
+    /**
+     * Spike v2.1a: enable — and return — variant-scoped terminal membership (the {@code attached} /
+     * {@code detached} delta resolved against the active variant instead of an ambient
+     * {@link BranchContext}). Idempotent. See {@code structural-variant-generic-design.md} (v2.1).
+     */
+    VariantScopedMembership enableVariantScopedMembership() {
+        VariantScopedMembership current = index.getVariantScopedMembership();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize());
+        index.setVariantScopedMembership(created);
+        return created;
+    }
+
+    VariantScopedMembership getVariantScopedMembership() {
+        return index.getVariantScopedMembership();
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }
