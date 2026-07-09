@@ -7,6 +7,7 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.iidm.network.Bus;
 import com.powsybl.iidm.network.Connectable;
 import com.powsybl.iidm.network.Line;
 import com.powsybl.iidm.network.Network;
@@ -142,6 +143,45 @@ class StructuralBranchCascadeSpikeTest {
         assertEquals(Set.of("VLB", "VLC"),
                 Set.of(m.getTerminal1().getVoltageLevel().getId(), m.getTerminal2().getVoltageLevel().getId()));
         assertTrue(connectableIds(base.getVoltageLevel("VLB").getConnectables()).contains("M"));
+    }
+
+    @Test
+    void branchAttachedTerminalParticipatesInBranchBusView() {
+        // Not just enumeration: a rebound terminal must take part in the branch voltage level's bus
+        // computation, so the branch's BusView is correct.
+        NetworkImpl base = (NetworkImpl) buildChain();
+        NetworkImpl branch = NetworkImpl.createStructuralBranch(base, "branch");
+        OverlayNetworkIndex overlay = (OverlayNetworkIndex) branch.getIndex();
+
+        // materialise VLB -> VLB' with its bus and an own load (so its merged bus is non-empty)
+        overlay.beginMaterialize();
+        Substation sbB = branch.newSubstation().setId("S_VLB").add();
+        VoltageLevelExt vlbBranch = (VoltageLevelExt) sbB.newVoltageLevel().setId("VLB").setNominalV(400)
+                .setTopologyKind(TopologyKind.BUS_BREAKER).add();
+        vlbBranch.getBusBreakerView().newBus().setId("bus_VLB").add();
+        vlbBranch.newLoad().setId("LDB").setConnectableBus("bus_VLB").setBus("bus_VLB").setP0(1).setQ0(0).add();
+        overlay.endMaterialize();
+
+        Line m = base.getLine("M");
+        TerminalExt nearM = terminalOn(m, "VLB");
+        BranchContext context = new BranchContext();
+        context.rebind(nearM, vlbBranch);
+
+        // under the branch context, VLB''s bus-view bus includes both its own load and the rebound M
+        ThreadLocalBranchContext.run(context, () -> {
+            Bus bus = vlbBranch.getBusView().getBuses().iterator().next();
+            Set<String> ids = new HashSet<>();
+            bus.getConnectedTerminalStream().forEach(t -> ids.add(t.getConnectable().getId()));
+            assertTrue(ids.contains("LDB"), "VLB' bus keeps its own load");
+            assertTrue(ids.contains("M"), "VLB' bus folds in the rebound M");
+        });
+
+        // outside the context, VLB''s bus has only its own load, not M
+        Bus busOutside = vlbBranch.getBusView().getBuses().iterator().next();
+        Set<String> idsOutside = new HashSet<>();
+        busOutside.getConnectedTerminalStream().forEach(t -> idsOutside.add(t.getConnectable().getId()));
+        assertTrue(idsOutside.contains("LDB"));
+        assertFalse(idsOutside.contains("M"));
     }
 
     @Test

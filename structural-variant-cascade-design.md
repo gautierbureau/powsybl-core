@@ -166,10 +166,19 @@ identity in the object's own base graph) deliberately stays raw. `StructuralBran
 proves, on a node/breaker `VLA--L--VLB--M--VLC`: forward VL *and node* (`M` at `VLB'` node 5 in-branch,
 `VLB` node 2 in-base), reverse via `getConnectables()`, no cascade, base intact.
 
-Remaining before production: calculated-bus folding (risk below — make a branch-attached terminal
-participate in `VLB'`'s bus/topology computation, not just enumeration); branch-scoped `move` +
-removing the `BranchLineSplit` guard; and the branch-access contract (traversal of branch objects must
-run within `ThreadLocalBranchContext.run`).
+**Calculated-bus folding done (bus/breaker).** A rebound terminal now participates in the branch
+voltage level's bus computation, not just enumeration: `MergedBus`'s connected-terminal methods union
+in the branch-attached terminals whose configured bus is in the merged set (`BranchContext.
+branchAttachedConnectedTerminals`), gated on an active context so normal bus views are unchanged.
+`StructuralBranchCascadeSpikeTest` proves it: under the branch context `VLB'`'s BusView bus lists both
+its own load and the rebound `M`; outside it, only the load. Full `iidm-impl` suite (1013 tests) passes.
+
+Remaining before production: the same fold for node/breaker `CalculatedBus` (a different mechanism from
+`MergedBus`/`ConfiguredBus`); the terminal→bus direction (`Terminal.getBusView().getBus()` on the
+rebound terminal should return `VLB'`'s bus — needs the terminal's bus-view/topology-model resolution
+to be branch-aware, symmetric to `getVoltageLevel`); branch-scoped `move` + removing the
+`BranchLineSplit` guard; and the branch-access contract (traversal of branch objects must run within
+`ThreadLocalBranchContext.run`).
 
 ## 8. Risks & open questions
 - **Reverse enumeration completeness:** every path that lists a VL's terminals/connectables must go
