@@ -150,6 +150,24 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
    layers on the first `STRUCTURAL` clone; route ordinary `add()`/`remove()`/modifications through them
    when the active variant is structural; teach `NetworkSerDe` to write the resolved view. Storage stays
    the current dense per-variant arrays (structural clone is O(N) like today's clone). Fully usable.
+
+   **Phase 1 status (partially built on this branch):**
+   - ✅ `VariantManager.VariantCloneStrategy` + `cloneVariant(..., strategy)` — landed (default methods;
+     `VariantManagerImpl` implements `STRUCTURAL`: marks the variant structural and auto-enables the
+     variant-scoped layers).
+   - ✅ **`remove()` auto-scopes** — `AbstractConnectable.remove()` tombstones (hide + detach terminals)
+     when the working variant is structural; network-wide otherwise (backward-compatible).
+   - ✅ **`add()` of a connectable auto-scopes** — the topology-model branch-attach intercept, under a
+     structural variant, records the new object's terminals in that variant's membership and marks the
+     object existence-scoped; ordinary `newGenerator().add()` / `newLine().add()` "just work". Proven by
+     `StructuralVariantRemoveTest` (add, remove, add+remove compose, two coexisting contingencies, and the
+     `STATE_ONLY` backward-compat case) and the reworked `StructuralVariantApiExampleTest` (examples 1 & 3
+     now call the real API).
+   - ⏳ **Container-creating operations** (a split that adds a new *voltage level* `Vf`, not just
+     connectables) — the new VL/bus/substation existence must be variant-scoped too. Not yet auto-scoped
+     (containers add no terminal, so the connectable intercept doesn't see them); the `iidm-modification`
+     split family still runs via the internal helper for now. Next Phase-1 increment.
+   - ⏳ **`NetworkSerDe` resolved-view write** — not yet wired.
 3. **Phase 2 — O(1) fork / full parity.** Swap the dense per-variant arrays of the `MultiVariantObject`
    classes for `CowVariantColumn` over a shared `CowVariantParentage`, and make `cloneVariant(...STRUCTURAL)`
    fork the parentage instead of allocating slots. This is the large, invasive change (the 57-class

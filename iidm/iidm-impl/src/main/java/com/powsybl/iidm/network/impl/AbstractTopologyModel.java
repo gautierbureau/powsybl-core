@@ -143,20 +143,29 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     /** This voltage level is a shared VL currently receiving a branch-attach add in the active variant. */
     protected boolean isActiveBranchAttachTarget() {
         VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
-        return membership != null && membership.isAttachTarget(voltageLevel);
+        return membership != null && (membership.isAttachTarget(voltageLevel) || getNetwork().isCurrentVariantStructural());
     }
 
     /**
-     * Branch-attach add: when a connectable-add targets this (shared) voltage level under an active
-     * branch-attach window, record the just-created terminal as branch-attached in the active variant's
-     * membership instead of entering this VL's graph — the shared graph is not mutated. Returns
-     * {@code true} if handled.
+     * Branch-attach add: a connectable added onto this (shared) voltage level while a structural variant
+     * is the working one is recorded in that variant's membership (its terminal) and existence (the
+     * object exists only in that variant) instead of entering this VL's shared graph. Also used by the
+     * internal split helper via an explicit attach window. Returns {@code true} if handled.
      */
     protected boolean branchAttachIntercept(TerminalExt terminal) {
-        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
-        if (membership != null && membership.isAttachTarget(voltageLevel)) {
+        NetworkImpl network = getNetwork();
+        VariantScopedMembership membership = network.getVariantScopedMembership();
+        if (membership == null) {
+            return false;
+        }
+        boolean structural = network.isCurrentVariantStructural();
+        if (membership.isAttachTarget(voltageLevel) || structural) {
             terminal.setVoltageLevel(voltageLevel);
             membership.attachInCurrentVariant(voltageLevel, terminal);
+            if (structural) {
+                // the object being added exists only in this structural variant
+                network.getVariantScopedExistence().existOnlyInCurrentVariant(terminal.getConnectable().getId());
+            }
             return true;
         }
         return false;

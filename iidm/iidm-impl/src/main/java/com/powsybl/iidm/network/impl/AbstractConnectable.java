@@ -63,6 +63,14 @@ abstract class AbstractConnectable<I extends Connectable<I>> extends AbstractIde
     public void remove() {
         NetworkImpl network = getNetwork();
 
+        // Structural variant (see VariantManager.VariantCloneStrategy.STRUCTURAL): a removal is scoped to
+        // the working variant — the object is tombstoned there (hidden, and its terminals detached from
+        // the shared voltage levels) but stays physically present for every other variant.
+        if (network.isCurrentVariantStructural()) {
+            removeInCurrentVariant(network);
+            return;
+        }
+
         network.getListeners().notifyBeforeRemoval(this);
 
         network.getIndex().remove(this);
@@ -75,6 +83,14 @@ abstract class AbstractConnectable<I extends Connectable<I>> extends AbstractIde
         network.getListeners().notifyAfterRemoval(id);
         removed = true;
         terminals.forEach(TerminalExt::remove);
+    }
+
+    private void removeInCurrentVariant(NetworkImpl network) {
+        network.getVariantScopedExistence().hideInCurrentVariant(id);
+        VariantScopedMembership membership = network.getVariantScopedMembership();
+        for (TerminalExt terminal : terminals) {
+            membership.detachInCurrentVariant((VoltageLevelExt) terminal.getVoltageLevel(), terminal);
+        }
     }
 
     protected void notifyUpdate(Supplier<String> attribute, Object oldValue, Object newValue) {
