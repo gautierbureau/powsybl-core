@@ -224,6 +224,12 @@ and `iidm-serde`) exports the base and a branch to XIIDM:
   `BranchExportProbe` confirms the flattened branch exports to a complete XIIDM (4 VLs / 3 lines) where
   the raw branch dropped the shared objects. Spike scope: the connectable types a fault-on-line split
   produces (buses, busbars, switches, loads, generators, lines); other types are rejected loudly.
+- **Oracle check (clone + modify).** `BranchExportProbe` also builds the ground truth: clone the base
+  (`NetworkSerDe.copy`) and apply the same split with the ordinary public API, then export. With a
+  sorted export, the flattened branch's XIIDM is **byte-for-byte identical** to that clone+modify
+  network (only the network id and case date differ). So the structural branch reaches the split
+  without a full copy, and `flatten()` at export time produces exactly what the traditional
+  copy-then-modify path would.
 
 **Node-breaker split path done.** `BranchLineSplit` now dispatches by topology kind: it copies a
 node/breaker endpoint's graph (busbar sections + switches by node, kind/open/retained preserved),
