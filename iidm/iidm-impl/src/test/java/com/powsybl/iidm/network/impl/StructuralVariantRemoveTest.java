@@ -24,10 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Phase 1 of the public structural-variant API (see {@code structural-variant-public-api.md}): a
- * {@code STRUCTURAL} clone plus an ordinary {@code remove()} now works end-to-end through the real API,
- * with <b>no</b> internal helper calls. Removing an object while a structural variant is the working
- * variant scopes the removal to that variant; the base and other variants keep it.
+ * The public structural-variant API (see {@code structural-variant-public-api.md}): a {@code STRUCTURAL}
+ * clone plus an ordinary {@code remove()} works end-to-end through the real API, with <b>no</b> internal
+ * helper calls. Removing an object while a structural variant is the working variant scopes the removal to
+ * that variant; the base and other variants keep it.
  *
  * @author Claude
  */

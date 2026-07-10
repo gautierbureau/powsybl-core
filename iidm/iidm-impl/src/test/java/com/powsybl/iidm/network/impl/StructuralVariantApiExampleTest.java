@@ -21,12 +21,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * <b>Worked examples of the proposed structural-variant public API</b> (see
+ * <b>Worked examples of the structural-variant public API</b> (see
  * {@code structural-variant-public-api.md}). Each example is annotated with the <b>public API call it
- * will become</b> once {@code cloneVariant(..., STRUCTURAL)} is wired into the ordinary add/remove/modify
- * paths (Phase 1); here it runs through the equivalent internal machinery so the behaviour is real and
- * asserted today. Three scenarios: expansion planning (add), short circuit (split), N-1 (remove) — all
- * on <b>one</b> network, reached by {@code setWorkingVariant}, base always untouched.
+ * corresponds to</b> — {@code cloneVariant(..., STRUCTURAL)} driving the ordinary add/remove/modify
+ * paths. Three scenarios: expansion planning (add), short circuit (split), N-1 (remove) — all on
+ * <b>one</b> network, reached by {@code setWorkingVariant}, base always untouched.
  *
  * @author Claude
  */

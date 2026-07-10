@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The public structural-variant API surface (see {@code structural-variant-public-api.md}): the
  * {@code cloneVariant(..., VariantCloneStrategy)} overloads. {@code STATE_ONLY} is the historical
- * behaviour; {@code STRUCTURAL} (Phase 1) additionally lets the variant diverge structurally. Both
+ * behaviour; {@code STRUCTURAL} additionally lets the variant diverge structurally. Both
  * produce a usable working variant. The scoping behaviour itself is covered by
  * {@link StructuralVariantRemoveTest}.
  *

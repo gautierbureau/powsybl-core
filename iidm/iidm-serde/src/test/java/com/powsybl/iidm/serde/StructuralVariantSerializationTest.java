@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Phase 1 (serialization): {@code NetworkSerDe} writes a structural variant's <b>resolved</b> view. In the
+ * Serialization: {@code NetworkSerDe} writes a structural variant's <b>resolved</b> view. In the
  * single-network variant model every object's parent is the one network, so writing while a structural
  * variant is the working variant serializes exactly what that variant resolves — base − tombstoned +
  * added — with no special flatten step.
