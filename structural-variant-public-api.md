@@ -209,7 +209,35 @@ to a parent, tombstones for removals, local additions surfaced at read. powsybl-
      structural delta per contingency; copies duplicate the whole network 40 times. This is where the
      feature earns its keep.
 
-   - ⏳ **Bulk state O(1)** — the remaining, larger part, and a deliberate core change (not a spike
+   - ✅ **Bulk state O(1) — LANDED (the live columnar copy-on-write port).** The three columnar stores
+     (`NumericVariantStore` / `TerminalVariantStore` / `SwitchVariantStore`) — behind which *every* O(rows)
+     owner of per-variant state now sits — store `STRUCTURAL` clones copy-on-write, gated by
+     `VariantCowState.isActive()` (flipped on the first structural clone, released when the last one goes):
+     - `cloneVariant(..., STRUCTURAL)` → `extendStructural`/`allocateStructural` copies **nothing**;
+       the variant owns no rows and resolves reads through the clone parentage (`VariantCowState`, the
+       live `CowVariantParentage`) to its nearest ancestor holding the row.
+     - Writes diverge **per row** (all columns of the touched row) into a sparse `CowBand`
+       (pre-sized `BitSet` + row arrays, published `volatile`); a write to any variant first freezes the
+       touched row into copy-on-write children still inheriting it (snapshot across the dense→sparse
+       boundary), and full bands are frozen before a variant is removed or overwritten
+       (`materializeInheritors`).
+     - Eager (`STATE_ONLY`) clones from a copy-on-write source copy its resolved band; overwriting a
+       structural variant with an eager clone makes it dense again; the flat arrays only grow for dense
+       bands, so structural variants cost no flat storage.
+     - The clone lifecycle carries the structural signal via defaults that delegate to the eager copy
+       (`MultiVariantObject.extendVariantArraySize(..., structuralClone)` /
+       `VariantColumnStore.extendStructural`), so unconverted owners (per-variant caches, the delta-sized
+       existence/membership maps, third-party multi-variant extensions) stay correct unchanged.
+
+     Pinned by `TerminalVariantStoreCowTest` / `SwitchVariantStoreCowTest` / `NumericVariantStoreCowTest`
+     (per-store semantics, ported from the `Cow*` prototypes) and `StructuralVariantCowCloneTest`
+     (end-to-end through the public API, including removal/overwrite/recycling and multi-thread access).
+     Re-measured at the flagship workload (40 contingencies, 4 000-line grid, same machine for both sides):
+     structural variants **350 ms / 13.9 MB** vs full copies **11 000 ms / 838 MB** — **~31× faster,
+     ~60× less memory** (up from ~20–25× / ~20× with eager per-variant state; retained state per variant
+     drops from ~1 MB to ~0.35 MB, the residue being per-VL cache slots and the structural deltas).
+
+   - The original analysis for the record — why this was deferred to its own change (not a spike
      increment). Even in the result above, each structural variant still costs ~1 MB of eager per-variant
      **state**: the columnar stores (`NumericVariantStore`/`TerminalVariantStore`/`SwitchVariantStore`)
      copy the whole source band on `VariantColumnStore.extend` (O(rows) per clone), and the per-object

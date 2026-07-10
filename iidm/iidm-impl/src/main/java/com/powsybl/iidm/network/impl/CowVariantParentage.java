@@ -11,9 +11,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * <p><b>Prototype for the deferred columnar copy-on-write clone — the variant parentage. Not wired into
+ * <p><b>Prototype for the columnar copy-on-write clone — the variant parentage. Not wired into
  * any live path; exercised only by unit tests.</b> See {@code structural-variant-public-api.md} (the
- * "O(1) clone" section).</p>
+ * "O(1) clone" section). Its live counterpart is {@link VariantCowState}.</p>
  *
  * <p>The variant-forest structure behind copy-on-write branching: each variant records the variant it was
  * forked from (its parent), or {@code -1} for a root. This is the direct analogue of network-store's
