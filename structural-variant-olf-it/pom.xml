@@ -30,6 +30,8 @@
         <powsybl-core.version>7.4.0-SNAPSHOT</powsybl-core.version>
         <open-loadflow.version>2.3.0</open-loadflow.version>
         <junit.version>5.11.4</junit.version>
+        <!-- extra JVM args for the benchmark fork, e.g. -Dbench.jvmArgs=-XX:StartFlightRecording=... -->
+        <bench.jvmArgs/>
         <slf4j.version>2.0.17</slf4j.version>
         <surefire.version>3.5.5</surefire.version>
     </properties>
@@ -75,6 +77,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>com.powsybl</groupId>
+            <artifactId>powsybl-matpower-converter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
@@ -94,6 +101,10 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire.version}</version>
+                <configuration>
+                    <!-- the PEGASE benchmarks hold K copies of a 9k/13k-bus network at once -->
+                    <argLine>-Xmx6g ${bench.jvmArgs}</argLine>
+                </configuration>
             </plugin>
         </plugins>
     </build>
