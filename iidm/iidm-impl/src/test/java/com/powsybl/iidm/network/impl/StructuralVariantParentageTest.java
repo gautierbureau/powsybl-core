@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Phase 2 (copy-on-write existence): an object added in a structural variant resolves its visibility
- * through the <b>variant parentage</b> — O(1) at add time instead of hiding it in every other variant.
+ * Copy-on-write existence: an object added in a structural variant resolves its visibility through the
+ * <b>variant parentage</b> — O(1) at add time instead of hiding it in every other variant.
  * This pins the parentage semantics: descendants inherit the object, siblings/ancestors do not, and
  * removing the variant makes it disappear everywhere.
  *

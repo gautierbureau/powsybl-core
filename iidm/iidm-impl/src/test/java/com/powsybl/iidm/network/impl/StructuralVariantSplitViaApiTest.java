@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Phase 1 (container scoping): a <b>container-creating</b> structural change — a fault-on-line split that
- * adds a new fictitious voltage level — now works entirely through the <b>public API</b>. It is the
+ * Container scoping: a <b>container-creating</b> structural change — a fault-on-line split that adds a new
+ * fictitious voltage level — works entirely through the <b>public API</b>. It is the
  * ordinary sequence a modification like {@code CreateVoltageLevelOnLine} performs
  * ({@code remove()} + {@code newSubstation()/newVoltageLevel()/newBus()} + {@code newLine()}), run while a
  * {@code STRUCTURAL} variant is the working one; existence-scoping of the new VL/bus/substation is handled
