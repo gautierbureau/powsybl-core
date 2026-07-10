@@ -81,10 +81,9 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
         return super.getVoltageLevel();
     }
 
-    // Spike (structural-variant branching): under an active branch context, a calculated bus of a
-    // branch voltage level also includes the terminals rebound/branch-attached onto one of its nodes,
-    // and (v2) excludes the terminals branch-detached from them. No active context (all normal use) ->
-    // empty, so behaviour is unchanged.
+    // Structural variants: when a variant-scoped membership is active, a calculated bus also includes the
+    // terminals attached onto one of its nodes in the active variant, and excludes the terminals detached
+    // from them. No membership (all normal use) -> empty, so behaviour is unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
         VoltageLevelExt vl = (VoltageLevelExt) super.getVoltageLevel();
         VariantScopedMembership membership = vl.getNetwork().getVariantScopedMembership();

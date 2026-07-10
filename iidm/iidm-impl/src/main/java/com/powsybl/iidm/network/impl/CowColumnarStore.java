@@ -11,8 +11,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * <p><b>Spike Phase 2 — copy-on-write columnar store (de-risking prototype).</b> See
- * {@code structural-variant-public-api.md} (Phase 2, "bulk state O(1)").</p>
+ * <p><b>Prototype for the deferred columnar copy-on-write clone. Not wired into any live path; exercised
+ * only by {@code CowColumnarStoreTest}.</b> See {@code structural-variant-public-api.md} (the "O(1) clone"
+ * section).</p>
  *
  * <p>The isolated proof of the hardest remaining piece: making a <b>columnar per-variant state store</b>
  * (the shape of {@code NumericVariantStore}/{@code TerminalVariantStore}/{@code SwitchVariantStore})

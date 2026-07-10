@@ -12,10 +12,10 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Spike Phase 2 (copy-on-write columnar store) de-risking prototype. See
- * {@code structural-variant-public-api.md}. Proves the mechanism that would make a {@code STRUCTURAL}
- * clone O(1) for the bulk per-variant state: a columnar store made copy-on-write over the variant tree,
- * with per-row divergence and snapshot-correct freeze-on-parent-write.
+ * Prototype for the deferred columnar copy-on-write clone. See {@code structural-variant-public-api.md}
+ * (the "O(1) clone" section). Proves the mechanism that would make a {@code STRUCTURAL} clone O(1) for the
+ * bulk per-variant state: a columnar store made copy-on-write over the variant tree, with per-row
+ * divergence and snapshot-correct freeze-on-parent-write.
  *
  * @author Claude
  */

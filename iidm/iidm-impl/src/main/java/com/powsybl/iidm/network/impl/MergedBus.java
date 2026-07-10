@@ -49,9 +49,9 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
         return bus.isPresent() && bus.get().isInMainSynchronousComponent();
     }
 
-    // Spike (structural-variant branching): under an active branch context, a merged bus over
-    // branch-owned configured buses also includes the terminals rebound onto them, and (v2) excludes
-    // the terminals branch-detached from them. No active context (all normal use) -> empty, unchanged.
+    // Structural variants: when a variant-scoped membership is active, a merged bus over the configured
+    // buses also includes the terminals attached onto them in the active variant, and excludes the
+    // terminals detached from them. No membership (all normal use) -> empty, unchanged.
     private List<TerminalExt> branchAttachedConnectedTerminals() {
         VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
         return membership == null ? List.of() : membership.attachedConnectedTerminals(voltageLevel(), busIds());

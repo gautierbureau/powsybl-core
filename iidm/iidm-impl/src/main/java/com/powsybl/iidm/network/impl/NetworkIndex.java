@@ -32,12 +32,12 @@ class NetworkIndex {
     // added or removed.
     private List<MultiVariantObject> statefulObjectsCache;
 
-    // Spike v2.1a (variant-scoped existence): when set, an object's existence is a function of the active
-    // variant. Null for every normal network, so get/getAll/contains keep their exact hot path.
+    // Variant-scoped existence: when set, an object's existence is a function of the active variant.
+    // Null for every normal network, so get/getAll/contains keep their exact hot path.
     private VariantScopedExistence existence;
 
-    // Spike v2.1a: variant-scoped terminal membership. Not consulted by the index (the topology-model
-    // folds read it); held here only so the real variant lifecycle grows/copies its per-variant maps.
+    // Variant-scoped terminal membership. Not consulted by the index (the topology-model folds read it);
+    // held here only so the variant lifecycle grows/copies its per-variant maps.
     private VariantScopedMembership membership;
 
     void setVariantScopedExistence(VariantScopedExistence existence) {
@@ -176,8 +176,8 @@ class NetworkIndex {
                     stateful.add(multiVariantObject);
                 }
             }
-            // v2.1a: existence and membership are variant state too — the real clone must grow/copy their
-            // columns with the rest
+            // existence and membership are variant state too — a clone must grow/copy their columns with
+            // the rest
             if (existence != null) {
                 stateful.add(existence);
             }

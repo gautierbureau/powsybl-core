@@ -11,8 +11,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * <p><b>Spike v2.1b — copy-on-write variant state (de-risking prototype), parentage.</b> See
- * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
+ * <p><b>Prototype for the deferred columnar copy-on-write clone — the variant parentage. Not wired into
+ * any live path; exercised only by unit tests.</b> See {@code structural-variant-public-api.md} (the
+ * "O(1) clone" section).</p>
  *
  * <p>The variant-forest structure behind copy-on-write branching: each variant records the variant it was
  * forked from (its parent), or {@code -1} for a root. This is the direct analogue of network-store's

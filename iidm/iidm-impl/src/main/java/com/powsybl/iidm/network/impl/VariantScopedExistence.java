@@ -13,14 +13,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Spike v2.1a — variant-scoped existence (de-risking prototype).</b> See
- * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
+ * <p><b>Variant-scoped existence.</b> See {@code structural-variant-public-api.md}.</p>
  *
- * <p>Proves the deeper end-state: instead of a side-car index plus an ambient context, object
- * <em>existence</em> becomes a function of the <b>active variant</b> — the
- * same mechanism IIDM already uses for per-variant <em>state</em> (tap position, switch open, terminal
- * p/q). One network answers {@code getLine(id)} differently per working variant; the "branch" is just a
- * cloned variant, and the working variant <em>is</em> the context.</p>
+ * <p>Object <em>existence</em> is a function of the <b>active variant</b> — the same mechanism IIDM
+ * already uses for per-variant <em>state</em> (tap position, switch open, terminal p/q). One network
+ * answers {@code getLine(id)} differently per working variant; a structural variant is just a cloned
+ * variant, and the working variant <em>is</em> the context.</p>
  *
  * <p>This is a {@link MultiVariantObject}: its per-variant hidden-id sets are grown and copied by the
  * <em>real</em> variant lifecycle ({@code VariantManagerImpl.cloneVariant} drives
@@ -39,7 +37,7 @@ final class VariantScopedExistence implements MultiVariantObject {
     // Per variant index, the ids hidden (tombstoned) in that variant — a removal in a structural variant.
     // Copied at clone (small, snapshot-correct). An id absent from the set exists in that variant.
     private final Map<Integer, Set<String>> hiddenByVariant = new HashMap<>();
-    // Phase 2 (copy-on-write): objects ADDED in a structural variant. id -> the variant it was added in;
+    // Objects ADDED in a structural variant. id -> the variant it was added in;
     // the object is visible in that variant and its descendants only. Global (not copied per variant), so
     // an add is O(1) instead of O(variants); visibility resolves through the variant parentage.
     private final Map<String, Integer> existsOnlyIn = new HashMap<>();
