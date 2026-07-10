@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Copyright (c) 2026, RTE (http://www.rte-france.com)
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.
+    SPDX-License-Identifier: MPL-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.powsybl.it</groupId>
+    <artifactId>structural-variant-olf-it</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Structural variants + OpenLoadFlow integration test</name>
+    <description>
+        Standalone integration-test project (NOT part of the powsybl-core reactor): runs real OpenLoadFlow
+        load flows in parallel on STRUCTURAL variants of one shared network, against the powsybl-core
+        7.4.0-SNAPSHOT of this branch. Build the branch first (./mvnw install -DskipTests), then run
+        ./mvnw -f structural-variant-olf-it/pom.xml test
+    </description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <powsybl-core.version>7.4.0-SNAPSHOT</powsybl-core.version>
+        <open-loadflow.version>2.3.0</open-loadflow.version>
+        <junit.version>5.11.4</junit.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <surefire.version>3.5.5</surefire.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- this branch's core FIRST, so it wins over the core version OpenLoadFlow was built with -->
+            <dependency>
+                <groupId>com.powsybl</groupId>
+                <artifactId>powsybl-core</artifactId>
+                <version>${powsybl-core.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.powsybl</groupId>
+            <artifactId>powsybl-open-loadflow</artifactId>
+            <version>${open-loadflow.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.powsybl</groupId>
+            <artifactId>powsybl-iidm-impl</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.powsybl</groupId>
+            <artifactId>powsybl-config-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire.version}</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
