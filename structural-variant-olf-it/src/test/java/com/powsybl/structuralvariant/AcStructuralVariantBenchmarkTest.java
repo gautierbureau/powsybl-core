@@ -161,10 +161,10 @@ class AcStructuralVariantBenchmarkTest {
 
         System.out.println();
         System.out.printf("AC load flow, OpenLoadFlow, %s, %d expansion scenarios (each: +1 generator, +1 line)%n", title, K);
-        System.out.printf("%-24s | %10s | %12s | %13s%n", "approach", "setup (ms)", "AC runs (ms)", "retained (MB)");
-        System.out.println("-".repeat(72));
-        runs.forEach((name, r) -> System.out.printf("%-24s | %10.1f | %12.1f | %13.2f%n",
-                name, r.setupMs(), r.loadFlowMs(), r.retainedBytes() / 1e6));
+        System.out.printf("%-24s | %10s | %12s | %9s | %13s%n", "approach", "setup (ms)", "AC runs (ms)", "total (s)", "retained (MB)");
+        System.out.println("-".repeat(84));
+        runs.forEach((name, r) -> System.out.printf("%-24s | %10.1f | %12.1f | %9.2f | %13.2f%n",
+                name, r.setupMs(), r.loadFlowMs(), (r.setupMs() + r.loadFlowMs()) / 1e3, r.retainedBytes() / 1e6));
 
         // cross-validation: for each scenario, the AC solution on the structural variant equals the AC
         // solution on the equivalent full copy, branch by branch — parallel and sequential alike
