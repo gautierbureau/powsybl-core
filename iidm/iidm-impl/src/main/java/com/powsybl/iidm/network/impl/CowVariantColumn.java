@@ -11,18 +11,19 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * <p><b>Spike v2.1b — copy-on-write variant state (de-risking prototype), one column.</b> See
- * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
+ * <p><b>Prototype for the deferred columnar copy-on-write clone — one column. Not wired into any live
+ * path; exercised only by its unit test.</b> See {@code structural-variant-public-api.md} (the "O(1)
+ * clone" section).</p>
  *
  * <p>A single variant-dependent field (a generator target, a switch open flag, a terminal p/q, …) stored
  * <b>copy-on-write</b> over a {@link CowVariantParentage} instead of as a dense per-variant array. This is
- * the storage every {@code MultiVariantObject} would adopt to reach full network-store parity (v2.1b): a
- * variant holds a value only where it has actually <em>diverged</em>; otherwise a read falls through to
- * its parent variant. Two consequences:</p>
+ * the storage every {@code MultiVariantObject} would adopt to make a clone O(1): a variant holds a value
+ * only where it has actually <em>diverged</em>; otherwise a read falls through to its parent variant. Two
+ * consequences:</p>
  * <ul>
- *   <li><b>Forking is O(1)</b> — {@link CowVariantParentage#fork} copies nothing, so a structural branch
- *       costs a parent pointer, not a per-object slot copy (this is exactly what v2.1a could not achieve:
- *       there {@code cloneVariant} extends every object's array, an O(N) copy).</li>
+ *   <li><b>Forking is O(1)</b> — {@link CowVariantParentage#fork} copies nothing, so a structural variant
+ *       costs a parent pointer, not a per-object slot copy (unlike today's {@code cloneVariant}, which
+ *       extends every object's array, an O(N) copy).</li>
  *   <li><b>IIDM snapshot semantics are preserved</b> — the copy-on-write happens on the <em>write</em>
  *       side: before a variant's value diverges, the current value is frozen into the children that still
  *       inherit it, so a later change to a parent variant never leaks into a variant forked earlier (as a

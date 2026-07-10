@@ -22,14 +22,13 @@ import java.util.stream.StreamSupport;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Structural-variant spike <b>v2.1a</b> step 1: variant-scoped terminal <b>membership</b>. See
- * {@code structural-variant-generic-design.md}, the v2.1 section.
+ * Tests variant-scoped terminal <b>membership</b> ({@link VariantScopedMembership}). See
+ * {@code structural-variant-public-api.md}.
  *
  * <p>The membership counterpart of {@link VariantScopedExistenceTest}: a voltage level's terminal set
- * (what {@code getConnectables} enumerates) becomes a function of the <b>working variant</b>, with
- * <b>no</b> ambient context and <b>no</b> thread-local — the same
- * enumeration folds v2 drove from an ambient context now read the active variant. And the membership
- * delta is cloned by the <em>real</em> {@code cloneVariant}, exactly as state is.</p>
+ * (what {@code getConnectables} enumerates) becomes a function of the <b>working variant</b>, with no
+ * thread-local context — the enumeration folds read the active variant. And the membership delta is
+ * cloned by the real {@code cloneVariant}, exactly as state is.</p>
  *
  * @author Claude
  */

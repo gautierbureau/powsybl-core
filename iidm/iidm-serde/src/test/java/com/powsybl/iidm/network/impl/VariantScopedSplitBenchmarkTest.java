@@ -26,11 +26,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * <b>Spike v2.1a — measurement harness (not a CI gate).</b> Quantifies the payoff of a variant-scoped
- * structural split ({@link VariantScopedLineSplit}, a cloned variant + small delta on one network)
- * against the classic fault-on-line approach ({@code NetworkSerDe.copy(base)} + split on the copy, i.e.
- * a whole second network). Lives in {@code iidm-serde} (which has both {@code NetworkSerDe} and the
- * spike classes on its classpath) in a split package so it can reach the package-private spike API.
+ * <b>Measurement harness (not a CI gate).</b> Quantifies the payoff of variant-scoped structural changes
+ * (a cloned structural variant + small delta on one network) against the classic approach
+ * ({@code NetworkSerDe.copy(base)} + change on the copy, i.e. a whole second network). Lives in
+ * {@code iidm-serde} (which has both {@code NetworkSerDe} and the impl classes on its classpath) in a
+ * split package so it can reach the package-private structural-variant API.
  *
  * <p>Gated behind {@code -Dbenchmark=true} so it is skipped in normal builds. Run with:
  * {@code mvn -pl iidm/iidm-serde test -Dtest=VariantScopedSplitBenchmarkTest -Dbenchmark=true}.</p>
@@ -114,7 +114,7 @@ class VariantScopedSplitBenchmarkTest {
     void compareManyContingenciesToManyCopies() {
         // The real use case: N-1 contingency analysis. K structural variants on ONE shared network vs K
         // full copies. The structural network shares the base object graph once; copies duplicate it K
-        // times. (Storage is still eager per-variant state; Phase 2's columnar copy-on-write would remove
+        // times. (Storage is still eager per-variant state; the columnar copy-on-write clone would remove
         // the remaining per-variant state duplication too.)
         assumeTrue(Boolean.getBoolean("benchmark"), "measurement harness; enable with -Dbenchmark=true");
 

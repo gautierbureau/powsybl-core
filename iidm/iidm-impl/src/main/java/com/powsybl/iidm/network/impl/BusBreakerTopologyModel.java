@@ -904,8 +904,8 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
         if (test) {
             return;
         }
-        // v2 (structural-variant branching): a branch-owned connectable attaching onto a shared VL is
-        // recorded in the branch context, not added to the shared graph. No-op in all normal use.
+        // Structural variants: a connectable added in a structural variant and attaching onto a shared VL
+        // is recorded in the variant-scoped membership, not added to the shared graph. No-op in normal use.
         if (branchAttachIntercept(terminal)) {
             return;
         }

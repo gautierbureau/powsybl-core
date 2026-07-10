@@ -12,11 +12,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Structural-variant spike <b>v2.1b</b> (copy-on-write variant state) de-risking prototype. See
- * {@code structural-variant-generic-design.md}, the v2.1 section.
+ * Prototype for the deferred columnar copy-on-write clone ({@link CowVariantColumn}). See
+ * {@code structural-variant-public-api.md} (the "O(1) clone" section).
  *
- * <p>Proves the mechanism that would take v2.1a (variant-scoped existence + membership, but O(N) fork
- * because {@code cloneVariant} copies every object's slot) to full network-store parity: a variant field
+ * <p>Proves the mechanism that would take the current design (variant-scoped existence + membership, but
+ * O(N) fork because {@code cloneVariant} copies every object's slot) to an O(1) clone: a variant field
  * stored copy-on-write over a parent-pointer forest. Forking is O(1) and copies nothing, yet IIDM's
  * snapshot semantics hold — a later change to a parent variant never leaks into a variant forked earlier.</p>
  *

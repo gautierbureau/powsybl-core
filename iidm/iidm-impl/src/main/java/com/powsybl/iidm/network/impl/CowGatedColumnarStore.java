@@ -13,8 +13,10 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Spike Phase 2 — gated copy-on-write columnar store (de-risking prototype).</b> See
- * {@code structural-variant-public-api.md} (Phase 2). The final de-risk before a live port.</p>
+ * <p><b>Prototype for the deferred columnar copy-on-write clone — the gated variant. Not wired into any
+ * live path; exercised only by {@code CowGatedColumnarStoreTest}.</b> See
+ * {@code structural-variant-public-api.md} (the "O(1) clone" section). The final de-risk before a live
+ * port.</p>
  *
  * <p>{@link CowColumnarStore} proved the copy-on-write algorithm. The remaining risk is <em>gating</em>:
  * making a real columnar store copy-on-write must cost <b>nothing</b> for the overwhelming majority of

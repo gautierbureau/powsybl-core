@@ -17,16 +17,14 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Spike v2.1a — variant-scoped terminal membership (de-risking prototype).</b> See
- * {@code structural-variant-generic-design.md}, the v2.1 section.</p>
+ * <p><b>Variant-scoped terminal membership.</b> See {@code structural-variant-public-api.md}.</p>
  *
- * <p>The membership counterpart of {@link VariantScopedExistence}: it moves the {@code attached} /
- * {@code detached} terminal-membership delta into
- * <b>per-variant</b> state on a single network. A voltage level's terminal set is then
- * {@code graph − detached(activeVariant) + attached(activeVariant)} — resolved against the
- * <b>working variant</b>, with no thread-local context. Combined with {@link VariantScopedExistence},
- * a split becomes pure variant state: the branch is a cloned variant, the working variant is the
- * context.</p>
+ * <p>The membership counterpart of {@link VariantScopedExistence}: it holds the {@code attached} /
+ * {@code detached} terminal-membership delta as <b>per-variant</b> state on a single network. A voltage
+ * level's terminal set is then {@code graph − detached(activeVariant) + attached(activeVariant)} —
+ * resolved against the <b>working variant</b>, with no thread-local context. Combined with
+ * {@link VariantScopedExistence}, a split becomes pure variant state: the branch is a cloned variant,
+ * the working variant is the context.</p>
  *
  * <p>Like existence, this is a {@link MultiVariantObject}: its per-variant membership maps are grown and
  * copied by the <em>real</em> variant lifecycle, so cloning a variant clones membership exactly as it

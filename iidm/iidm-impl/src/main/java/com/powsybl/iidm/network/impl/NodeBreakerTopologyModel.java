@@ -1162,9 +1162,9 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
                             + ", a node connection should be specified instead of a bus connection");
         }
         int node = ((NodeTerminal) terminal).getNode();
-        // v2 (structural-variant branching): a branch-attach onto this shared VL is recorded in the
-        // branch context, not entered into this graph, so the node may legitimately still hold the
-        // (branch-detached) base terminal — neither add a vertex nor check occupancy against the graph.
+        // Structural variants: an attach onto this shared VL is recorded in the variant-scoped membership,
+        // not entered into this graph, so the node may legitimately still hold the (variant-detached) base
+        // terminal — neither add a vertex nor check occupancy against the graph.
         if (isActiveBranchAttachTarget()) {
             return;
         }
@@ -1188,7 +1188,8 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         if (test) {
             return;
         }
-        // v2: record onto the branch context instead of mutating the shared graph (no-op in normal use).
+        // Structural variants: record into the variant-scoped membership instead of mutating the shared
+        // graph (no-op in normal use).
         if (branchAttachIntercept(terminal)) {
             return;
         }

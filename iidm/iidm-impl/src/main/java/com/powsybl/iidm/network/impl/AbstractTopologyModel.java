@@ -88,9 +88,9 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
 
     public abstract Stream<Terminal> getTerminalStream();
 
-    // Spike (structural-variant branching): when true, this voltage level has a variant-scoped terminal
-    // membership delta, so enumeration folds in the active variant's attached/detached terminals. Default
-    // false -> the common path is exactly getTerminals().
+    // Structural variants: when true, this voltage level has a variant-scoped terminal membership delta,
+    // so enumeration folds in the active variant's attached/detached terminals. Default false -> the
+    // common path is exactly getTerminals().
     private boolean branchAttachmentHint = false;
 
     void setBranchAttachmentHint(boolean branchAttachmentHint) {
