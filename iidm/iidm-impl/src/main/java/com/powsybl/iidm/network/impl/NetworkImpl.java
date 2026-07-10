@@ -146,8 +146,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
-        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
-        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize());
+        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
+        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
         variantColumnStores.add(terminalVariantStore);
         variantColumnStores.add(switchVariantStore);
         variants = new VariantArray<>(ref, VariantImpl::new);
@@ -347,7 +347,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
             // created at the current variant array size (its bands hold the column defaults); registered so
             // that subsequent variant operations drive it. Creation happens on the main thread during build.
             store = new NumericVariantStore(variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
-                    booleanDefaults);
+                    booleanDefaults, variantManager.getCowState());
             numericVariantStores.put(key, store);
             variantColumnStores.add(store);
         }
@@ -1319,14 +1319,24 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, final int sourceIndex) {
+        extendVariantArraySize(initVariantArraySize, number, sourceIndex, false);
+    }
+
+    @Override
+    public void extendVariantArraySize(int initVariantArraySize, int number, final int sourceIndex, boolean structuralClone) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
         // columnar variant stores (terminal p/q, switch open/retained, node terminal, bus...):
-        // extended once for the whole network instead of once per object
+        // extended once for the whole network instead of once per object. A STRUCTURAL clone extends them
+        // copy-on-write (O(1)); everything else above stays eager (caches and delta-sized maps, all cheap).
         for (VariantColumnStore store : variantColumnStores) {
-            store.extend(number, sourceIndex);
+            if (structuralClone) {
+                store.extendStructural(number, sourceIndex);
+            } else {
+                store.extend(number, sourceIndex);
+            }
         }
 
         variants.push(number, () -> variants.copy(sourceIndex));
@@ -1360,15 +1370,35 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
+        allocateVariantArrayElement(indexes, sourceIndex, false);
+    }
+
+    @Override
+    public void allocateVariantArrayElement(int[] indexes, final int sourceIndex, boolean structuralClone) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
         dcTopologyModel.allocateVariantArrayElement(indexes, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
 
         for (VariantColumnStore store : variantColumnStores) {
-            store.allocate(indexes, sourceIndex);
+            if (structuralClone) {
+                store.allocateStructural(indexes, sourceIndex);
+            } else {
+                store.allocate(indexes, sourceIndex);
+            }
         }
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
+    }
+
+    /**
+     * Freeze the state a copy-on-write variant still inherits from {@code variantIndex} into it, in every
+     * columnar store, before {@code variantIndex} is removed or overwritten. Called by the variant manager;
+     * see {@link VariantColumnStore#materializeInheritors(int)}.
+     */
+    void materializeCowInheritorsOf(int variantIndex) {
+        for (VariantColumnStore store : variantColumnStores) {
+            store.materializeInheritors(variantIndex);
+        }
     }
 
     private static void checkIndependentNetwork(Network network) {

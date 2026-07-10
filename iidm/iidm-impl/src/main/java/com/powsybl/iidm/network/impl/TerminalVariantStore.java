@@ -53,7 +53,11 @@ class TerminalVariantStore implements VariantColumnStore {
     // rows freed by removed terminals, available for reuse (avoids leaking a row per removed terminal)
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    TerminalVariantStore(int variantArraySize) {
+    // shared copy-on-write bookkeeping (parentage, structural marks, master gate)
+    private final VariantCowState cowState;
+
+    TerminalVariantStore(int variantArraySize, VariantCowState cowState) {
+        this.cowState = cowState;
         this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;

@@ -66,7 +66,12 @@ public class NumericVariantStore implements VariantColumnStore {
 
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
+    // shared copy-on-write bookkeeping (parentage, structural marks, master gate)
+    private final VariantCowState cowState;
+
+    NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults,
+                        VariantCowState cowState) {
+        this.cowState = cowState;
         this.nDouble = doubleDefaults.length;
         this.nInt = intDefaults.length;
         this.nBoolean = booleanDefaults.length;

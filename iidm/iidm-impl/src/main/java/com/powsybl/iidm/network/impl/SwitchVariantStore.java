@@ -44,7 +44,11 @@ class SwitchVariantStore implements VariantColumnStore {
     private int variantSize;
     private int variantCapacity;
 
-    SwitchVariantStore(int variantArraySize) {
+    // shared copy-on-write bookkeeping (parentage, structural marks, master gate)
+    private final VariantCowState cowState;
+
+    SwitchVariantStore(int variantArraySize, VariantCowState cowState) {
+        this.cowState = cowState;
         this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
