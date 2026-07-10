@@ -49,59 +49,27 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
         return bus.isPresent() && bus.get().isInMainSynchronousComponent();
     }
 
-    // Structural variants: when a variant-scoped membership is active, a merged bus over the configured
-    // buses also includes the terminals attached onto them in the active variant, and excludes the
-    // terminals detached from them. No membership (all normal use) -> empty, unchanged.
-    private List<TerminalExt> branchAttachedConnectedTerminals() {
-        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
-        return membership == null ? List.of() : membership.attachedConnectedTerminals(voltageLevel(), busIds());
-    }
-
-    private List<TerminalExt> branchDetachedConnectedTerminals() {
-        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
-        return membership == null ? List.of() : membership.detachedConnectedTerminals(voltageLevel(), busIds());
-    }
-
-    private VoltageLevelExt voltageLevel() {
-        return (VoltageLevelExt) buses.iterator().next().getVoltageLevel();
-    }
-
-    private Set<String> busIds() {
-        Set<String> busIds = new HashSet<>();
-        buses.forEach(b -> busIds.add(b.getId()));
-        return busIds;
-    }
+    // Structural variants: the variant-scoped membership (terminals attached/detached in the active
+    // variant) is folded once, by each ConfiguredBus (see ConfiguredBusImpl.getConnectedTerminalStream),
+    // so this merged view — like every read derived from the configured buses — sees it automatically.
 
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
-        return buses.stream().mapToInt(ConfiguredBus::getConnectedTerminalCount).sum()
-                - branchDetachedConnectedTerminals().size()
-                + branchAttachedConnectedTerminals().size();
+        return buses.stream().mapToInt(ConfiguredBus::getConnectedTerminalCount).sum();
     }
 
     @Override
     public Iterable<TerminalExt> getConnectedTerminals() {
         checkValidity();
-        Iterable<TerminalExt> own = buses.stream().map(ConfiguredBus::getConnectedTerminals)
+        return buses.stream().map(ConfiguredBus::getConnectedTerminals)
                 .reduce(Iterables::concat).orElse(Collections.emptyList());
-        List<TerminalExt> detached = branchDetachedConnectedTerminals();
-        if (!detached.isEmpty()) {
-            own = Iterables.filter(own, t -> !detached.contains(t));
-        }
-        List<TerminalExt> attached = branchAttachedConnectedTerminals();
-        return attached.isEmpty() ? own : Iterables.concat(own, attached);
     }
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        List<TerminalExt> detached = branchDetachedConnectedTerminals();
-        Stream<TerminalExt> own = buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream);
-        if (!detached.isEmpty()) {
-            own = own.filter(t -> !detached.contains(t));
-        }
-        return Stream.concat(own, branchAttachedConnectedTerminals().stream());
+        return buses.stream().flatMap(ConfiguredBus::getConnectedTerminalStream);
     }
 
     @Override
