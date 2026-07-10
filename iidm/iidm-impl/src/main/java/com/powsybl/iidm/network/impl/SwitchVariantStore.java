@@ -13,7 +13,7 @@ import java.util.Arrays;
  * Columnar (structure-of-arrays) store for the variant-dependent <em>topology</em> of every switch in a
  * network: its {@code open} and {@code retained} state.
  *
- * <p>Second target of the columnar variant-storage spike. Switch open/retained is per-variant topology
+ * <p>The second columnar variant-storage type. Switch open/retained is per-variant topology
  * (unlike terminal p/q, which is a computed characteristic) and is the state that security-analysis
  * contingencies mutate, so it is on the path of the real variant-cloning workload. It follows the same flat
  * variant-major layout as {@link TerminalVariantStore}: {@code open[variant * rowStride + row]}, so a clone
@@ -25,7 +25,7 @@ import java.util.Arrays;
  *
  * <p>Thread-safety follows the {@link com.powsybl.iidm.network.VariantManager} contract as before: structural
  * changes happen on the main thread only; pre-allocated variants are read/written concurrently, each thread
- * on its own band. Rows are monotonic in this prototype (no free list): a removed switch leaves a dead row,
+ * on its own band. Rows are monotonic (no free list): a removed switch leaves a dead row,
  * which is correct (never read) but grows with switch churn. Recycling would need a {@code removed} guard on
  * {@link SwitchImpl} to be safe, unlike terminals whose reads are already guarded.</p>
  *

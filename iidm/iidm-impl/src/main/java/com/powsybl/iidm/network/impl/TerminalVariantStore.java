@@ -15,8 +15,8 @@ import java.util.Deque;
  * Columnar (structure-of-arrays) store for the variant-dependent {@code p} and {@code q} of every
  * terminal in a network.
  *
- * <p>Prototype for the "columnar variant storage" architecture spike. Instead of each terminal owning
- * its own {@code TDoubleArrayList} indexed by variant (array-of-structures), all terminals share two
+ * <p>Instead of each terminal owning its own {@code TDoubleArrayList} indexed by variant
+ * (array-of-structures), all terminals share two
  * network-level, <em>variant-major</em>, <em>flat</em> arrays: the {@code p} of terminal {@code row} in
  * variant {@code v} is {@code p[v * rowStride + row]}. A variant clone is then a couple of
  * {@link System#arraycopy} calls over contiguous bands <em>within the existing array</em> — no per-clone
@@ -31,7 +31,7 @@ import java.util.Deque;
  * (its own band). The backing arrays are published through {@code volatile} references so worker threads
  * observe fully constructed state.</p>
  *
- * <p>Row lifecycle is monotonic in this prototype: {@link #allocateRow} hands out an ever-increasing row
+ * <p>Row lifecycle is monotonic: {@link #allocateRow} hands out an ever-increasing row
  * index and rows are not recycled when a terminal is removed (a full implementation would keep a free list).
  * This is correct — dead rows are simply never read.</p>
  *
