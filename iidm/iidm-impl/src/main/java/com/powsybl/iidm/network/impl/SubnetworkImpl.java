@@ -8,6 +8,7 @@
 package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.PowsyblException;
+import com.powsybl.commons.extensions.Extension;
 import com.powsybl.commons.ref.RefChain;
 import com.powsybl.commons.ref.RefObj;
 import com.powsybl.commons.report.ReportNode;
@@ -1013,6 +1014,17 @@ public class SubnetworkImpl extends AbstractNetwork {
         // children (terminals, extensions, ...), mirroring the extend cascade.
         for (Identifiable<?> i : identifiables) {
             if (i instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(detachedNetwork);
+            }
+        }
+
+        // Network-level multi-variant extensions (e.g. SecondaryVoltageControl) live on the Network object,
+        // not in the identifiables index, so the cascade above does not reach them. transferExtensions has
+        // just moved them onto the detached network; re-home their columnar variant state as well, while the
+        // extensions still carry the source store reference. This mirrors the merge path, where the network
+        // object itself is part of the re-homed identifiables and cascades to its extensions.
+        for (Extension<Network> e : detachedNetwork.getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
                 multiVariantObject.reHomeVariantStores(detachedNetwork);
             }
         }

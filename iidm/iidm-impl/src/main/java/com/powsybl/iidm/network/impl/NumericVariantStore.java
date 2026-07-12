@@ -24,9 +24,15 @@ import java.util.Deque;
  * {@code TBooleanArrayList} defaults.</p>
  *
  * <p>Thread-safety follows the {@link com.powsybl.iidm.network.VariantManager} contract: structural changes on
- * the main thread only; pre-allocated variants read/written concurrently, each thread on its own band. Rows of
- * removed objects are recycled through a free list; callers must not read a freed row (which holds true for
- * equipment whose reads are guarded once removed).</p>
+ * the main thread only; pre-allocated variants read/written concurrently, each thread on its own band.</p>
+ *
+ * <p>Row lifecycle: {@link #freeRow(int)} returns a row to a free list for reuse by a future object. Freeing is
+ * only safe when the owner guarantees no read of the freed row can follow (otherwise a reused row would surface
+ * another object's value). Today only terminals/buses, whose reads are gated by a {@code removed} flag, free
+ * their row on removal; other owners (injections, tap changers, converters, areas, DC nodes, extensions, ...)
+ * keep their row for their lifetime, so {@code rowCount} grows monotonically under add/remove churn and is only
+ * reclaimed when the whole store is discarded. Wiring {@code freeRow} for those owners requires first gating
+ * their columnar getters on removal, as terminals do.</p>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -45,6 +51,14 @@ public class NumericVariantStore implements VariantColumnStore {
     private volatile int[] ints;
     private volatile boolean[] booleans;
 
+    // Geometry fields (rowStride, rowCount, variantSize, variantCapacity) are deliberately NOT volatile: a
+    // read computes its index from the volatile array reference AND rowStride, so publishing only the array
+    // is not by itself sufficient to safely observe a resized store. Correctness relies entirely on the
+    // VariantManager contract that geometry-changing operations (grow/allocate/extend, which reassign the
+    // array and mutate rowStride together) run on the main thread only, with a happens-before edge before any
+    // worker thread starts reading. Do not mutate geometry from a worker thread (e.g. via a lazy store
+    // creation or a late equipment add during a parallel analysis): a reader could then observe a new, wider
+    // array with the old stride and index out of bounds / into the wrong variant.
     private int rowStride;
     private int rowCount;
     private int variantSize;
