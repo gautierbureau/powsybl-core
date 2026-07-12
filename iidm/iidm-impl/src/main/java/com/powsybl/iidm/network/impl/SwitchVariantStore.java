@@ -87,6 +87,9 @@ class SwitchVariantStore implements VariantColumnStore {
         this.variantCapacity = Math.max(variantArraySize, 1);
         this.open = new boolean[variantCapacity * rowStride];
         this.retained = new boolean[variantCapacity * rowStride];
+        // Pre-size the copy-on-write band table to the current variant count so it is never grown on a worker
+        // thread (see NumericVariantStore for the full rationale).
+        this.cowBands = new CowBand[variantSize];
     }
 
     /**

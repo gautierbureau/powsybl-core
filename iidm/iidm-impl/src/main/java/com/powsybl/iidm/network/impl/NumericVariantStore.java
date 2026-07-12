@@ -131,6 +131,11 @@ public class NumericVariantStore implements VariantColumnStore {
         this.doubles = new double[variantCapacity * nDouble * rowStride];
         this.ints = new int[variantCapacity * nInt * rowStride];
         this.booleans = new boolean[variantCapacity * nBoolean * rowStride];
+        // Pre-size the copy-on-write band table to the current variant count so it is never grown on a worker
+        // thread. extendStructural keeps this invariant on clone, but a store created lazily (a new columnar
+        // type first used after structural variants already exist) would otherwise start empty and let
+        // ensureBand run Arrays.copyOf concurrently from workers, racing and dropping diverged bands.
+        this.cowBands = new CowBand[variantSize];
     }
 
     private int doubleIndex(int variant, int col, int row) {
