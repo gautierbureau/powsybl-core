@@ -262,6 +262,39 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return variantManager.isCurrentVariantStructural();
     }
 
+    /** Whether {@code id} is an object created in a structural variant (so extending/removing it is variant-scoped). */
+    boolean isVariantAddedObject(String id) {
+        VariantScopedExistence existence = getVariantScopedExistence();
+        return existence != null && existence.isAddedObject(id);
+    }
+
+    /**
+     * A structural variant supports adding variant-scoped equipment (routed through the membership intercept)
+     * and removing connectables (tombstoned). Editing shared containers, switches or buses instead mutates the
+     * single shared graph seen by every variant, so those operations are rejected in a structural variant
+     * rather than silently corrupting the base and sibling variants. This is a documented limitation, pending
+     * variant-scoped support for that structure.
+     */
+    void rejectSharedStructuralEdit(String operation) {
+        if (isCurrentVariantStructural()) {
+            throw new PowsyblException(operation + " is not supported in a structural variant "
+                    + "(it would modify structure shared by all variants).");
+        }
+    }
+
+    /**
+     * Reject {@code operation} that would extend a shared container in a structural variant. Extending a
+     * container created in the same variant is fine (it exists only in that variant); extending a shared one
+     * would leak into every variant.
+     */
+    void rejectStructuralEditOnSharedContainer(String containerId, String operation) {
+        if (isCurrentVariantStructural() && !isVariantAddedObject(containerId)) {
+            throw new PowsyblException(operation + " onto shared container '" + containerId
+                    + "' is not supported in a structural variant "
+                    + "(only a container created in the same variant can be extended).");
+        }
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }

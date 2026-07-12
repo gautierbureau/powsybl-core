@@ -815,11 +815,13 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public SwitchAdder newSwitch() {
+            rejectStructuralInternalStructureAdd("Adding a switch");
             return new SwitchAdderImpl();
         }
 
         @Override
         public InternalConnectionAdder newInternalConnection() {
+            rejectStructuralInternalStructureAdd("Adding an internal connection");
             return new InternalConnectionAdderImpl();
         }
 
@@ -852,6 +854,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public void removeInternalConnections(int node1, int node2) {
+            rejectStructuralInternalStructureRemoval("Removing an internal connection");
             int[] internalConnectionsToBeRemoved = Arrays.stream(graph.getEdges())
                     .filter(e -> graph.getEdgeObject(e) == null)
                     .filter(e -> graph.getEdgeVertex1(e) == node1 && graph.getEdgeVertex2(e) == node2
@@ -903,6 +906,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public void removeSwitch(String switchId) {
+            rejectStructuralInternalStructureRemoval("Removing a switch");
             NodeBreakerTopologyModel.this.removeSwitchFromTopology(switchId, true);
         }
 

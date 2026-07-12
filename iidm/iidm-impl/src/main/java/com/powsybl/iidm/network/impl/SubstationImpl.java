@@ -222,9 +222,11 @@ class SubstationImpl extends AbstractIdentifiable<Substation> implements Substat
 
     @Override
     public void remove() {
+        NetworkImpl network = getNetwork();
+        network.rejectSharedStructuralEdit("Removing a substation");
+
         Substations.checkRemovability(this);
 
-        NetworkImpl network = getNetwork();
         network.getListeners().notifyBeforeRemoval(this);
 
         Set<VoltageLevelExt> vls = new HashSet<>(voltageLevels);

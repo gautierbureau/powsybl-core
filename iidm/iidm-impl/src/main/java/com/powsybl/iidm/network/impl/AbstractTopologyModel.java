@@ -52,6 +52,21 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         return voltageLevel.getNetwork();
     }
 
+    /**
+     * Reject adding a switch / internal connection onto this voltage level in a structural variant unless the
+     * voltage level was itself created in that variant. On a shared voltage level the edge would be added to
+     * the single shared graph and corrupt the topology (calculated buses, connected components) of every
+     * other variant, while the identifiable would be existence-hidden — an inconsistent, silently wrong state.
+     */
+    protected void rejectStructuralInternalStructureAdd(String operation) {
+        getNetwork().rejectStructuralEditOnSharedContainer(voltageLevel.getId(), operation);
+    }
+
+    /** Reject removing a switch / bus (shared graph structure) in a structural variant. */
+    protected void rejectStructuralInternalStructureRemoval(String operation) {
+        getNetwork().rejectSharedStructuralEdit(operation);
+    }
+
     protected static void addNextTerminals(TerminalExt otherTerminal, List<TerminalExt> nextTerminals) {
         Objects.requireNonNull(otherTerminal);
         Objects.requireNonNull(nextTerminals);

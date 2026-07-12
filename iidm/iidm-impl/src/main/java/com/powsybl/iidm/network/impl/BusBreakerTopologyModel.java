@@ -710,6 +710,7 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public VoltageLevel.BusBreakerView.SwitchAdder newSwitch() {
+            rejectStructuralInternalStructureAdd("Adding a switch");
             return new SwitchAdderImpl();
         }
 
@@ -780,6 +781,7 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
     }
 
     private void removeBus(String busId) {
+        rejectStructuralInternalStructureRemoval("Removing a bus");
         ConfiguredBus bus = getBus(busId, true);
         if (bus.getTerminalCount() > 0) {
             throw new ValidationException(voltageLevel, "Cannot remove bus "
@@ -841,6 +843,7 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
     }
 
     private void removeSwitch(String switchId) {
+        rejectStructuralInternalStructureRemoval("Removing a switch");
         Integer e = switches.get(switchId);
         if (e == null) {
             throw new PowsyblException("Switch '" + switchId
