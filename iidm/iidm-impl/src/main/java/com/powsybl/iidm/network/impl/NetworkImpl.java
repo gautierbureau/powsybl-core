@@ -229,7 +229,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         if (current != null) {
             return current;
         }
-        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize());
+        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize(), variantManager.getCowState());
         index.setVariantScopedExistence(created);
         return created;
     }
@@ -244,7 +244,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         if (current != null) {
             return current;
         }
-        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize());
+        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize(), variantManager.getCowState());
         index.setVariantScopedMembership(created);
         return created;
     }
@@ -1402,6 +1402,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     void materializeCowInheritorsOf(int variantIndex) {
         for (VariantColumnStore store : variantColumnStores) {
             store.materializeInheritors(variantIndex);
+        }
+        // existence and membership ride the same copy-on-write parentage — freeze what their children inherit
+        VariantScopedExistence existence = index.getVariantScopedExistence();
+        if (existence != null) {
+            existence.materializeInheritors(variantIndex);
+        }
+        VariantScopedMembership membership = index.getVariantScopedMembership();
+        if (membership != null) {
+            membership.materializeInheritors(variantIndex);
         }
     }
 
