@@ -22,6 +22,12 @@ import java.util.*;
 class NetworkIndex {
 
     private final Map<String, Identifiable<?>> objectsById = new HashMap<>();
+    // Overflow holder for the rare case of several objects sharing an id across sibling structural variants
+    // (an id added independently in two variants, or removed then re-added in one). Empty for every normal
+    // network and while no such collision exists, so the single-object hot path is unchanged. The object in
+    // objectsById is the primary; the extras live here. At most one object per id is visible in a variant.
+    private Map<String, List<Identifiable<?>>> extraObjectsById;
+
     private final Map<String, String> idByAlias = new HashMap<>();
 
     private final Map<Class<? extends Identifiable>, Set<Identifiable<?>>> objectsByClass = new HashMap<>();
@@ -70,11 +76,24 @@ class NetworkIndex {
 
     void checkAndAdd(Identifiable<?> obj) {
         checkId(obj.getId());
-        if (objectsById.containsKey(obj.getId())) {
-            throw new PowsyblException("Object (" + obj.getClass().getName()
-                    + ") '" + obj.getId() + "' already exists");
+        String id = obj.getId();
+        boolean structural = existence != null && existence.isCurrentVariantStructural();
+        Identifiable<?> primary = objectsById.get(id);
+        List<Identifiable<?>> extras = extraObjectsById == null ? null : extraObjectsById.get(id);
+        boolean idAlreadyUsed = primary != null || extras != null && !extras.isEmpty();
+        if (idAlreadyUsed) {
+            // Outside a structural variant an id is unique network-wide. Inside one, an id collides only if a
+            // same-id object is actually visible in the active variant (e.g. a base object still present, or
+            // one added in this variant); if the existing objects are all hidden here (added in a sibling, or
+            // tombstoned), the new object is a distinct variant-scoped object sharing the id.
+            if (!structural || isAnySameIdVisible(primary, extras)) {
+                throw new PowsyblException("Object (" + obj.getClass().getName()
+                        + ") '" + id + "' already exists");
+            }
+            addExtra(id, obj);
+        } else {
+            objectsById.put(id, obj);
         }
-        objectsById.put(obj.getId(), obj);
         obj.getAliases().forEach(alias -> addAlias(obj, alias));
 
         Set<Identifiable<?>> all = objectsByClass.computeIfAbsent(obj.getClass(), k -> new LinkedHashSet<>());
@@ -84,9 +103,51 @@ class NetworkIndex {
         // Structural variant: an object added while a structural variant is the working one exists only in
         // that variant (a connectable, a container VL/bus/substation — anything). Its terminal membership
         // is handled separately by the topology-model branch-attach intercept.
-        if (existence != null && existence.isCurrentVariantStructural()) {
-            existence.existOnlyInCurrentVariant(obj.getId());
+        if (structural) {
+            existence.existOnlyInCurrentVariant(obj);
         }
+    }
+
+    private boolean isAnySameIdVisible(Identifiable<?> primary, List<Identifiable<?>> extras) {
+        if (primary != null && existence.isVisible(primary)) {
+            return true;
+        }
+        if (extras != null) {
+            for (Identifiable<?> e : extras) {
+                if (existence.isVisible(e)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void addExtra(String id, Identifiable<?> obj) {
+        if (extraObjectsById == null) {
+            extraObjectsById = new HashMap<>();
+        }
+        extraObjectsById.computeIfAbsent(id, k -> new ArrayList<>()).add(obj);
+    }
+
+    /** Resolve an id to the single object visible in the active variant (null if none), across collisions. */
+    private Identifiable<?> resolveVisible(String id) {
+        Identifiable<?> primary = objectsById.get(id);
+        if (existence == null) {
+            return primary;
+        }
+        List<Identifiable<?>> extras = extraObjectsById == null ? null : extraObjectsById.get(id);
+        if (extras == null) {
+            return primary != null && existence.isVisible(primary) ? primary : null;
+        }
+        if (primary != null && existence.isVisible(primary)) {
+            return primary;
+        }
+        for (Identifiable<?> e : extras) {
+            if (existence.isVisible(e)) {
+                return e;
+            }
+        }
+        return null;
     }
 
     boolean addAlias(Identifiable<?> obj, String alias) {
@@ -135,11 +196,7 @@ class NetworkIndex {
     Identifiable get(String idOrAlias) {
         String id = idByAlias.getOrDefault(idOrAlias, idOrAlias);
         checkId(id);
-        Identifiable<?> obj = objectsById.get(id);
-        if (obj != null && existence != null && existence.isHidden(id)) {
-            return null; // exists structurally, but hidden in the active variant
-        }
-        return obj;
+        return resolveVisible(id);
     }
 
     <T extends Identifiable> T get(String id, Class<T> clazz) {
@@ -152,13 +209,22 @@ class NetworkIndex {
     }
 
     Collection<Identifiable<?>> getAll() {
-        if (existence == null || !existence.anyHidden()) {
+        if (existence == null || !existence.anyScoped()) {
             return objectsById.values();
         }
         List<Identifiable<?>> visible = new ArrayList<>(objectsById.size());
-        for (Map.Entry<String, Identifiable<?>> entry : objectsById.entrySet()) {
-            if (!existence.isHidden(entry.getKey())) {
-                visible.add(entry.getValue());
+        for (Identifiable<?> obj : objectsById.values()) {
+            if (existence.isVisible(obj)) {
+                visible.add(obj);
+            }
+        }
+        if (extraObjectsById != null) {
+            for (List<Identifiable<?>> extras : extraObjectsById.values()) {
+                for (Identifiable<?> obj : extras) {
+                    if (existence.isVisible(obj)) {
+                        visible.add(obj);
+                    }
+                }
             }
         }
         return visible;
@@ -174,6 +240,15 @@ class NetworkIndex {
             for (Identifiable<?> obj : objectsById.values()) {
                 if (obj instanceof MultiVariantObject multiVariantObject) {
                     stateful.add(multiVariantObject);
+                }
+            }
+            if (extraObjectsById != null) {
+                for (List<Identifiable<?>> extras : extraObjectsById.values()) {
+                    for (Identifiable<?> obj : extras) {
+                        if (obj instanceof MultiVariantObject multiVariantObject) {
+                            stateful.add(multiVariantObject);
+                        }
+                    }
                 }
             }
             // existence and membership are variant state too — a clone must grow/copy their columns with
@@ -194,12 +269,12 @@ class NetworkIndex {
         if (all == null) {
             return Collections.emptySet();
         }
-        if (existence == null || !existence.anyHidden()) {
+        if (existence == null || !existence.anyScoped()) {
             return (Set<T>) all;
         }
         Set<Identifiable<?>> visible = new LinkedHashSet<>(all.size());
         for (Identifiable<?> obj : all) {
-            if (!existence.isHidden(obj.getId())) {
+            if (existence.isVisible(obj)) {
                 visible.add(obj);
             }
         }
@@ -209,23 +284,41 @@ class NetworkIndex {
     boolean contains(String id) {
         String idFromPotentialAlias = idByAlias.getOrDefault(id, id);
         checkId(idFromPotentialAlias);
-        if (!objectsById.containsKey(idFromPotentialAlias)) {
-            return false;
-        }
-        return existence == null || !existence.isHidden(idFromPotentialAlias);
+        return resolveVisible(idFromPotentialAlias) != null;
     }
 
     void remove(Identifiable obj) {
         checkId(obj.getId());
-        Identifiable old = objectsById.remove(obj.getId());
-        if (old == null || old != obj) {
-            throw new PowsyblException("Object (" + obj.getClass().getName()
-                    + ") '" + obj.getId() + "' not found");
+        String id = obj.getId();
+        Identifiable<?> primary = objectsById.get(id);
+        if (primary == obj) {
+            // remove the primary; promote an extra (a same-id variant-scoped object) to primary if any
+            List<Identifiable<?>> extras = extraObjectsById == null ? null : extraObjectsById.get(id);
+            if (extras != null && !extras.isEmpty()) {
+                objectsById.put(id, extras.remove(0));
+                if (extras.isEmpty()) {
+                    extraObjectsById.remove(id);
+                }
+            } else {
+                objectsById.remove(id);
+            }
+        } else {
+            List<Identifiable<?>> extras = extraObjectsById == null ? null : extraObjectsById.get(id);
+            if (extras == null || !extras.remove(obj)) {
+                throw new PowsyblException("Object (" + obj.getClass().getName()
+                        + ") '" + id + "' not found");
+            }
+            if (extras.isEmpty()) {
+                extraObjectsById.remove(id);
+            }
         }
         obj.getAliases().forEach(idByAlias::remove);
         Set<Identifiable<?>> all = objectsByClass.get(obj.getClass());
         if (all != null) {
             all.remove(obj);
+        }
+        if (existence != null) {
+            existence.forgetObject(obj);
         }
         statefulObjectsCache = null;
     }
@@ -233,6 +326,9 @@ class NetworkIndex {
     void clean() {
         objectsById.clear();
         objectsByClass.clear();
+        if (extraObjectsById != null) {
+            extraObjectsById.clear();
+        }
         statefulObjectsCache = null;
     }
 

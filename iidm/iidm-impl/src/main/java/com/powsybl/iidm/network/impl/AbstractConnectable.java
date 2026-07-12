@@ -86,7 +86,7 @@ abstract class AbstractConnectable<I extends Connectable<I>> extends AbstractIde
     }
 
     private void removeInCurrentVariant(NetworkImpl network) {
-        network.getVariantScopedExistence().hideInCurrentVariant(id);
+        network.getVariantScopedExistence().hideInCurrentVariant(this);
         VariantScopedMembership membership = network.getVariantScopedMembership();
         for (TerminalExt terminal : terminals) {
             membership.detachInCurrentVariant((VoltageLevelExt) terminal.getVoltageLevel(), terminal);

@@ -58,7 +58,7 @@ class VariantScopedExistenceTest {
 
         // in the faulted variant, hide the line (a variant-scoped structural tombstone)
         n.getVariantManager().setWorkingVariant("faulted");
-        existence.hideInCurrentVariant("L");
+        existence.hideInCurrentVariant(n.getLine("L"));
 
         // faulted view: L does not exist — via getLine, getIdentifiable, contains and the counts
         assertNull(n.getLine("L"));
@@ -79,7 +79,7 @@ class VariantScopedExistenceTest {
         VariantScopedExistence existence = n.enableVariantScopedExistence();
         n.getVariantManager().cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "faulted");
         n.getVariantManager().setWorkingVariant("faulted");
-        existence.hideInCurrentVariant("L");
+        existence.hideInCurrentVariant(n.getLine("L"));
 
         // clone the faulted variant: the real cloneVariant must copy the existence column, so the child
         // inherits the hidden line — existence is variant state, grown/copied like every other column.
@@ -99,10 +99,11 @@ class VariantScopedExistenceTest {
         VariantScopedExistence existence = n.enableVariantScopedExistence();
         n.getVariantManager().cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "faulted");
         n.getVariantManager().setWorkingVariant("faulted");
-        existence.hideInCurrentVariant("L");
+        com.powsybl.iidm.network.Line line = n.getLine("L");
+        existence.hideInCurrentVariant(line);
         assertNull(n.getLine("L"));
 
-        existence.showInCurrentVariant("L");
+        existence.showInCurrentVariant(line);
         assertNotNull(n.getLine("L"));
     }
 }

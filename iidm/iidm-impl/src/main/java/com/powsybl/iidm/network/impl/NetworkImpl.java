@@ -265,7 +265,11 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     /** Whether {@code id} is an object created in a structural variant (so extending/removing it is variant-scoped). */
     boolean isVariantAddedObject(String id) {
         VariantScopedExistence existence = getVariantScopedExistence();
-        return existence != null && existence.isAddedObject(id);
+        if (existence == null) {
+            return false;
+        }
+        Identifiable<?> obj = index.get(id);
+        return obj != null && existence.isAddedObject(obj);
     }
 
     /**
