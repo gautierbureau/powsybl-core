@@ -219,6 +219,86 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return index;
     }
 
+    /**
+     * Enable — and return — the layer that makes an object's existence depend on the active variant, so a
+     * cloned variant is a structural variant of this same network. Idempotent. See
+     * {@code structural-variant-public-api.md}.
+     */
+    VariantScopedExistence enableVariantScopedExistence() {
+        VariantScopedExistence current = index.getVariantScopedExistence();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize(), variantManager.getCowState());
+        index.setVariantScopedExistence(created);
+        return created;
+    }
+
+    /**
+     * Enable — and return — variant-scoped terminal membership (the {@code attached} / {@code detached}
+     * delta resolved against the active variant). Idempotent. See
+     * {@code structural-variant-public-api.md}.
+     */
+    VariantScopedMembership enableVariantScopedMembership() {
+        VariantScopedMembership current = index.getVariantScopedMembership();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize(), variantManager.getCowState());
+        index.setVariantScopedMembership(created);
+        return created;
+    }
+
+    VariantScopedMembership getVariantScopedMembership() {
+        return index.getVariantScopedMembership();
+    }
+
+    VariantScopedExistence getVariantScopedExistence() {
+        return index.getVariantScopedExistence();
+    }
+
+    /** Whether structural mutations (add/remove) made now are scoped to the working (structural) variant. */
+    boolean isCurrentVariantStructural() {
+        return variantManager.isCurrentVariantStructural();
+    }
+
+    /** Whether {@code id} is an object created in a structural variant (so extending/removing it is variant-scoped). */
+    boolean isVariantAddedObject(String id) {
+        VariantScopedExistence existence = getVariantScopedExistence();
+        if (existence == null) {
+            return false;
+        }
+        Identifiable<?> obj = index.get(id);
+        return obj != null && existence.isAddedObject(obj);
+    }
+
+    /**
+     * A structural variant supports adding variant-scoped equipment (routed through the membership intercept)
+     * and removing connectables (tombstoned). Editing shared containers, switches or buses instead mutates the
+     * single shared graph seen by every variant, so those operations are rejected in a structural variant
+     * rather than silently corrupting the base and sibling variants. This is a documented limitation, pending
+     * variant-scoped support for that structure.
+     */
+    void rejectSharedStructuralEdit(String operation) {
+        if (isCurrentVariantStructural()) {
+            throw new PowsyblException(operation + " is not supported in a structural variant "
+                    + "(it would modify structure shared by all variants).");
+        }
+    }
+
+    /**
+     * Reject {@code operation} that would extend a shared container in a structural variant. Extending a
+     * container created in the same variant is fine (it exists only in that variant); extending a shared one
+     * would leak into every variant.
+     */
+    void rejectStructuralEditOnSharedContainer(String containerId, String operation) {
+        if (isCurrentVariantStructural() && !isVariantAddedObject(containerId)) {
+            throw new PowsyblException(operation + " onto shared container '" + containerId
+                    + "' is not supported in a structural variant "
+                    + "(only a container created in the same variant can be extended).");
+        }
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }
@@ -1322,6 +1402,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     void materializeCowInheritorsOf(int variantIndex) {
         for (VariantColumnStore store : variantColumnStores) {
             store.materializeInheritors(variantIndex);
+        }
+        // existence and membership ride the same copy-on-write parentage — freeze what their children inherit
+        VariantScopedExistence existence = index.getVariantScopedExistence();
+        if (existence != null) {
+            existence.materializeInheritors(variantIndex);
+        }
+        VariantScopedMembership membership = index.getVariantScopedMembership();
+        if (membership != null) {
+            membership.materializeInheritors(variantIndex);
         }
     }
 
