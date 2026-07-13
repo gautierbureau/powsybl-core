@@ -15,8 +15,8 @@ import java.util.Arrays;
  * owning only their diverged rows), and the derived per-variant list of copy-on-write children (the
  * variants a write must freeze rows into to preserve the clone snapshot).
  *
- * <p>This is the live port of the {@code CowVariantParentage} prototype, folded together with the
- * structural-variant marking previously kept in {@link VariantManagerImpl}. One instance per network,
+ * <p>This folds the clone parentage together with the structural-variant marking previously kept in
+ * {@link VariantManagerImpl}. One instance per network,
  * owned by the {@link VariantManagerImpl} and consulted by every {@link VariantColumnStore}.</p>
  *
  * <p>The {@link #isActive()} gate is the copy-on-write master switch: it is {@code true} while at least one

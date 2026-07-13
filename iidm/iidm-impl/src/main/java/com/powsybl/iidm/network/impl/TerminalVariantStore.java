@@ -27,8 +27,8 @@ import java.util.Deque;
  *
  * <h2>Copy-on-write ({@code STRUCTURAL}) variants</h2>
  *
- * <p>A variant cloned with {@code VariantCloneStrategy.STRUCTURAL} is stored copy-on-write (the live port
- * of the {@code CowGatedColumnarStore} prototype): {@link #extendStructural} copies <b>nothing</b> (O(1)) —
+ * <p>A variant cloned with {@code VariantCloneStrategy.STRUCTURAL} is stored copy-on-write:
+ * {@link #extendStructural} copies <b>nothing</b> (O(1)) —
  * the new variant owns no rows and resolves reads through the clone parentage ({@link VariantCowState})
  * to its nearest ancestor that holds the row. Rows diverge one by one: writing a copy-on-write variant
  * first materialises the touched row into its sparse band ({@code CowBand}), and — to preserve the clone
