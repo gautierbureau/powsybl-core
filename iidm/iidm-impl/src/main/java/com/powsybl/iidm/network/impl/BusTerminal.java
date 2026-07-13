@@ -27,7 +27,7 @@ import java.util.Set;
 class BusTerminal extends AbstractTerminal {
 
     private BusBreakerTopologyModel getTopologyModel() {
-        return (BusBreakerTopologyModel) voltageLevel.getTopologyModel();
+        return (BusBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final NodeBreakerView nodeBreakerView = new NodeBreakerView() {

@@ -194,6 +194,12 @@ public class VariantManagerImpl implements VariantManager {
             }
             LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
         }
+
+        if (structural) {
+            // the network resolves object existence and terminal membership against the active variant
+            network.enableVariantScopedExistence();
+            network.enableVariantScopedMembership();
+        }
     }
 
     /** The shared copy-on-write bookkeeping (parentage, structural marks, master gate). */
@@ -250,9 +256,14 @@ public class VariantManagerImpl implements VariantManager {
         }
         int index = getVariantIndex(variantId);
         // Freeze the state its copy-on-write children still inherit from it into them (they keep their
-        // snapshot), then re-parent them onto its parent, so the index can be recycled.
+        // snapshot), then re-parent them onto its parent and forget its existence deltas (objects that
+        // existed only in it become invisible; its index may be recycled).
         network.materializeCowInheritorsOf(index);
         cowState.forgetVariant(index);
+        VariantScopedExistence existence = networkIndex.getVariantScopedExistence();
+        if (existence != null) {
+            existence.forgetVariant(index);
+        }
         id2index.remove(variantId);
         LOGGER.debug("Removing variant '{}'", variantId);
         if (index == variantArraySize - 1) {
