@@ -9,6 +9,7 @@ package com.powsybl.iidm.network;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * This class provides methods to manage variants of the network (create and
@@ -91,6 +92,61 @@ public interface VariantManager {
      *      *                         the mayOverwrite parameter is set to {@code false}
      */
     void cloneVariant(String sourceVariantId, String targetVariantId, boolean mayOverwrite);
+
+    /**
+     * The capability a cloned variant has to diverge from its source. Mirrors network-store's
+     * <em>full</em> vs <em>partial</em> variant distinction. See {@code structural-variant-public-api.md}.
+     */
+    enum VariantCloneStrategy {
+
+        /**
+         * Current behaviour (default): the target variant gets an independent copy of every per-variant
+         * <b>state</b> value (setpoints, tap positions, switch open, terminal p/q) and shares the network
+         * <b>structure</b> with all other variants. Structural changes made while it is active are
+         * network-wide.
+         */
+        STATE_ONLY,
+
+        /**
+         * The target variant may diverge <b>structurally</b>: objects can be added, removed, or
+         * re-connected in it without affecting any other variant. For a network that has at least one
+         * structural variant, object existence and topology are resolved against the active variant.
+         */
+        STRUCTURAL
+    }
+
+    /**
+     * Create a new variant by cloning an existing one, with an explicit clone strategy.
+     *
+     * <p>{@link VariantCloneStrategy#STATE_ONLY} is the historical behaviour and the default of every
+     * other {@code cloneVariant} overload. {@link VariantCloneStrategy#STRUCTURAL} additionally lets the
+     * target variant diverge structurally (see the enum and {@code structural-variant-public-api.md}).</p>
+     *
+     * @param sourceVariantId the source variant id
+     * @param targetVariantId the target variant id (the one that will be created)
+     * @param strategy        the clone strategy
+     */
+    default void cloneVariant(String sourceVariantId, String targetVariantId, VariantCloneStrategy strategy) {
+        cloneVariant(sourceVariantId, List.of(targetVariantId), strategy, false);
+    }
+
+    /**
+     * Create or overwrite variants by cloning an existing one, with an explicit clone strategy.
+     *
+     * @param sourceVariantId  the source variant id
+     * @param targetVariantIds the target variant id list
+     * @param strategy         the clone strategy
+     * @param mayOverwrite     indicates if a target can be overwritten when it already exists
+     */
+    default void cloneVariant(String sourceVariantId, List<String> targetVariantIds, VariantCloneStrategy strategy, boolean mayOverwrite) {
+        Objects.requireNonNull(strategy);
+        if (strategy == VariantCloneStrategy.STATE_ONLY) {
+            cloneVariant(sourceVariantId, targetVariantIds, mayOverwrite);
+        } else {
+            throw new UnsupportedOperationException(
+                    "STRUCTURAL variant clone is a proposed API not yet implemented; see structural-variant-public-api.md");
+        }
+    }
 
     /**
      * Remove a variant.
