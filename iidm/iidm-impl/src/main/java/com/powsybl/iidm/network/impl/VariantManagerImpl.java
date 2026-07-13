@@ -38,6 +38,10 @@ public class VariantManagerImpl implements VariantManager {
 
     private final Deque<Integer> unusedIndexes = new ArrayDeque<>();
 
+    // Clone parentage, copy-on-write (STRUCTURAL) variant marks and the copy-on-write master gate, shared
+    // with every columnar variant store. Drives copy-on-write existence AND state resolution.
+    private final VariantCowState cowState = new VariantCowState();
+
     private final NetworkImpl network;
 
     VariantManagerImpl(NetworkImpl network) {
@@ -123,6 +127,12 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public void cloneVariant(String sourceVariantId, List<String> targetVariantIds, boolean mayOverwrite) {
+        cloneVariant(sourceVariantId, targetVariantIds, VariantCloneStrategy.STATE_ONLY, mayOverwrite);
+    }
+
+    @Override
+    public void cloneVariant(String sourceVariantId, List<String> targetVariantIds, VariantCloneStrategy strategy, boolean mayOverwrite) {
+        Objects.requireNonNull(strategy);
         if (targetVariantIds.isEmpty()) {
             throw new IllegalArgumentException("Empty target variant id list");
         }
@@ -157,17 +167,43 @@ public class VariantManagerImpl implements VariantManager {
             }
         }
 
+        boolean structural = strategy == VariantCloneStrategy.STRUCTURAL;
+
         // compute the stateful objects list only once for the whole clone operation
         List<MultiVariantObject> statefulObjects = getStafulObjects();
 
-        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
+        // an overwritten variant may have copy-on-write children still inheriting state from it: freeze
+        // that state into them before its bands are overwritten, so they keep their snapshot
+        for (int index : overwritten) {
+            network.materializeCowInheritorsOf(index);
+        }
+
+        // Record the clone parentage (and, for a STRUCTURAL clone, the copy-on-write marks) before driving
+        // the owners, so the stores resolve through a consistent parentage while cloning. An object added
+        // in a structural variant resolves its visibility through this same tree instead of being hidden in
+        // every other variant eagerly. The parentage follows every clone, whatever the strategy.
+        for (String targetVariantId : targetVariantIds) {
+            cowState.recordClone(id2index.get(targetVariantId), sourceIndex, structural);
+        }
+
+        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects, structural);
 
         if (extendedCount > 0) {
             for (MultiVariantObject obj : statefulObjects) {
-                obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
+                obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex, structural);
             }
             LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
         }
+    }
+
+    /** The shared copy-on-write bookkeeping (parentage, structural marks, master gate). */
+    VariantCowState getCowState() {
+        return cowState;
+    }
+
+    /** The variant a variant was cloned from, or {@code -1} for a root (the initial variant). */
+    int parentVariant(int index) {
+        return cowState.getParent(index);
     }
 
     private void checkExistingVariantIds(List<String> targetVariantIds) {
@@ -181,11 +217,11 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten,
-                                              List<MultiVariantObject> statefulObjects) {
+                                              List<MultiVariantObject> statefulObjects, boolean structural) {
         if (!recycled.isEmpty()) {
             int[] indexes = Ints.toArray(recycled);
             for (MultiVariantObject obj : statefulObjects) {
-                obj.allocateVariantArrayElement(indexes, sourceIndex);
+                obj.allocateVariantArrayElement(indexes, sourceIndex, structural);
             }
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("Recycling variant array indexes {}", Arrays.toString(indexes));
@@ -194,12 +230,17 @@ public class VariantManagerImpl implements VariantManager {
         if (!overwritten.isEmpty()) {
             int[] indexes = Ints.toArray(overwritten);
             for (MultiVariantObject obj : statefulObjects) {
-                obj.allocateVariantArrayElement(indexes, sourceIndex);
+                obj.allocateVariantArrayElement(indexes, sourceIndex, structural);
             }
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("Overwriting variant array indexes {}", Arrays.toString(indexes));
             }
         }
+    }
+
+    /** Whether structural mutations (add/remove/reconnect) made now are scoped to the working variant. */
+    boolean isCurrentVariantStructural() {
+        return variantContext.isIndexSet() && cowState.isCow(variantContext.getVariantIndex());
     }
 
     @Override
@@ -208,6 +249,10 @@ public class VariantManagerImpl implements VariantManager {
             throw new PowsyblException("Removing initial variant is forbidden");
         }
         int index = getVariantIndex(variantId);
+        // Freeze the state its copy-on-write children still inherit from it into them (they keep their
+        // snapshot), then re-parent them onto its parent, so the index can be recycled.
+        network.materializeCowInheritorsOf(index);
+        cowState.forgetVariant(index);
         id2index.remove(variantId);
         LOGGER.debug("Removing variant '{}'", variantId);
         if (index == variantArraySize - 1) {
