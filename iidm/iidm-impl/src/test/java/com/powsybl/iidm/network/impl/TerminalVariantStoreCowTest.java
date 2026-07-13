@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The live port of the {@code CowGatedColumnarStore} semantics onto {@link TerminalVariantStore}: the dense
+ * Copy-on-write semantics on {@link TerminalVariantStore}: the dense
  * fast path while no structural variant exists, an O(1) structural clone (zero rows stored) that reads
  * through to its parent, per-row divergence on write, and the snapshot frozen into copy-on-write children
  * when a parent is written, overwritten or removed.
