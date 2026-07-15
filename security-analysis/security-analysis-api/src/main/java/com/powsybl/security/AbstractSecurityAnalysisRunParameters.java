@@ -13,9 +13,9 @@ import com.powsybl.computation.ComputationManager;
 import com.powsybl.computation.local.LocalComputationManager;
 import com.powsybl.contingency.strategy.OperatorStrategy;
 import com.powsybl.contingency.violations.LimitViolationFilter;
+import com.powsybl.loadflow.resultswriter.NetworkResultWriterFactory;
 import com.powsybl.security.interceptors.SecurityAnalysisInterceptor;
 import com.powsybl.security.monitor.StateMonitor;
-import com.powsybl.security.writer.SecurityAnalysisResultWriterFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +37,7 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     private List<Action> actions = new ArrayList<>();
     private List<StateMonitor> monitors = new ArrayList<>();
     private ReportNode reportNode = ReportNode.NO_OP;
-    private SecurityAnalysisResultWriterFactory resultWriterFactory = SecurityAnalysisResultWriterFactory.NO_OP;
+    private NetworkResultWriterFactory resultWriterFactory = NetworkResultWriterFactory.NO_OP;
 
     /**
      * {@link LimitViolationFilter} getter<br>
@@ -82,10 +82,10 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     }
 
     /**
-     * {@link SecurityAnalysisResultWriterFactory} getter. Defaults to
-     * {@link SecurityAnalysisResultWriterFactory#NO_OP}, i.e. streaming disabled.
+     * {@link NetworkResultWriterFactory} getter. Defaults to
+     * {@link NetworkResultWriterFactory#NO_OP}, i.e. streaming disabled.
      */
-    public SecurityAnalysisResultWriterFactory getResultWriterFactory() {
+    public NetworkResultWriterFactory getResultWriterFactory() {
         return resultWriterFactory;
     }
 
@@ -177,12 +177,12 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
 
     /**
      * Sets the factory building the per-partition writers used to stream results incrementally, see
-     * {@link SecurityAnalysisResultWriterFactory}.
+     * {@link NetworkResultWriterFactory}.
      * <p>Support is provider-dependent: a provider that does not support streaming ignores it. Set to
-     * {@link SecurityAnalysisResultWriterFactory#NO_OP} (the default) to disable streaming.
+     * {@link NetworkResultWriterFactory#NO_OP} (the default) to disable streaming.
      */
-    public T setResultWriterFactory(SecurityAnalysisResultWriterFactory resultWriterFactory) {
-        Objects.requireNonNull(resultWriterFactory, "SecurityAnalysisResultWriterFactory should not be null");
+    public T setResultWriterFactory(NetworkResultWriterFactory resultWriterFactory) {
+        Objects.requireNonNull(resultWriterFactory, "NetworkResultWriterFactory should not be null");
         this.resultWriterFactory = resultWriterFactory;
         return self();
     }

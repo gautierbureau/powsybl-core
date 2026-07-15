@@ -14,13 +14,13 @@
 
     <parent>
         <groupId>com.powsybl</groupId>
-        <artifactId>powsybl-security-analysis</artifactId>
+        <artifactId>powsybl-loadflow</artifactId>
         <version>7.4.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>powsybl-security-analysis-parquet</artifactId>
-    <name>Security analysis Parquet</name>
-    <description>Streaming of security analysis branch flows to Parquet files</description>
+    <artifactId>powsybl-loadflow-results-parquet</artifactId>
+    <name>Load flow results Parquet</name>
+    <description>Streaming of network computation results (branch flows, bus voltages, generator dispatch) to Parquet files</description>
 
     <properties>
         <!-- parquet-floor is a minimal, Hadoop-free Parquet writer/reader (parquet-hadoop's hadoop-common is provided) -->
@@ -35,7 +35,7 @@
                 <configuration>
                     <archive>
                         <manifestEntries>
-                            <Automatic-Module-Name>com.powsybl.security.analysis.parquet</Automatic-Module-Name>
+                            <Automatic-Module-Name>com.powsybl.loadflow.results.parquet</Automatic-Module-Name>
                         </manifestEntries>
                     </archive>
                 </configuration>
@@ -56,7 +56,7 @@
         <!-- Compilation dependencies -->
         <dependency>
             <groupId>${project.groupId}</groupId>
-            <artifactId>powsybl-security-analysis-api</artifactId>
+            <artifactId>powsybl-loadflow-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
