@@ -38,7 +38,7 @@ public abstract class AbstractSecondaryVoltageControlTest {
                     .newControlZone()
                         .withName("z1")
                         .newPilotPoint()
-                            .withBusbarSectionsOrBusesIds(List.of("NLOAD"))
+                            .withBuses(List.of(new PilotPoint.BusRef("VLLOAD", "NLOAD")))
                             .withTargetV(15d)
                         .add()
                         .newControlUnit()
@@ -59,7 +59,7 @@ public abstract class AbstractSecondaryVoltageControlTest {
         ControlZone z1 = control.getControlZones().get(0);
         assertEquals("z1", z1.getName());
         assertNotNull(z1.getPilotPoint());
-        assertEquals(List.of("NLOAD"), z1.getPilotPoint().getBusbarSectionsOrBusesIds());
+        assertEquals(List.of(new PilotPoint.BusRef("VLLOAD", "NLOAD")), z1.getPilotPoint().getBuses());
         assertEquals(15d, z1.getPilotPoint().getTargetV(), 0d);
         assertEquals(2, z1.getControlUnits().size());
         assertEquals("GEN", z1.getControlUnits().get(0).getId());
@@ -109,7 +109,7 @@ public abstract class AbstractSecondaryVoltageControlTest {
                 .newControlZone()
                     .withName("z2")
                     .newPilotPoint()
-                        .withBusbarSectionsOrBusesIds(List.of("NGEN"))
+                        .withBuses(List.of(new PilotPoint.BusRef("VLGEN", "NGEN")))
                         .withTargetV(7d)
                     .add()
                     .newControlUnit()
@@ -194,13 +194,13 @@ public abstract class AbstractSecondaryVoltageControlTest {
         ControlZone z1 = control.getControlZones().get(0);
         assertEquals("z1", z1.getName());
         assertNotNull(z1.getPilotPoint());
-        assertEquals(List.of("NLOAD"), z1.getPilotPoint().getBusbarSectionsOrBusesIds());
+        assertEquals(List.of(new PilotPoint.BusRef("VLLOAD", "NLOAD")), z1.getPilotPoint().getBuses());
         assertEquals("GEN", z1.getControlUnits().get(0).getId());
 
         network.getIdentifiable("NLOAD").setId("NLOAD_NEW_ID");
         network.getIdentifiable("GEN").setId("GEN_NEW_ID");
 
-        assertEquals(List.of("NLOAD_NEW_ID"), z1.getPilotPoint().getBusbarSectionsOrBusesIds());
+        assertEquals(List.of(new PilotPoint.BusRef("VLLOAD", "NLOAD_NEW_ID")), z1.getPilotPoint().getBuses());
         assertEquals("GEN_NEW_ID", z1.getControlUnits().get(0).getId());
         assertEquals(2, z1.getControlUnits().size());
 
