@@ -8,6 +8,7 @@
 package com.powsybl.iidm.serde.extensions;
 
 import com.powsybl.iidm.network.Network;
+import com.powsybl.iidm.network.extensions.PilotPoint;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControl;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControlAdder;
 import com.powsybl.iidm.network.test.EurostagTutorialExample1Factory;
@@ -36,7 +37,7 @@ class SecondaryVoltageControlXmlTest extends AbstractIidmSerDeTest {
                 .newControlZone()
                     .withName("z1")
                     .newPilotPoint()
-                        .withBusbarSectionsOrBusesIds(List.of("NLOAD"))
+                        .withBuses(List.of(new PilotPoint.BusRef("VLLOAD", "NLOAD")))
                         .withTargetV(15d)
                     .add()
                     .newControlUnit()
@@ -55,8 +56,10 @@ class SecondaryVoltageControlXmlTest extends AbstractIidmSerDeTest {
         assertNotNull(control2);
 
         assertEquals(control.getControlZones().size(), control2.getControlZones().size());
-        assertEquals(control.getControlZones().get(0).getPilotPoint().getBusbarSectionsOrBusesIds(),
-                     control2.getControlZones().get(0).getPilotPoint().getBusbarSectionsOrBusesIds());
+        assertEquals(control.getControlZones().get(0).getPilotPoint().getBuses(),
+                     control2.getControlZones().get(0).getPilotPoint().getBuses());
+        assertEquals(control.getControlZones().get(0).getPilotPoint().getBusbarSectionIds(),
+                     control2.getControlZones().get(0).getPilotPoint().getBusbarSectionIds());
         assertEquals(control.getControlZones().get(0).getPilotPoint().getTargetV(),
                      control2.getControlZones().get(0).getPilotPoint().getTargetV(), 0d);
         assertEquals(control.getControlZones().get(0).getControlUnits().size(),

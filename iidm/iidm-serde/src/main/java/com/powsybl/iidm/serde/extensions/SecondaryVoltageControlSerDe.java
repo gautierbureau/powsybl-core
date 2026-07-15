@@ -30,8 +30,11 @@ public class SecondaryVoltageControlSerDe extends AbstractExtensionSerDe<Network
     private static final String CONTROL_ZONE_ROOT_ELEMENT = "controlZone";
     private static final String CONTROL_ZONE_ARRAY_ELEMENT = "controlZones";
     private static final String PILOT_POINT_ELEMENT = "pilotPoint";
-    private static final String BUSBAR_SECTION_OR_BUS_ID_ROOT_ELEMENT = "busbarSectionOrBusId";
-    private static final String BUSBAR_SECTION_OR_BUS_ID_ARRAY_ELEMENT = "busbarSectionOrBusIds";
+    private static final String BUS_ROOT_ELEMENT = "bus";
+    private static final String BUS_ARRAY_ELEMENT = "buses";
+    private static final String BUSBAR_SECTION_ROOT_ELEMENT = "busbarSection";
+    private static final String BUSBAR_SECTION_ARRAY_ELEMENT = "busbarSections";
+    private static final String VOLTAGE_LEVEL_ATTRIBUTE = "voltageLevel";
     private static final String CONTROL_UNIT_ROOT_ELEMENT = "controlUnit";
     private static final String CONTROL_UNIT_ARRAY_ELEMENT = "controlUnits";
 
@@ -44,7 +47,8 @@ public class SecondaryVoltageControlSerDe extends AbstractExtensionSerDe<Network
     public Map<String, String> getArrayNameToSingleNameMap() {
         return Map.of(CONTROL_ZONE_ARRAY_ELEMENT, CONTROL_ZONE_ROOT_ELEMENT,
                 CONTROL_UNIT_ARRAY_ELEMENT, CONTROL_UNIT_ROOT_ELEMENT,
-                BUSBAR_SECTION_OR_BUS_ID_ARRAY_ELEMENT, BUSBAR_SECTION_OR_BUS_ID_ROOT_ELEMENT);
+                BUS_ARRAY_ELEMENT, BUS_ROOT_ELEMENT,
+                BUSBAR_SECTION_ARRAY_ELEMENT, BUSBAR_SECTION_ROOT_ELEMENT);
     }
 
     @Override
@@ -62,12 +66,21 @@ public class SecondaryVoltageControlSerDe extends AbstractExtensionSerDe<Network
     }
 
     private void writePilotPoint(ControlZone controlZone, TreeDataWriter writer) {
+        PilotPoint pilotPoint = controlZone.getPilotPoint();
         writer.writeStartNode(getNamespaceUri(), PILOT_POINT_ELEMENT);
-        writer.writeDoubleAttribute("targetV", controlZone.getPilotPoint().getTargetV());
+        writer.writeDoubleAttribute("targetV", pilotPoint.getTargetV());
         writer.writeStartNodes();
-        for (String busbarSectionOrBusId : controlZone.getPilotPoint().getBusbarSectionsOrBusesIds()) {
-            writer.writeStartNode(getNamespaceUri(), BUSBAR_SECTION_OR_BUS_ID_ROOT_ELEMENT);
-            writer.writeNodeContent(busbarSectionOrBusId);
+        for (PilotPoint.BusRef bus : pilotPoint.getBuses()) {
+            writer.writeStartNode(getNamespaceUri(), BUS_ROOT_ELEMENT);
+            writer.writeStringAttribute(VOLTAGE_LEVEL_ATTRIBUTE, bus.voltageLevelId());
+            writer.writeNodeContent(bus.busId());
+            writer.writeEndNode();
+        }
+        writer.writeEndNodes();
+        writer.writeStartNodes();
+        for (String busbarSectionId : pilotPoint.getBusbarSectionIds()) {
+            writer.writeStartNode(getNamespaceUri(), BUSBAR_SECTION_ROOT_ELEMENT);
+            writer.writeNodeContent(busbarSectionId);
             writer.writeEndNode();
         }
         writer.writeEndNodes();
@@ -113,15 +126,21 @@ public class SecondaryVoltageControlSerDe extends AbstractExtensionSerDe<Network
 
     private static void readPilotPoint(DeserializerContext context, ControlZoneAdder controlZoneAdder) {
         double targetV = context.getReader().readDoubleAttribute("targetV");
-        List<String> busbarSectionsOrBusesIds = new ArrayList<>();
+        List<PilotPoint.BusRef> buses = new ArrayList<>();
+        List<String> busbarSectionIds = new ArrayList<>();
         context.getReader().readChildNodes(elementName -> {
-            if (!elementName.equals(BUSBAR_SECTION_OR_BUS_ID_ROOT_ELEMENT)) {
-                throw new PowsyblException(getExceptionMessageUnknownElement(elementName, PILOT_POINT_ELEMENT));
+            switch (elementName) {
+                case BUS_ROOT_ELEMENT -> {
+                    String voltageLevelId = context.getReader().readStringAttribute(VOLTAGE_LEVEL_ATTRIBUTE);
+                    buses.add(new PilotPoint.BusRef(voltageLevelId, context.getReader().readContent()));
+                }
+                case BUSBAR_SECTION_ROOT_ELEMENT -> busbarSectionIds.add(context.getReader().readContent());
+                default -> throw new PowsyblException(getExceptionMessageUnknownElement(elementName, PILOT_POINT_ELEMENT));
             }
-            busbarSectionsOrBusesIds.add(context.getReader().readContent());
         });
         controlZoneAdder.newPilotPoint()
-                .withBusbarSectionsOrBusesIds(busbarSectionsOrBusesIds)
+                .withBuses(buses)
+                .withBusbarSectionIds(busbarSectionIds)
                 .withTargetV(targetV)
                 .add();
     }

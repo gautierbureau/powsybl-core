@@ -50,7 +50,7 @@
         <svc:secondaryVoltageControl>
             <svc:controlZone name="z1">
                 <svc:pilotPoint targetV="15.0">
-                    <svc:busbarSectionOrBusId>NLOAD</svc:busbarSectionOrBusId>
+                    <svc:bus voltageLevel="VLLOAD">NLOAD</svc:bus>
                 </svc:pilotPoint>
                 <svc:controlUnit participate="false">GEN</svc:controlUnit>
                 <svc:controlUnit participate="true">GEN2</svc:controlUnit>
