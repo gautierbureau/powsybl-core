@@ -13,9 +13,17 @@
            xmlns:svc="http://www.powsybl.org/schema/iidm/ext/secondary_voltage_control/1_0"
            targetNamespace="http://www.powsybl.org/schema/iidm/ext/secondary_voltage_control/1_0"
            elementFormDefault="qualified">
+    <xs:complexType name="Bus">
+        <xs:simpleContent>
+            <xs:extension base="xs:string">
+                <xs:attribute name="voltageLevel" use="required" type="xs:string"/>
+            </xs:extension>
+        </xs:simpleContent>
+    </xs:complexType>
     <xs:complexType name="PilotPoint">
         <xs:sequence>
-            <xs:element name="busbarSectionOrBusId" type="xs:string" minOccurs="1" maxOccurs="unbounded"/>
+            <xs:element name="bus" type="svc:Bus" minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="busbarSection" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
         </xs:sequence>
         <xs:attribute name="targetV" use="required" type="xs:double"/>
     </xs:complexType>
