@@ -55,7 +55,8 @@ public class CalculatedTimeSeries implements DoubleTimeSeries {
 
     private final TimeSeriesMetadata metadata;
 
-    private TimeSeriesIndex index;
+    // volatile: read without holding the lock on the hot path of getIndex()
+    private volatile TimeSeriesIndex index;
 
     public CalculatedTimeSeries(String name, NodeCalc nodeCalc, TimeSeriesNameResolver resolver) {
         this.name = Objects.requireNonNull(name);
@@ -151,8 +152,9 @@ public class CalculatedTimeSeries implements DoubleTimeSeries {
     }
 
     @Override
-    public void synchronize(TimeSeriesIndex newIndex) {
+    public synchronized void synchronize(TimeSeriesIndex newIndex) {
         Objects.requireNonNull(newIndex);
+        // same lock as getIndex(): this is the other writer of the index cache, and the check below reads it
         if (metadata.getIndex() == InfiniteTimeSeriesIndex.INSTANCE) {
             index = newIndex;
         } else {
@@ -211,11 +213,23 @@ public class CalculatedTimeSeries implements DoubleTimeSeries {
         return metadata;
     }
 
+    /**
+     * The index is computed lazily and cached, so this is safe to call from several threads: readers of a shared
+     * calculated time series (reading values ends up here through {@code toArray()}) would otherwise race on the cache
+     * field, and could publish a partially initialized index or compute it several times through the resolver.
+     */
     public TimeSeriesIndex getIndex() {
-        if (index == null) {
-            index = computeIndex(nodeCalc, resolver);
+        TimeSeriesIndex value = index;
+        if (value == null) {
+            synchronized (this) {
+                value = index;
+                if (value == null) {
+                    value = computeIndex(nodeCalc, resolver);
+                    index = value;
+                }
+            }
         }
-        return index;
+        return value;
     }
 
     private static DoublePoint evaluateMultiPoint(NodeCalc resolvedNodeCalc, DoubleMultiPoint multiPoint) {
