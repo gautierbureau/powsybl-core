@@ -12,6 +12,7 @@ import com.powsybl.iidm.network.extensions.PilotPoint;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControl;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControlAdder;
 import com.powsybl.iidm.network.test.EurostagTutorialExample1Factory;
+import com.powsybl.iidm.network.test.NetworkTest1Factory;
 import com.powsybl.iidm.serde.AbstractIidmSerDeTest;
 import com.powsybl.iidm.serde.ExportOptions;
 import org.junit.jupiter.api.Test;
@@ -81,6 +82,37 @@ class SecondaryVoltageControlXmlTest extends AbstractIidmSerDeTest {
         Network network2 = allFormatsRoundTripTest(network, "/secondaryVoltageControlRoundTripRef.xml", CURRENT_IIDM_VERSION);
 
         assertControlEquals(control, network2.getExtension(SecondaryVoltageControl.class));
+    }
+
+    @Test
+    void testNodeBreakerWithBusbarSections() throws IOException {
+        Network network = NetworkTest1Factory.create();
+        network.setCaseDate(ZonedDateTime.parse("2023-01-07T20:43:11.819+01:00"));
+
+        SecondaryVoltageControl control = network.newExtension(SecondaryVoltageControlAdder.class)
+                .newControlZone()
+                    .withName("z1")
+                    .newPilotPoint()
+                        .withBusbarSectionIds(List.of("voltageLevel1BusbarSection1", "voltageLevel1BusbarSection2"))
+                        .withTargetV(400d)
+                    .add()
+                    .newControlUnit()
+                        .withId("generator1")
+                        .withParticipate(false)
+                    .add()
+                .add()
+            .add();
+
+        Network network2 = allFormatsRoundTripTest(network, "/secondaryVoltageControlNodeBreakerRoundTripRef.xml", CURRENT_IIDM_VERSION);
+
+        SecondaryVoltageControl control2 = network2.getExtension(SecondaryVoltageControl.class);
+        assertNotNull(control2);
+        PilotPoint pilotPoint = control.getControlZones().get(0).getPilotPoint();
+        PilotPoint pilotPoint2 = control2.getControlZones().get(0).getPilotPoint();
+        assertEquals(List.of(), pilotPoint2.getBuses());
+        assertEquals(List.of("voltageLevel1BusbarSection1", "voltageLevel1BusbarSection2"), pilotPoint2.getBusbarSectionIds());
+        assertEquals(pilotPoint.getBusbarSectionIds(), pilotPoint2.getBusbarSectionIds());
+        assertEquals(pilotPoint.getTargetV(), pilotPoint2.getTargetV(), 0d);
     }
 
     @Test
