@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Switch;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.test.EurostagTutorialExample1Factory;
 import com.powsybl.iidm.network.test.FourSubstationsNodeBreakerFactory;
@@ -37,14 +36,14 @@ class StructuralVariantUnsupportedEditsTest {
 
     private static VariantManager structuralVariant(Network n) {
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "s", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s");
         vm.setWorkingVariant("s");
         return vm;
     }
 
     private static void assertRejected(Executable op) {
         PowsyblException e = assertThrows(PowsyblException.class, op::run);
-        assertTrue(e.getMessage().contains("structural variant"), () -> "unexpected message: " + e.getMessage());
+        assertTrue(e.getMessage().contains("several variants"), () -> "unexpected message: " + e.getMessage());
     }
 
     @FunctionalInterface

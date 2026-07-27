@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -22,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * <b>Worked examples of the structural-variant public API</b> (see
- * {@code structural-variant-public-api.md}). Each example is annotated with the <b>public API call it
+ * Each example is annotated with the <b>public API call it
  * corresponds to</b> — {@code cloneVariant(..., STRUCTURAL)} driving the ordinary add/remove/modify
  * paths. Three scenarios: expansion planning (add), short circuit (split), N-1 (remove) — all on
  * <b>one</b> network, reached by {@code setWorkingVariant}, base always untouched.
@@ -58,7 +57,7 @@ class StructuralVariantApiExampleTest {
 
         // ===== the real public API — a STRUCTURAL clone, then the ordinary adder, scoped automatically ==
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "expansion", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "expansion");
         vm.setWorkingVariant("expansion");
         vl1.newGenerator().setId("NEW_CCGT").setConnectableBus("b1").setBus("b1")
                 .setMinP(0).setMaxP(400).setTargetP(350).setTargetV(400).setVoltageRegulatorOn(true)
@@ -81,7 +80,7 @@ class StructuralVariantApiExampleTest {
         //       such as CreateVoltageLevelOnLine performs it): remove the line, add a fictitious mid VL,
         //       add the two half-lines — all scoped to "fault", including the new voltage level ===========
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         vm.setWorkingVariant("fault");
         n.getLine("LINE12").remove();
         Substation sf = n.newSubstation().setId("SFx").setFictitious(true).add();
@@ -114,7 +113,7 @@ class StructuralVariantApiExampleTest {
 
         // ===== the real public API — a STRUCTURAL clone, then the ordinary remove(), scoped automatically
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "n-1-gen1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "n-1-gen1");
         vm.setWorkingVariant("n-1-gen1");
         n.getGenerator("GEN1").remove();
         // ================================================================================================

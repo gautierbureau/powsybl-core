@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Variant-scoped terminal membership.</b> See {@code structural-variant-public-api.md}.</p>
+ * <p><b>Variant-scoped terminal membership.</b></p>
  *
  * <p>The membership counterpart of {@link VariantScopedExistence}: it holds the {@code attached} /
  * {@code detached} terminal-membership delta per variant. A voltage level's terminal set is
@@ -26,19 +26,22 @@ import java.util.Set;
  *
  * <p>Like existence, membership is stored <b>copy-on-write</b> on the shared {@link VariantCowState}: a
  * variant records only the terminals whose membership it diverges from its parent; a read resolves through
- * the clone parentage until the first explicit entry or a dense variant. A write freezes the touched
- * terminal into the copy-on-write children still inheriting it, so a later change to a parent never leaks
- * into a variant forked earlier. Eager ({@code STATE_ONLY}) clones materialise the source's resolved view.</p>
+ * the clone parentage until the first explicit entry or the dense initial variant. Like
+ * {@link VariantScopedExistence}, the delta is live rather than a snapshot, matching how a network-store
+ * partial variant resolves against its full variant.</p>
  *
- * <p>Registered only when structural branching is used; absent for normal networks, and the folds consult it
- * only when a voltage level is already flagged (branch-attachment hint), so the hot path is unchanged.</p>
+ * <p>Registered on the network's first clone; absent while a network has a single variant, and the folds
+ * consult it only when a voltage level is already flagged (branch-attachment hint), so the hot path is
+ * unchanged.</p>
  *
- * @author Claude
+ * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
 final class VariantScopedMembership implements MultiVariantObject {
 
+    /** The shared base view: network-store's full variant. */
+    private static final int BASE_VARIANT = 0;
+
     private final VariantManagerHolder holder;
-    private final VariantCowState cowState;
     // Per variant, the terminals it diverges per voltage level: attached (shown) / detached (hidden). A
     // terminal with no entry in a variant inherits its membership through the clone parentage.
     private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> attachedByVariant = new HashMap<>();
@@ -50,17 +53,14 @@ final class VariantScopedMembership implements MultiVariantObject {
     // progress should record a branch-attach into the current variant instead of mutating the graph.
     private final Set<VoltageLevelExt> attachTargets = new HashSet<>();
 
-    VariantScopedMembership(VariantManagerHolder holder, int variantArraySize, VariantCowState cowState) {
+    VariantScopedMembership(VariantManagerHolder holder, int variantArraySize) {
         this.holder = holder;
-        this.cowState = cowState;
         this.variantArraySize = variantArraySize;
     }
 
     /** Show {@code terminal} on {@code voltageLevel} in the current working variant only. */
     void attachInCurrentVariant(VoltageLevelExt voltageLevel, TerminalExt terminal) {
         int current = holder.getVariantIndex();
-        // attaching means the terminal was not shown here before (a new connectable's terminal, or a re-add)
-        freezeInheritors(current, voltageLevel, terminal, false);
         vlSet(attachedByVariant, current, voltageLevel).add(terminal);
         removeFrom(detachedByVariant, current, voltageLevel, terminal);
         scopedVoltageLevels.add(voltageLevel);
@@ -70,8 +70,6 @@ final class VariantScopedMembership implements MultiVariantObject {
     /** Hide {@code terminal} from {@code voltageLevel} in the current working variant only. */
     void detachInCurrentVariant(VoltageLevelExt voltageLevel, TerminalExt terminal) {
         int current = holder.getVariantIndex();
-        // detaching means the terminal was shown here before (an existing connectable being removed)
-        freezeInheritors(current, voltageLevel, terminal, true);
         vlSet(detachedByVariant, current, voltageLevel).add(terminal);
         removeFrom(attachedByVariant, current, voltageLevel, terminal);
         scopedVoltageLevels.add(voltageLevel);
@@ -88,24 +86,19 @@ final class VariantScopedMembership implements MultiVariantObject {
         return resolve(voltageLevel, holder.getVariantIndex()).detached;
     }
 
-    // The attached and detached terminals of a voltage level as resolved from variant v: walk the clone
-    // parentage while copy-on-write, the nearest entry for each terminal winning, stopping at a dense variant.
+    // The attached and detached terminals of a voltage level as resolved from variant v: the variant's own
+    // entry wins, otherwise the shared base view answers. Two steps, never a walk -- see
+    // VariantScopedExistence for why a partial variant never resolves through another one.
     private Resolved resolve(VoltageLevelExt voltageLevel, int v) {
         Set<TerminalExt> attached = new LinkedHashSet<>();
         Set<TerminalExt> detached = new LinkedHashSet<>();
         Set<TerminalExt> decided = identitySet();
-        int variant = v;
-        while (true) {
-            collect(attachedByVariant, variant, voltageLevel, decided, attached);
-            collect(detachedByVariant, variant, voltageLevel, decided, detached);
-            if (!cowState.isCow(variant)) {
-                break;
-            }
-            variant = cowState.getParent(variant);
-            if (variant == VariantCowState.NO_PARENT) {
-                break;
-            }
+        if (v != BASE_VARIANT) {
+            collect(attachedByVariant, v, voltageLevel, decided, attached);
+            collect(detachedByVariant, v, voltageLevel, decided, detached);
         }
+        collect(attachedByVariant, BASE_VARIANT, voltageLevel, decided, attached);
+        collect(detachedByVariant, BASE_VARIANT, voltageLevel, decided, detached);
         return new Resolved(attached, detached);
     }
 
@@ -129,11 +122,6 @@ final class VariantScopedMembership implements MultiVariantObject {
     private record Resolved(Set<TerminalExt> attached, Set<TerminalExt> detached) {
     }
 
-    private boolean hasExplicitEntry(int variant, VoltageLevelExt voltageLevel, TerminalExt terminal) {
-        return contains(attachedByVariant, variant, voltageLevel, terminal)
-                || contains(detachedByVariant, variant, voltageLevel, terminal);
-    }
-
     private static boolean contains(Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> byVariant, int variant,
                                     VoltageLevelExt voltageLevel, TerminalExt terminal) {
         Map<VoltageLevelExt, Set<TerminalExt>> vlMap = byVariant.get(variant);
@@ -144,48 +132,7 @@ final class VariantScopedMembership implements MultiVariantObject {
         return terminals != null && terminals.contains(terminal);
     }
 
-    // Before variant p's membership of (voltageLevel, terminal) changes, freeze p's current shown-state of that
-    // terminal into every copy-on-write child still inheriting it, so the change does not leak into a variant
-    // forked earlier. shownBefore is the pre-change state: a shown terminal is pinned via an attached entry
-    // (which the fold shows on top of the base graph), a hidden one via a detached entry.
-    private void freezeInheritors(int p, VoltageLevelExt voltageLevel, TerminalExt terminal, boolean shownBefore) {
-        int[] children = cowState.getCowChildren(p);
-        if (children.length == 0) {
-            return;
-        }
-        for (int c : children) {
-            if (!hasExplicitEntry(c, voltageLevel, terminal)) {
-                if (shownBefore) {
-                    vlSet(attachedByVariant, c, voltageLevel).add(terminal);
-                } else {
-                    vlSet(detachedByVariant, c, voltageLevel).add(terminal);
-                }
-            }
-        }
-    }
-
     /** Freeze into copy-on-write children what they inherit from {@code variant} before it is removed. */
-    void materializeInheritors(int variant) {
-        int[] children = cowState.getCowChildren(variant);
-        if (children.length == 0) {
-            return;
-        }
-        for (VoltageLevelExt voltageLevel : divergedVoltageLevels(variant)) {
-            Resolved resolved = resolve(voltageLevel, variant);
-            for (int c : children) {
-                for (TerminalExt t : resolved.attached) {
-                    if (!hasExplicitEntry(c, voltageLevel, t)) {
-                        vlSet(attachedByVariant, c, voltageLevel).add(t);
-                    }
-                }
-                for (TerminalExt t : resolved.detached) {
-                    if (!hasExplicitEntry(c, voltageLevel, t)) {
-                        vlSet(detachedByVariant, c, voltageLevel).add(t);
-                    }
-                }
-            }
-        }
-    }
 
     private Set<VoltageLevelExt> divergedVoltageLevels(int variant) {
         Set<VoltageLevelExt> vls = new LinkedHashSet<>();
@@ -198,20 +145,6 @@ final class VariantScopedMembership implements MultiVariantObject {
             vls.addAll(det.keySet());
         }
         return vls;
-    }
-
-    // Eagerly materialise, into dense variant target, the resolved membership of source (for every voltage
-    // level scoped anywhere). Used for STATE_ONLY clones, which are dense and independent of later writes.
-    private void materializeResolvedInto(int target, int source) {
-        for (VoltageLevelExt voltageLevel : scopedVoltageLevels) {
-            Resolved resolved = resolve(voltageLevel, source);
-            for (TerminalExt t : resolved.attached) {
-                vlSet(attachedByVariant, target, voltageLevel).add(t);
-            }
-            for (TerminalExt t : resolved.detached) {
-                vlSet(detachedByVariant, target, voltageLevel).add(t);
-            }
-        }
     }
 
     private static Set<TerminalExt> vlSet(Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> byVariant,
@@ -300,31 +233,39 @@ final class VariantScopedMembership implements MultiVariantObject {
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        extendVariantArraySize(initVariantArraySize, number, sourceIndex, false);
-    }
-
-    @Override
-    public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex, boolean structuralClone) {
-        if (!structuralClone) {
-            for (int i = 0; i < number; i++) {
-                materializeResolvedInto(initVariantArraySize + i, sourceIndex);
-            }
+        for (int i = 0; i < number; i++) {
+            copyDelta(sourceIndex, initVariantArraySize + i);
         }
         variantArraySize = initVariantArraySize + number;
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        allocateVariantArrayElement(indexes, sourceIndex, false);
-    }
-
-    @Override
-    public void allocateVariantArrayElement(int[] indexes, int sourceIndex, boolean structuralClone) {
         for (int index : indexes) {
+            // a recycled index starts clean, then takes over the source's delta
             attachedByVariant.remove(index);
             detachedByVariant.remove(index);
-            if (!structuralClone) {
-                materializeResolvedInto(index, sourceIndex);
+            copyDelta(sourceIndex, index);
+        }
+    }
+
+    // Cloning from a variant that carries a delta copies that delta; cloning from the base copies nothing.
+    private void copyDelta(int source, int target) {
+        if (source == BASE_VARIANT || source == target) {
+            return;
+        }
+        copyDelta(attachedByVariant, source, target);
+        copyDelta(detachedByVariant, source, target);
+    }
+
+    private void copyDelta(Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> byVariant, int source, int target) {
+        Map<VoltageLevelExt, Set<TerminalExt>> vlMap = byVariant.get(source);
+        if (vlMap == null) {
+            return;
+        }
+        for (Map.Entry<VoltageLevelExt, Set<TerminalExt>> e : vlMap.entrySet()) {
+            if (!e.getValue().isEmpty()) {
+                vlSet(byVariant, target, e.getKey()).addAll(e.getValue());
             }
         }
     }

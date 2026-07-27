@@ -63,10 +63,10 @@ abstract class AbstractConnectable<I extends Connectable<I>> extends AbstractIde
     public void remove() {
         NetworkImpl network = getNetwork();
 
-        // Structural variant (see VariantManager.VariantCloneStrategy.STRUCTURAL): a removal is scoped to
-        // the working variant — the object is tombstoned there (hidden, and its terminals detached from
-        // the shared voltage levels) but stays physically present for every other variant.
-        if (network.isCurrentVariantStructural()) {
+        // Once the network has several variants a removal is scoped to the working variant: the object is
+        // tombstoned there (hidden, and its terminals detached from the shared voltage levels) but stays
+        // physically present for every other variant.
+        if (network.isVariantScopedStructure()) {
             removeInCurrentVariant(network);
             return;
         }

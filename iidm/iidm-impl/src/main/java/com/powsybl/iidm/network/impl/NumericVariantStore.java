@@ -24,8 +24,8 @@ import java.util.Deque;
  * grown capacity, so behaviour matches the former per-object {@code TDoubleArrayList}/{@code TIntArrayList}/
  * {@code TBooleanArrayList} defaults.</p>
  *
- * <p>Variants cloned with {@code VariantCloneStrategy.STRUCTURAL} are stored copy-on-write, exactly as in
- * {@link TerminalVariantStore}: {@link #extendStructural} copies nothing (O(1)); reads resolve through the
+ * <p>Cloned variants are stored copy-on-write, exactly as in
+ * {@link TerminalVariantStore}: {@link #extend} copies nothing (O(1)); reads resolve through the
  * clone parentage ({@link VariantCowState}); rows diverge per write (all columns of the touched row at
  * once), and a write to a variant first freezes the touched row into the copy-on-write children still
  * inheriting it. The {@link VariantCowState#isActive()} gate keeps every network without a structural
@@ -132,7 +132,7 @@ public class NumericVariantStore implements VariantColumnStore {
         this.ints = new int[variantCapacity * nInt * rowStride];
         this.booleans = new boolean[variantCapacity * nBoolean * rowStride];
         // Pre-size the copy-on-write band table to the current variant count so it is never grown on a worker
-        // thread. extendStructural keeps this invariant on clone, but a store created lazily (a new columnar
+        // thread. extend keeps this invariant on clone, but a store created lazily (a new columnar
         // type first used after structural variants already exist) would otherwise start empty and let
         // ensureBand run Arrays.copyOf concurrently from workers, racing and dropping diverged bands.
         this.cowBands = new CowBand[variantSize];
@@ -446,53 +446,6 @@ public class NumericVariantStore implements VariantColumnStore {
 
     @Override
     public void extend(int number, int sourceIndex) {
-        int newSize = variantSize + number;
-        ensureVariantCapacity(newSize);
-        int dBlock = nDouble * rowStride;
-        int iBlock = nInt * rowStride;
-        int bBlock = nBoolean * rowStride;
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
-        if (!cowState.isActive() || !cowState.isCow(sourceIndex)) {
-            for (int i = 0; i < number; i++) {
-                int dst = variantSize + i;
-                if (dBlock > 0) {
-                    System.arraycopy(dd, sourceIndex * dBlock, dd, dst * dBlock, dBlock);
-                }
-                if (iBlock > 0) {
-                    System.arraycopy(id, sourceIndex * iBlock, id, dst * iBlock, iBlock);
-                }
-                if (bBlock > 0) {
-                    System.arraycopy(bd, sourceIndex * bBlock, bd, dst * bBlock, bBlock);
-                }
-            }
-        } else {
-            // the source is copy-on-write: an eager (STATE_ONLY) clone of it copies its resolved band
-            int first = variantSize;
-            copyResolvedBandToFlat(sourceIndex, first);
-            for (int i = 1; i < number; i++) {
-                int dst = variantSize + i;
-                if (dBlock > 0) {
-                    System.arraycopy(dd, first * dBlock, dd, dst * dBlock, dBlock);
-                }
-                if (iBlock > 0) {
-                    System.arraycopy(id, first * iBlock, id, dst * iBlock, iBlock);
-                }
-                if (bBlock > 0) {
-                    System.arraycopy(bd, first * bBlock, bd, dst * bBlock, bBlock);
-                }
-            }
-        }
-        doubles = dd;
-        ints = id;
-        booleans = bd;
-        variantSize = newSize;
-        flatSize = Math.max(flatSize, newSize);
-    }
-
-    @Override
-    public void extendStructural(int number, int sourceIndex) {
         // O(1): the new copy-on-write variants own no rows and inherit through the parentage
         variantSize += number;
         CowBand[] bands = cowBands;
@@ -527,46 +480,6 @@ public class NumericVariantStore implements VariantColumnStore {
 
     @Override
     public void allocate(int[] indexes, int sourceIndex) {
-        int required = flatSize;
-        for (int index : indexes) {
-            required = Math.max(required, index + 1);
-        }
-        ensureVariantCapacity(required);
-        int dBlock = nDouble * rowStride;
-        int iBlock = nInt * rowStride;
-        int bBlock = nBoolean * rowStride;
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
-        if (!cowState.isActive() || !cowState.isCow(sourceIndex)) {
-            for (int index : indexes) {
-                if (dBlock > 0) {
-                    System.arraycopy(dd, sourceIndex * dBlock, dd, index * dBlock, dBlock);
-                }
-                if (iBlock > 0) {
-                    System.arraycopy(id, sourceIndex * iBlock, id, index * iBlock, iBlock);
-                }
-                if (bBlock > 0) {
-                    System.arraycopy(bd, sourceIndex * bBlock, bd, index * bBlock, bBlock);
-                }
-            }
-        } else {
-            for (int index : indexes) {
-                copyResolvedBandToFlat(sourceIndex, index);
-            }
-        }
-        doubles = dd;
-        ints = id;
-        booleans = bd;
-        // the target becomes (or stays) dense: it owns its flat band, any copy-on-write past is dropped
-        for (int index : indexes) {
-            dropCowBand(index);
-        }
-        flatSize = required;
-    }
-
-    @Override
-    public void allocateStructural(int[] indexes, int sourceIndex) {
         // O(1) per band: recycled/overwritten indexes become fresh copy-on-write variants owning no rows
         CowBand[] bands = cowBands;
         int required = variantSize;

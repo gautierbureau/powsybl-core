@@ -53,16 +53,17 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     }
 
     /**
-     * Reject adding a switch / internal connection onto this voltage level in a structural variant unless the
-     * voltage level was itself created in that variant. On a shared voltage level the edge would be added to
-     * the single shared graph and corrupt the topology (calculated buses, connected components) of every
-     * other variant, while the identifiable would be existence-hidden — an inconsistent, silently wrong state.
+     * Reject adding a switch / internal connection onto this voltage level, once the network has several
+     * variants, unless the voltage level was itself created in the working variant. On a shared voltage level
+     * the edge would be added to the single shared graph and corrupt the topology (calculated buses,
+     * connected components) of every other variant, while the identifiable would be existence-hidden — an
+     * inconsistent, silently wrong state.
      */
     protected void rejectStructuralInternalStructureAdd(String operation) {
         getNetwork().rejectStructuralEditOnSharedContainer(voltageLevel.getId(), operation);
     }
 
-    /** Reject removing a switch / bus (shared graph structure) in a structural variant. */
+    /** Reject removing a switch / bus (shared graph structure) once the network has several variants. */
     protected void rejectStructuralInternalStructureRemoval(String operation) {
         getNetwork().rejectSharedStructuralEdit(operation);
     }
@@ -103,7 +104,7 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
 
     public abstract Stream<Terminal> getTerminalStream();
 
-    // Structural variants: when true, this voltage level has a variant-scoped terminal membership delta,
+    // When true, this voltage level has a variant-scoped terminal membership delta,
     // so enumeration folds in the active variant's attached/detached terminals. Default false -> the
     // common path is exactly getTerminals().
     private boolean branchAttachmentHint = false;
@@ -155,16 +156,16 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         return membership == null ? Set.of() : membership.detachedTerminals(voltageLevel);
     }
 
-    /** This voltage level is a shared VL currently receiving a branch-attach add in the active variant. */
+    /** This voltage level is a shared VL currently receiving a branch-attach add in the working variant. */
     protected boolean isActiveBranchAttachTarget() {
         VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
-        return membership != null && (membership.isAttachTarget(voltageLevel) || getNetwork().isCurrentVariantStructural());
+        return membership != null && (membership.isAttachTarget(voltageLevel) || getNetwork().isVariantScopedStructure());
     }
 
     /**
-     * Branch-attach add: a connectable's terminal added onto this (shared) voltage level while a
-     * structural variant is the working one is recorded in that variant's membership instead of entering
-     * this VL's shared graph. The object's existence-scoping is handled centrally in
+     * Branch-attach add: a connectable's terminal added onto this (shared) voltage level, once the network
+     * has several variants, is recorded in the working variant's membership instead of entering this VL's
+     * shared graph. The object's existence-scoping is handled centrally in
      * {@code NetworkIndex.checkAndAdd}. Also used by the internal split helper via an explicit attach
      * window. Returns {@code true} if handled.
      */
@@ -174,7 +175,7 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         if (membership == null) {
             return false;
         }
-        if (membership.isAttachTarget(voltageLevel) || network.isCurrentVariantStructural()) {
+        if (membership.isAttachTarget(voltageLevel) || network.isVariantScopedStructure()) {
             terminal.setVoltageLevel(voltageLevel);
             membership.attachInCurrentVariant(voltageLevel, terminal);
             return true;

@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 /**
  * The public structural-variant API is <b>type-agnostic</b>: generators, loads — any connectable — scope
  * to a {@code STRUCTURAL} variant through their ordinary adders, with no per-type code (see
- * {@code structural-variant-public-api.md}).
+
  *
  * @author Claude
  */
@@ -50,7 +49,7 @@ class StructuralVariantTypeAgnosticTest {
     void aGeneratorScopesToTheStructuralVariant() {
         Network n = gridWithBus();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "expansion", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "expansion");
         vm.setWorkingVariant("expansion");
         n.getVoltageLevel("VLA").newGenerator().setId("G").setConnectableBus("busA").setBus("busA")
                 .setMinP(0).setMaxP(200).setTargetP(150).setTargetV(400).setVoltageRegulatorOn(true)
@@ -66,7 +65,7 @@ class StructuralVariantTypeAgnosticTest {
     void aLoadScopesToTheStructuralVariantViaTheSameApi() {
         Network n = gridWithBus();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "demand", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "demand");
         vm.setWorkingVariant("demand");
         n.getVoltageLevel("VLA").newLoad().setId("LD").setConnectableBus("busA").setBus("busA")
                 .setP0(20).setQ0(10).add();

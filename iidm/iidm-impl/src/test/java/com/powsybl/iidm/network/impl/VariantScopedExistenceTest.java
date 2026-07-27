@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests variant-scoped existence ({@link VariantScopedExistence}). See
- * {@code structural-variant-public-api.md}.
+
  *
  * <p>On a <b>single network</b>, object existence is a function of the active variant: a structural
  * variant is a cloned variant, and the working variant <em>is</em> the context. The existence column

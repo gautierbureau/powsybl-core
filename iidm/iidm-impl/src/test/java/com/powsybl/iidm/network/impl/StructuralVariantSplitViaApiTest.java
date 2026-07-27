@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -68,7 +67,7 @@ class StructuralVariantSplitViaApiTest {
         VoltageLevel vlb = n.getVoltageLevel("VLB");
 
         // ============================ ENTIRELY THE PUBLIC API ============================
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         vm.setWorkingVariant("fault");
 
         // the ordinary split sequence, scoped to "fault":
@@ -121,7 +120,7 @@ class StructuralVariantSplitViaApiTest {
                 .setR(1).setX(10).setG1(0).setB1(0).setG2(0).setB2(0).add();
 
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         vm.setWorkingVariant("fault");
 
         n.getLine("L").remove();

@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.SwitchKind;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -73,7 +72,7 @@ class StructuralVariantCowCloneTest {
         VariantManager vm = n.getVariantManager();
         NetworkImpl impl = (NetworkImpl) n;
 
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         int fault = variantIndex(n, "fault");
 
         // O(1): no columnar store materialised anything for the structural variant
@@ -105,7 +104,7 @@ class StructuralVariantCowCloneTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
 
         // mutate the SOURCE variant after the fork: state and terminal values
         n.getGenerator("GEN1").setTargetP(333.0);
@@ -126,11 +125,11 @@ class StructuralVariantCowCloneTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "s1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s1");
         vm.setWorkingVariant("s1");
         n.getGenerator("GEN1").setTargetP(150.0);
 
-        vm.cloneVariant("s1", "s2", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant("s1", "s2");
         vm.removeVariant("s1");
 
         vm.setWorkingVariant("s2");
@@ -149,24 +148,24 @@ class StructuralVariantCowCloneTest {
         VariantManager vm = n.getVariantManager();
         NetworkImpl impl = (NetworkImpl) n;
 
-        vm.cloneVariant(INITIAL, "s1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s1");
         vm.setWorkingVariant("s1");
         n.getGenerator("GEN1").setTargetP(150.0);
         int s1 = variantIndex(n, "s1");
 
-        // overwrite the structural variant with an eager clone of the initial variant: dense again
+        // overwrite the variant with a fresh clone of the initial variant: its divergence is dropped
         vm.setWorkingVariant(INITIAL);
-        vm.cloneVariant(INITIAL, List.of("s1"), VariantCloneStrategy.STATE_ONLY, true);
+        vm.cloneVariant(INITIAL, List.of("s1"), true);
         vm.setWorkingVariant("s1");
         assertEquals(200.0, n.getGenerator("GEN1").getTargetP());
 
-        // and the copy-on-write gate is released: no structural variant remains
-        assertFalse(impl.getVariantManager().getCowState().isActive());
+        // the copy-on-write gate stays on: a clone still exists
+        assertTrue(impl.getVariantManager().getCowState().isActive());
 
-        // remove it and recycle its index as a fresh structural clone
+        // remove it and recycle its index as a fresh clone
         vm.setWorkingVariant(INITIAL);
         vm.removeVariant("s1");
-        vm.cloneVariant(INITIAL, "s2", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s2");
         assertEquals(s1, variantIndex(n, "s2")); // the index was recycled
         vm.setWorkingVariant("s2");
         assertEquals(200.0, n.getGenerator("GEN1").getTargetP()); // clean band: no leftover 150
@@ -186,7 +185,7 @@ class StructuralVariantCowCloneTest {
         for (int i = 0; i < 10; i++) {
             String id = "c" + i;
             variants.add(id);
-            vm.cloneVariant(INITIAL, id, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(INITIAL, id);
         }
         for (String id : variants) {
             int index = variantIndex(n, id);
@@ -209,7 +208,7 @@ class StructuralVariantCowCloneTest {
         VariantManager vm = n.getVariantManager();
         int workers = 4;
         for (int i = 0; i < workers; i++) {
-            vm.cloneVariant(INITIAL, "w" + i, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(INITIAL, "w" + i);
         }
         vm.allowVariantMultiThreadAccess(true);
 

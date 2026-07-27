@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -53,8 +52,8 @@ class StructuralVariantSameIdTest {
     void siblingVariantsCanEachAddTheSameIdIndependently() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "A", VariantCloneStrategy.STRUCTURAL);
-        vm.cloneVariant(INITIAL, "B", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "A");
+        vm.cloneVariant(INITIAL, "B");
 
         vm.setWorkingVariant("A");
         addUnit(n, "NEW", 10);
@@ -80,7 +79,7 @@ class StructuralVariantSameIdTest {
     void anIdRemovedInAVariantCanBeReAddedThereWhileTheBaseKeepsTheOriginal() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "A", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "A");
 
         vm.setWorkingVariant("A");
         n.getGenerator("BASE").remove(); // tombstone BASE in A
@@ -100,7 +99,7 @@ class StructuralVariantSameIdTest {
     void idUniquenessIsStillEnforcedOutsideAStructuralVariant() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
-        // a plain (STATE_ONLY) variant does not scope structure, so ids stay unique network-wide
+        // in the initial variant structure is not scoped, so ids stay unique network-wide
         vm.cloneVariant(INITIAL, "wc");
         vm.setWorkingVariant("wc");
         org.junit.jupiter.api.Assertions.assertThrows(com.powsybl.commons.PowsyblException.class,

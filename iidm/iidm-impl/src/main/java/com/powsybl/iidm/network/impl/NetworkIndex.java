@@ -77,16 +77,19 @@ class NetworkIndex {
     void checkAndAdd(Identifiable<?> obj) {
         checkId(obj.getId());
         String id = obj.getId();
-        boolean structural = existence != null && existence.isCurrentVariantStructural();
+        if (existence != null) {
+            existence.checkStructuralEditAllowed(id);
+        }
+        boolean variantScoped = existence != null && existence.isVariantScopedStructure();
         Identifiable<?> primary = objectsById.get(id);
         List<Identifiable<?>> extras = extraObjectsById == null ? null : extraObjectsById.get(id);
         boolean idAlreadyUsed = primary != null || extras != null && !extras.isEmpty();
         if (idAlreadyUsed) {
-            // Outside a structural variant an id is unique network-wide. Inside one, an id collides only if a
-            // same-id object is actually visible in the active variant (e.g. a base object still present, or
-            // one added in this variant); if the existing objects are all hidden here (added in a sibling, or
-            // tombstoned), the new object is a distinct variant-scoped object sharing the id.
-            if (!structural || isAnySameIdVisible(primary, extras)) {
+            // While the network has a single variant an id is unique network-wide. Once it has several, an id
+            // collides only if a same-id object is actually visible in the active variant (e.g. a base object
+            // still present, or one added in this variant); if the existing objects are all hidden here (added
+            // in a sibling, or tombstoned), the new object is a distinct variant-scoped object sharing the id.
+            if (!variantScoped || isAnySameIdVisible(primary, extras)) {
                 throw new PowsyblException("Object (" + obj.getClass().getName()
                         + ") '" + id + "' already exists");
             }
@@ -100,10 +103,10 @@ class NetworkIndex {
         all.add(obj);
         statefulObjectsCache = null;
 
-        // Structural variant: an object added while a structural variant is the working one exists only in
-        // that variant (a connectable, a container VL/bus/substation — anything). Its terminal membership
-        // is handled separately by the topology-model branch-attach intercept.
-        if (structural) {
+        // Once the network has several variants, an object added while one of them is the working variant
+        // exists only in that variant (a connectable, a container VL/bus/substation — anything). Its terminal
+        // membership is handled separately by the topology-model branch-attach intercept.
+        if (variantScoped) {
             existence.existOnlyInCurrentVariant(obj);
         }
     }
@@ -290,6 +293,9 @@ class NetworkIndex {
     void remove(Identifiable obj) {
         checkId(obj.getId());
         String id = obj.getId();
+        if (existence != null) {
+            existence.checkStructuralEditAllowed(id);
+        }
         Identifiable<?> primary = objectsById.get(id);
         if (primary == obj) {
             // remove the primary; promote an extra (a same-id variant-scoped object) to primary if any

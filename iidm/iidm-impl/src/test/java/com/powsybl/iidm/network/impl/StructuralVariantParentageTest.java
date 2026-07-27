@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -65,14 +64,14 @@ class StructuralVariantParentageTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "scenario", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "scenario");
         vm.setWorkingVariant("scenario");
         addUnit(n, "G");                                             // added in "scenario"
 
         // a child forked from "scenario" AFTER the add inherits G (descendant visibility)
-        vm.cloneVariant("scenario", "sub", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant("scenario", "sub");
         // a sibling forked from the base does NOT see G
-        vm.cloneVariant(INITIAL, "other", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "other");
 
         vm.setWorkingVariant("scenario");
         assertNotNull(n.getGenerator("G"));
@@ -89,10 +88,10 @@ class StructuralVariantParentageTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "scenario", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "scenario");
         vm.setWorkingVariant("scenario");
         addUnit(n, "G");
-        vm.cloneVariant("scenario", "sub", VariantCloneStrategy.STRUCTURAL); // sub inherits G (snapshot)
+        vm.cloneVariant("scenario", "sub"); // sub inherits G (snapshot)
 
         // remove the variant G was added in; "sub" holds its own snapshot copy taken at its clone
         vm.setWorkingVariant(INITIAL);
@@ -111,7 +110,7 @@ class StructuralVariantParentageTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "scenario", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "scenario");
         vm.setWorkingVariant("scenario");
         addUnit(n, "G"); // added only in "scenario", nothing forked from it
 
@@ -129,9 +128,9 @@ class StructuralVariantParentageTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "A", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "A");
         vm.setWorkingVariant("A");
-        vm.cloneVariant("A", "C", VariantCloneStrategy.STRUCTURAL); // C forked from A BEFORE the add
+        vm.cloneVariant("A", "C"); // C forked from A BEFORE the add
         vm.setWorkingVariant("A");
         addUnit(n, "G");                                            // add G in A, AFTER C was forked
 
@@ -153,9 +152,9 @@ class StructuralVariantParentageTest {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "A", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "A");
         vm.setWorkingVariant("A");
-        vm.cloneVariant("A", "C", VariantCloneStrategy.STRUCTURAL); // C forked from A BEFORE the removal
+        vm.cloneVariant("A", "C"); // C forked from A BEFORE the removal
         vm.setWorkingVariant("A");
         n.getGenerator("BASE").remove();                           // remove BASE in A, AFTER C was forked
 

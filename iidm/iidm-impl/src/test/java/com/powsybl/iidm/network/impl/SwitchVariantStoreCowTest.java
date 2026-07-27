@@ -23,19 +23,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SwitchVariantStoreCowTest {
 
     @Test
-    void stateOnlyClonesStayOnTheDenseFastPath() {
+    void aCloneReadsThroughAndDivergesIndependently() {
         VariantCowState cow = new VariantCowState();
         SwitchVariantStore store = new SwitchVariantStore(1, cow);
         int r0 = store.allocateRow(false, true);
 
-        cow.recordClone(1, 0, false);
+        cow.recordClone(1, 0);
         store.extend(1, 0);
-        assertFalse(cow.isActive());
+        assertTrue(cow.isActive()); // every clone is copy-on-write
 
         store.setOpen(1, r0, true);
         assertTrue(store.getOpen(1, r0));
         assertFalse(store.getOpen(0, r0));
-        assertTrue(store.getRetained(1, r0)); // eagerly copied
+        assertTrue(store.getRetained(1, r0)); // untouched: still resolved through the parentage
     }
 
     @Test
@@ -45,8 +45,8 @@ class SwitchVariantStoreCowTest {
         int r0 = store.allocateRow(false, true);
         int r1 = store.allocateRow(true, false);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         assertTrue(cow.isActive());
         assertEquals(0, store.cowRowsMaterialized(1));
@@ -68,8 +68,8 @@ class SwitchVariantStoreCowTest {
         SwitchVariantStore store = new SwitchVariantStore(1, cow);
         int r0 = store.allocateRow(false, false);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         store.setOpen(0, r0, true); // mutate the DENSE parent after the structural fork
 
@@ -84,12 +84,12 @@ class SwitchVariantStoreCowTest {
         int r0 = store.allocateRow(false, false);
         int r1 = store.allocateRow(true, true);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setOpen(1, r0, true);
 
-        cow.recordClone(2, 1, true);
-        store.extendStructural(1, 1);
+        cow.recordClone(2, 1);
+        store.extend(1, 1);
 
         // remove the middle variant: the grandchild keeps everything it inherited through it
         store.materializeInheritors(1);
@@ -100,12 +100,12 @@ class SwitchVariantStoreCowTest {
         store.setOpen(0, r1, false);
         assertTrue(store.getOpen(2, r1)); // no longer inherits from the root
 
-        // overwrite the grandchild with an eager clone of the root: dense again, gate released
+        // overwrite the grandchild with a fresh clone of the root: its own divergence is dropped
         store.materializeInheritors(2);
         cow.forgetVariant(2);
-        cow.recordClone(2, 0, false);
+        cow.recordClone(2, 0);
         store.allocate(new int[] {2}, 0);
-        assertFalse(cow.isActive());
+        assertTrue(cow.isActive());
         assertFalse(store.getOpen(2, r1));
         assertFalse(store.getOpen(2, r0));
     }
@@ -115,8 +115,8 @@ class SwitchVariantStoreCowTest {
         VariantCowState cow = new VariantCowState();
         SwitchVariantStore store = new SwitchVariantStore(1, cow);
         int r0 = store.allocateRow(true, false);
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setRetained(1, r0, true);
 
         // new switches and stride growth while the fork exists

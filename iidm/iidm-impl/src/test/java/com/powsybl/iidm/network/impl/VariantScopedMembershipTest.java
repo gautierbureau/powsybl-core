@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Tests variant-scoped terminal <b>membership</b> ({@link VariantScopedMembership}). See
- * {@code structural-variant-public-api.md}.
+
  *
  * <p>The membership counterpart of {@link VariantScopedExistenceTest}: a voltage level's terminal set
  * (what {@code getConnectables} enumerates) becomes a function of the <b>working variant</b>, with no

@@ -13,18 +13,19 @@ import java.util.Arrays;
 
 /**
  * Shared bookkeeping for the columnar copy-on-write variant storage: the clone parentage (each variant
- * points at the variant it was cloned from), which variants are copy-on-write ({@code STRUCTURAL} clones,
- * owning only their diverged rows), and the derived per-variant list of copy-on-write children (the
- * variants a write must freeze rows into to preserve the clone snapshot).
+ * points at the variant it was cloned from), which variants are copy-on-write (every clone -- they own only
+ * their diverged rows), and the derived per-variant list of copy-on-write children (the variants a write
+ * must freeze rows into to preserve the clone snapshot).
  *
- * <p>This folds the clone parentage together with the structural-variant marking previously kept in
- * {@link VariantManagerImpl}. One instance per network,
+ * <p>This is the in-memory counterpart of network-store's {@code fullVariantNum}: the initial variant is
+ * the dense (full) one, every clone is a partial variant holding only what it diverges. One instance per
+ * network,
  * owned by the {@link VariantManagerImpl} and consulted by every {@link VariantColumnStore}.</p>
  *
  * <p>The {@link #isActive()} gate is the copy-on-write master switch: it is {@code true} while at least one
- * copy-on-write variant exists. While it is {@code false} — every network that never clones with
- * {@code VariantCloneStrategy.STRUCTURAL} — the stores take their plain dense path and never consult the
- * rest of this class.</p>
+ * copy-on-write variant exists, i.e. while the network has more than the initial variant. While it is
+ * {@code false} — every single-variant network — the stores take their plain dense path and never consult
+ * the rest of this class, and structure is not variant-scoped at all.</p>
  *
  * <p>Thread-safety: the parentage/marks/derived-children are bundled into a single immutable {@link State}
  * snapshot published through one {@code volatile} reference. Readers ({@link #isActive()}, {@link #isCow},
@@ -80,7 +81,7 @@ final class VariantCowState {
         return state.active;
     }
 
-    /** Whether {@code variantIndex} is a copy-on-write ({@code STRUCTURAL}) variant. */
+    /** Whether {@code variantIndex} is a copy-on-write (partial) variant, i.e. any variant but the initial one. */
     boolean isCow(int variantIndex) {
         boolean[] cow = state.cow;
         return variantIndex >= 0 && variantIndex < cow.length && cow[variantIndex];
@@ -103,13 +104,13 @@ final class VariantCowState {
     }
 
     /**
-     * Record a clone: {@code child} was cloned from {@code parentIndex} with the given strategy. Called for
-     * every clone (whatever the strategy) before the per-variant state owners are driven, so the stores see
-     * a consistent parentage while cloning. Overwriting an existing variant simply re-records it.
+     * Record a clone: {@code child} was cloned from {@code parentIndex}. Called before the per-variant state
+     * owners are driven, so the stores see a consistent parentage while cloning. Overwriting an existing
+     * variant simply re-records it.
      *
      * <p>Must be called under the {@link VariantManagerImpl} variant lock (serialized with other mutators).</p>
      */
-    void recordClone(int child, int parentIndex, boolean structural) {
+    void recordClone(int child, int parentIndex) {
         State cur = state;
         int size = Math.max(cur.parent.length, Math.max(child, parentIndex) + 1);
         boolean[] cow = Arrays.copyOf(cur.cow, size);
@@ -117,7 +118,7 @@ final class VariantCowState {
         // freshly grown parent slots have no parent yet (Arrays.copyOf pads int[] with 0, a valid index)
         Arrays.fill(parent, cur.parent.length, size, NO_PARENT);
         parent[child] = parentIndex;
-        cow[child] = structural;
+        cow[child] = true;
         state = build(cow, parent);
     }
 
