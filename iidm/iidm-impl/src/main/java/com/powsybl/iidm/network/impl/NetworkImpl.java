@@ -289,6 +289,30 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     }
 
     /**
+     * Reject removing {@code voltageLevel} while another variant still has equipment attached to it.
+     * <p>
+     * A removability check ({@code VoltageLevels.checkRemovability}) enumerates the voltage level's
+     * connectables, which resolve against the working variant. Equipment added onto this voltage level in
+     * another variant is recorded in the variant-scoped membership instead of the voltage level's graph, so
+     * that check cannot see it and the removal would strand it — the equipment stays visible in its own
+     * variant with a terminal pointing at a voltage level that no longer exists.
+     */
+    void rejectRemovalOfVoltageLevelUsedByAnotherVariant(VoltageLevelExt voltageLevel) {
+        VariantScopedMembership membership = getVariantScopedMembership();
+        if (membership == null) {
+            return;
+        }
+        VariantScopedMembership.ForeignAttachment attachment =
+                membership.findAttachmentInAnotherVariant(voltageLevel, getVariantIndex());
+        if (attachment != null) {
+            throw new PowsyblException("The voltage level '" + voltageLevel.getId() + "' cannot be removed: "
+                    + "variant '" + variantManager.getVariantId(attachment.variantIndex()) + "' has equipment "
+                    + "attached to it ('" + attachment.terminal().getConnectable().getId() + "'). Remove that "
+                    + "equipment, or that variant, first.");
+        }
+    }
+
+    /**
      * Reject {@code operation} that would extend a shared container. Extending a container created in the
      * working variant is fine (it exists only there); extending a shared one would leak into every variant.
      */

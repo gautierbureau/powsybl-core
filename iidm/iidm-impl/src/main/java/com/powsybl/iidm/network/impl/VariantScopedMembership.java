@@ -76,6 +76,36 @@ final class VariantScopedMembership implements MultiVariantObject {
         ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
     }
 
+    /**
+     * The first terminal another variant attaches onto {@code voltageLevel}, or {@code null} if none does.
+     * <p>
+     * Equipment added in a variant onto a shared voltage level lives here rather than in that voltage
+     * level's graph, so it is invisible to a removability check run against another variant's resolved
+     * view. Callers about to remove the voltage level must consult this, otherwise the removal succeeds and
+     * leaves that equipment pointing at a voltage level that is gone from the index.
+     *
+     * @param voltageLevel  the voltage level about to be removed
+     * @param exceptVariant the variant the removal is being made from, which is checked by the caller's own
+     *                      resolved view and must not be reported here
+     */
+    ForeignAttachment findAttachmentInAnotherVariant(VoltageLevelExt voltageLevel, int exceptVariant) {
+        for (Map.Entry<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> byVariant : attachedByVariant.entrySet()) {
+            int variant = byVariant.getKey();
+            if (variant == exceptVariant) {
+                continue;
+            }
+            Set<TerminalExt> terminals = byVariant.getValue().get(voltageLevel);
+            if (terminals != null && !terminals.isEmpty()) {
+                return new ForeignAttachment(variant, terminals.iterator().next());
+            }
+        }
+        return null;
+    }
+
+    /** A terminal that a variant other than the one being edited attaches onto a voltage level. */
+    record ForeignAttachment(int variantIndex, TerminalExt terminal) {
+    }
+
     /** Terminals shown on {@code voltageLevel} in the current working variant. */
     Set<TerminalExt> attachedTerminals(VoltageLevelExt voltageLevel) {
         return resolve(voltageLevel, holder.getVariantIndex()).attached;
