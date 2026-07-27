@@ -64,7 +64,7 @@ final class VariantScopedMembership implements MultiVariantObject {
         vlSet(attachedByVariant, current, voltageLevel).add(terminal);
         removeFrom(detachedByVariant, current, voltageLevel, terminal);
         scopedVoltageLevels.add(voltageLevel);
-        ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
+        markScoped(voltageLevel);
     }
 
     /** Hide {@code terminal} from {@code voltageLevel} in the current working variant only. */
@@ -73,7 +73,7 @@ final class VariantScopedMembership implements MultiVariantObject {
         vlSet(detachedByVariant, current, voltageLevel).add(terminal);
         removeFrom(attachedByVariant, current, voltageLevel, terminal);
         scopedVoltageLevels.add(voltageLevel);
-        ((VoltageLevelImpl) voltageLevel).getTopologyModel().setBranchAttachmentHint(true);
+        markScoped(voltageLevel);
     }
 
     /**
@@ -104,6 +104,18 @@ final class VariantScopedMembership implements MultiVariantObject {
 
     /** A terminal that a variant other than the one being edited attaches onto a voltage level. */
     record ForeignAttachment(int variantIndex, TerminalExt terminal) {
+    }
+
+    // Flag the voltage level so its terminal enumeration folds this delta in, and drop the caches derived
+    // from that enumeration in the variant the change was made in. The ordinary attach/detach path does the
+    // same invalidation once it has mutated the shared graph; a variant-scoped change never reaches it, so
+    // it has to invalidate here. Terminal enumeration itself resolves the delta on every read and cannot go
+    // stale, but the caches computed from it can -- the per-variant connected components most visibly, since
+    // an added or removed branch changes which buses are in the same component.
+    private void markScoped(VoltageLevelExt voltageLevel) {
+        AbstractTopologyModel topologyModel = ((VoltageLevelImpl) voltageLevel).getTopologyModel();
+        topologyModel.setBranchAttachmentHint(true);
+        topologyModel.invalidateCache();
     }
 
     /** Terminals shown on {@code voltageLevel} in the current working variant. */
