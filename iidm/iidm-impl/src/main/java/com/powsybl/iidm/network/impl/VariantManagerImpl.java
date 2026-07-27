@@ -171,6 +171,22 @@ public class VariantManagerImpl implements VariantManager {
                 checkExistingVariantIds(targetVariantIds);
             }
             int sourceIndex = getVariantIndex(sourceVariantId);
+            boolean structural = strategy == VariantCloneStrategy.STRUCTURAL;
+
+            // clone-from-unwritten-base guard (checked before any state is mutated): a STRUCTURAL clone
+            // created while multi-thread access is enabled must fork from a NON-structural (base) variant --
+            // typically the initial variant left unwritten during the parallel region. Forking from another
+            // structural variant would build a fork chain whose middle variant is both written by its own
+            // worker and a freeze source for its children; writing it then races the workers reading those
+            // children (the freeze-on-write race). The safe, supported topology is one structural variant per
+            // worker, all forked from the shared base.
+            if (structural && isVariantMultiThreadAccessAllowed() && cowState.isCow(sourceIndex)) {
+                throw new PowsyblException("A STRUCTURAL variant cloned while multi-thread access is enabled "
+                        + "must fork from a non-structural (base) variant, not from another structural variant '"
+                        + getVariantId(sourceIndex) + "'. Fork every concurrent structural variant from the "
+                        + "shared base variant instead.");
+            }
+
             int initVariantArraySize = variantArraySize;
             int extendedCount = 0;
             List<Integer> recycled = new ArrayList<>();
@@ -205,8 +221,6 @@ public class VariantManagerImpl implements VariantManager {
                     network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
                 }
             }
-
-            boolean structural = strategy == VariantCloneStrategy.STRUCTURAL;
 
             // compute the stateful objects list only once for the whole clone operation
             List<MultiVariantObject> statefulObjects = getStafulObjects();

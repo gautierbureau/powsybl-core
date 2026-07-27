@@ -103,10 +103,23 @@ Row 1 is the pre-alloc PR's job; rows 2–4 are new work the CoW engine introduc
           `isActive`) take one volatile read and see a consistent tuple with no lock;
           `recordClone` / `forgetVariant` build a fresh `State` and swap it in (serialized by
           `variantLock`). Replaces the previous non-volatile in-place rebuild.
-    - [ ] **Enforce the clone-from-unwritten-base guard.** Today the safe pattern (fork from
-          a variant no other thread is writing) is a convention the test follows but nothing
-          rejects a concurrent clone-from-a-written-parent, which would hit the freeze race.
-          Add a fail-fast guard (or a documented precondition) before relying on it in OLF.
+    - [x] **Enforce the clone-from-unwritten-base guard (clone side).** A STRUCTURAL clone
+          created while multi-thread access is enabled now **fails fast unless it forks from a
+          non-structural (base) variant** (`cowState.isCow(source)` → throw). This forbids the
+          dangerous fork chains (a middle variant that is both written by its worker and a
+          freeze source for its children), leaving only the safe topology: one structural
+          variant per worker, all forked from the shared base. Checked before any state is
+          mutated, so a rejected clone leaves nothing partial. Single-threaded nested forks are
+          unaffected. Test: `concurrentStructuralCloneMustForkFromNonStructuralBase`.
+    - [ ] **Residual (write side): forbid writing the shared base during the parallel region.**
+          The clone-side guard makes the base the only legal fork source; writing that base
+          while workers read their forks is still only a *documented* precondition, not
+          machine-enforced. A precise write-side guard is hard without false positives (the
+          multi-thread flag being on does not prove workers are running, so a legitimate
+          main-thread base write during setup is indistinguishable from an unsafe concurrent
+          one). Options: a thread-scoped "in parallel region" marker, or accept the strict
+          contract "do not write a variant that has structural children while multi-thread
+          access is on".
     - [ ] **Multi-core soak test on real hardware.** The concurrent test passes here but the
           sandbox is effectively single-core; run it under real parallelism (supersedes the
           "concurrency unproven" item above for the structural path).
