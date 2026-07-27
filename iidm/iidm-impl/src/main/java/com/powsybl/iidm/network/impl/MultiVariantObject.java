@@ -51,6 +51,24 @@ public interface MultiVariantObject {
     void allocateVariantArrayElement(int[] indexes, int sourceIndex);
 
     /**
+     * Strategy-aware variant of {@link #extendVariantArraySize(int, int, int)}, called by the variant
+     * manager so a {@code STRUCTURAL} clone can be stored copy-on-write. The default ignores the flag and
+     * performs the eager copy, which is always correct: only owners that support copy-on-write storage
+     * (see {@link NetworkImpl}) override this.
+     */
+    default void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex, boolean structuralClone) {
+        extendVariantArraySize(initVariantArraySize, number, sourceIndex);
+    }
+
+    /**
+     * Strategy-aware variant of {@link #allocateVariantArrayElement(int[], int)}; same contract as
+     * {@link #extendVariantArraySize(int, int, int, boolean)}.
+     */
+    default void allocateVariantArrayElement(int[] indexes, int sourceIndex, boolean structuralClone) {
+        allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    /**
      * Called when this object changes network (merge/detach) to move its columnar variant state
      * (see {@link NumericVariantStore}) into {@code targetNetwork}'s stores, before the network reference is
      * redirected. Implementations re-home their own rows and cascade to their children, mirroring the
