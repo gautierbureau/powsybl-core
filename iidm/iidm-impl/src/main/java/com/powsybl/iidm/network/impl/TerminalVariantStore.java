@@ -305,6 +305,7 @@ class TerminalVariantStore implements VariantColumnStore {
     // into every copy-on-write child that still inherits it. One level is enough — freezing a child cuts the
     // resolution path of that child's whole subtree.
     private void freezeInheritors(int variantIndex, int row) {
+        cowState.checkWritable(variantIndex);
         for (int child : cowState.getCowChildren(variantIndex)) {
             CowBand band = bandOf(child);
             if (band == null || !band.materialized.get(row)) {

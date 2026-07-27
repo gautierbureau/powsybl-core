@@ -111,15 +111,18 @@ Row 1 is the pre-alloc PR's job; rows 2–4 are new work the CoW engine introduc
           variant per worker, all forked from the shared base. Checked before any state is
           mutated, so a rejected clone leaves nothing partial. Single-threaded nested forks are
           unaffected. Test: `concurrentStructuralCloneMustForkFromNonStructuralBase`.
-    - [ ] **Residual (write side): forbid writing the shared base during the parallel region.**
-          The clone-side guard makes the base the only legal fork source; writing that base
-          while workers read their forks is still only a *documented* precondition, not
-          machine-enforced. A precise write-side guard is hard without false positives (the
-          multi-thread flag being on does not prove workers are running, so a legitimate
-          main-thread base write during setup is indistinguishable from an unsafe concurrent
-          one). Options: a thread-scoped "in parallel region" marker, or accept the strict
-          contract "do not write a variant that has structural children while multi-thread
-          access is on".
+    - [x] **Write-side guard: the shared base is frozen for the parallel region.** When a
+          STRUCTURAL variant is forked from a base while multi-thread access is enabled, that
+          base is recorded as a *frozen base* in `VariantCowState`; the columnar write path
+          (`freezeInheritors` in each store, via `cowState.checkWritable`) then rejects any
+          write to it fail-fast, and the freeze is cleared when multi-thread access is turned
+          off. Design note: this is deliberately **not** a thread-scoped "only workers are
+          blocked" marker — a main-thread write to the base during the region is *also* unsafe
+          (it would freeze state into every worker's band), so all writes to it are rejected.
+          There are no false positives on the legitimate pattern (base never written during
+          the region); the only writes rejected are ones that are genuinely unsafe. Hot-path
+          cost is one volatile read that short-circuits on the common empty case. Test:
+          `writingTheSharedBaseDuringTheParallelRegionIsRejected`.
     - [ ] **Multi-core soak test on real hardware.** The concurrent test passes here but the
           sandbox is effectively single-core; run it under real parallelism (supersedes the
           "concurrency unproven" item above for the structural path).

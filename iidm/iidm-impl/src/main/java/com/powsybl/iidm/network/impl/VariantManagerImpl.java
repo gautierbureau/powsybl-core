@@ -180,11 +180,17 @@ public class VariantManagerImpl implements VariantManager {
             // worker and a freeze source for its children; writing it then races the workers reading those
             // children (the freeze-on-write race). The safe, supported topology is one structural variant per
             // worker, all forked from the shared base.
-            if (structural && isVariantMultiThreadAccessAllowed() && cowState.isCow(sourceIndex)) {
-                throw new PowsyblException("A STRUCTURAL variant cloned while multi-thread access is enabled "
-                        + "must fork from a non-structural (base) variant, not from another structural variant '"
-                        + getVariantId(sourceIndex) + "'. Fork every concurrent structural variant from the "
-                        + "shared base variant instead.");
+            if (structural && isVariantMultiThreadAccessAllowed()) {
+                if (cowState.isCow(sourceIndex)) {
+                    throw new PowsyblException("A STRUCTURAL variant cloned while multi-thread access is "
+                            + "enabled must fork from a non-structural (base) variant, not from another "
+                            + "structural variant '" + getVariantId(sourceIndex) + "'. Fork every concurrent "
+                            + "structural variant from the shared base variant instead.");
+                }
+                // write side: the source is now the shared read-only ancestor for the parallel region.
+                // Freeze it so any write to it fails fast (it would freeze state into every worker variant
+                // that inherits from it, racing their writes). Cleared when multi-thread access is turned off.
+                cowState.freezeBase(sourceIndex);
             }
 
             int initVariantArraySize = variantArraySize;
@@ -394,6 +400,12 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public void allowVariantMultiThreadAccess(boolean allow) {
+        if (!allow) {
+            // the parallel region is ending: the frozen concurrent-clone bases become writable again
+            synchronized (variantLock) {
+                cowState.clearFrozenBases();
+            }
+        }
         if (allow && !(variantContext instanceof ThreadLocalMultiVariantContext)) {
             VariantContext newVariantContext = new ThreadLocalMultiVariantContext();
             // For multithreaded VariantContext, don't set the variantIndex to a default

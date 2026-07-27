@@ -99,6 +99,38 @@ class VariantPreAllocationStructuralCloneTest {
     }
 
     @Test
+    void writingTheSharedBaseDuringTheParallelRegionIsRejected() {
+        Network network = EurostagTutorialExample1Factory.create();
+        Generator gen = network.getGenerator("GEN");
+        double baseTargetP = gen.getTargetP();
+        VariantManager vm = network.getVariantManager();
+
+        vm.preAllocateVariants(2);
+        vm.allowVariantMultiThreadAccess(true);
+
+        // writing the base is still fine before it becomes a fork source
+        gen.setTargetP(baseTargetP + 1);
+
+        // forking a structural variant off the base freezes the base for the parallel region
+        vm.cloneVariant(INITIAL, "w", VariantCloneStrategy.STRUCTURAL);
+
+        // writing the worker's own leaf is fine
+        vm.setWorkingVariant("w");
+        gen.setTargetP(123.0);
+        assertEquals(123.0, gen.getTargetP(), 0.0);
+
+        // writing the shared base while the region is active is rejected fail-fast
+        vm.setWorkingVariant(INITIAL);
+        PowsyblException e = assertThrows(PowsyblException.class, () -> gen.setTargetP(500.0));
+        assertTrue(e.getMessage().contains("must not be written while multi-thread access is enabled"));
+
+        // once the region ends, the base is writable again
+        vm.allowVariantMultiThreadAccess(false);
+        gen.setTargetP(500.0);
+        assertEquals(500.0, gen.getTargetP(), 0.0);
+    }
+
+    @Test
     void concurrentOnDemandStructuralCloneIsThreadSafe() throws Exception {
         int nThreads = 8;
         Network network = EurostagTutorialExample1Factory.create();
