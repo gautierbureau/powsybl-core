@@ -17,9 +17,11 @@ import com.powsybl.iidm.network.IdentifiableType;
 public class RegexCriterion implements Criterion {
 
     private final String regex;
+    private final Pattern pattern;
 
     public RegexCriterion(String regex) {
         this.regex = regex;
+        this.pattern = Pattern.compile(regex);
     }
 
     @Override
@@ -29,7 +31,7 @@ public class RegexCriterion implements Criterion {
 
     @Override
     public boolean filter(Identifiable<?> identifiable, IdentifiableType type) {
-        return Pattern.compile(regex).matcher(identifiable.getId()).find();
+        return pattern.matcher(identifiable.getId()).find();
     }
 
     public String getRegex() {
