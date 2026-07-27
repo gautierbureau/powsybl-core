@@ -87,6 +87,14 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access voltage level of removed equipment " + connectable.id);
         }
+        return resolveVoltageLevel();
+    }
+
+    /**
+     * The terminal's voltage level without the {@link #getVoltageLevel()} removed check, so it can back
+     * internal resolution (e.g. the terminal's topology model / bus view).
+     */
+    VoltageLevelExt resolveVoltageLevel() {
         return voltageLevel;
     }
 

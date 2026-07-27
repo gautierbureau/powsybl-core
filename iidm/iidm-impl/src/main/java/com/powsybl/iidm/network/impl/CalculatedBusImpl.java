@@ -81,22 +81,59 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
         return super.getVoltageLevel();
     }
 
+    // Structural variants: when a variant-scoped membership is active, a calculated bus also includes the
+    // terminals attached onto one of its nodes in the active variant, and excludes the terminals detached
+    // from them. No membership (all normal use) -> empty, so behaviour is unchanged.
+    private List<TerminalExt> branchAttachedConnectedTerminals() {
+        VoltageLevelExt vl = (VoltageLevelExt) super.getVoltageLevel();
+        VariantScopedMembership membership = vl.getNetwork().getVariantScopedMembership();
+        return membership == null ? List.of() : membership.attachedTerminalsOnNodes(vl, nodeSet());
+    }
+
+    private List<TerminalExt> branchDetachedConnectedTerminals() {
+        VoltageLevelExt vl = (VoltageLevelExt) super.getVoltageLevel();
+        VariantScopedMembership membership = vl.getNetwork().getVariantScopedMembership();
+        return membership == null ? List.of() : membership.detachedTerminalsOnNodes(vl, nodeSet());
+    }
+
+    private Set<Integer> nodeSet() {
+        Set<Integer> nodeSet = new HashSet<>();
+        for (int node : nodes) {
+            nodeSet.add(node);
+        }
+        return nodeSet;
+    }
+
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
-        return terminals.size();
+        return terminals.size() - branchDetachedConnectedTerminals().size()
+                + branchAttachedConnectedTerminals().size();
     }
 
     @Override
     public Collection<TerminalExt> getConnectedTerminals() {
         checkValidity();
-        return Collections.unmodifiableCollection(terminals);
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
+        List<TerminalExt> attached = branchAttachedConnectedTerminals();
+        if (detached.isEmpty() && attached.isEmpty()) {
+            return Collections.unmodifiableCollection(terminals);
+        }
+        List<TerminalExt> all = new ArrayList<>(terminals);
+        all.removeAll(detached);
+        all.addAll(attached);
+        return Collections.unmodifiableCollection(all);
     }
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        return terminals.stream().map(Function.identity());
+        List<TerminalExt> detached = branchDetachedConnectedTerminals();
+        Stream<TerminalExt> own = terminals.stream().map(Function.identity());
+        if (!detached.isEmpty()) {
+            own = own.filter(t -> !detached.contains(t));
+        }
+        return Stream.concat(own, branchAttachedConnectedTerminals().stream());
     }
 
     @Override

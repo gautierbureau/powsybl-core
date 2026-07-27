@@ -49,6 +49,10 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
         return bus.isPresent() && bus.get().isInMainSynchronousComponent();
     }
 
+    // Structural variants: the variant-scoped membership (terminals attached/detached in the active
+    // variant) is folded once, by each ConfiguredBus (see ConfiguredBusImpl.getConnectedTerminalStream),
+    // so this merged view — like every read derived from the configured buses — sees it automatically.
+
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
@@ -58,7 +62,8 @@ class MergedBus extends AbstractIdentifiable<Bus> implements CalculatedBus {
     @Override
     public Iterable<TerminalExt> getConnectedTerminals() {
         checkValidity();
-        return buses.stream().map(ConfiguredBus::getConnectedTerminals).reduce(Iterables::concat).orElse(Collections.emptyList());
+        return buses.stream().map(ConfiguredBus::getConnectedTerminals)
+                .reduce(Iterables::concat).orElse(Collections.emptyList());
     }
 
     @Override
