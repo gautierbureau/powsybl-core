@@ -60,7 +60,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public int getConnectedTerminalCount() {
-        return (int) getTerminals().stream().filter(BusTerminal::isConnected).count();
+        return (int) getConnectedTerminalStream().count();
     }
 
     @Override
@@ -70,7 +70,49 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
-        return getTerminals().stream().filter(Terminal::isConnected).map(Function.identity());
+        Stream<TerminalExt> own = getTerminals().stream().filter(Terminal::isConnected).map(Function.identity());
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        if (membership == null) {
+            return own; // all normal use: no structural variant machinery, unchanged
+        }
+        return foldMembership(own, true);
+    }
+
+    // Structural variants: this bus also carries the terminals attached onto it in the active variant, and
+    // hides the ones detached from it, so every read derived from the connected terminals (typed accessors,
+    // equipment visitors, bus-view merging, component traversal) sees the variant's own topology.
+    private Stream<TerminalExt> foldMembership(Stream<TerminalExt> own, boolean connectedOnly) {
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        VoltageLevelExt vl = (VoltageLevelExt) getVoltageLevel();
+        List<TerminalExt> detached = membershipTerminalsOnThisBus(membership.detachedTerminals(vl), connectedOnly);
+        Stream<TerminalExt> visible = detached.isEmpty() ? own : own.filter(t -> !detached.contains(t));
+        List<TerminalExt> attached = membershipTerminalsOnThisBus(membership.attachedTerminals(vl), connectedOnly);
+        return attached.isEmpty() ? visible : Stream.concat(visible, attached.stream());
+    }
+
+    private List<TerminalExt> membershipTerminalsOnThisBus(java.util.Set<TerminalExt> terminalSet, boolean connectedOnly) {
+        if (terminalSet.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : terminalSet) {
+            if (terminal instanceof BusTerminal busTerminal && getId().equals(busTerminal.getConnectableBusId())
+                    && (!connectedOnly || busTerminal.isConnected())) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void visitConnectedOrConnectableEquipments(TopologyVisitor visitor) {
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        if (membership == null) {
+            super.visitConnectedOrConnectableEquipments(visitor);
+            return;
+        }
+        Stream<TerminalExt> own = getTerminals().stream().map(Function.identity());
+        AbstractBus.visitEquipments(foldMembership(own, false).toList(), visitor);
     }
 
     @Override

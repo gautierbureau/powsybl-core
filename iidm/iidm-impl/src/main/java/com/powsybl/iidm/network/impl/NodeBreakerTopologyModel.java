@@ -815,11 +815,13 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public SwitchAdder newSwitch() {
+            rejectStructuralInternalStructureAdd("Adding a switch");
             return new SwitchAdderImpl();
         }
 
         @Override
         public InternalConnectionAdder newInternalConnection() {
+            rejectStructuralInternalStructureAdd("Adding an internal connection");
             return new InternalConnectionAdderImpl();
         }
 
@@ -852,6 +854,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public void removeInternalConnections(int node1, int node2) {
+            rejectStructuralInternalStructureRemoval("Removing an internal connection");
             int[] internalConnectionsToBeRemoved = Arrays.stream(graph.getEdges())
                     .filter(e -> graph.getEdgeObject(e) == null)
                     .filter(e -> graph.getEdgeVertex1(e) == node1 && graph.getEdgeVertex2(e) == node2
@@ -903,6 +906,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
         @Override
         public void removeSwitch(String switchId) {
+            rejectStructuralInternalStructureRemoval("Removing a switch");
             NodeBreakerTopologyModel.this.removeSwitchFromTopology(switchId, true);
         }
 
@@ -1162,6 +1166,12 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
                             + ", a node connection should be specified instead of a bus connection");
         }
         int node = ((NodeTerminal) terminal).getNode();
+        // Structural variants: an attach onto this shared VL is recorded in the variant-scoped membership,
+        // not entered into this graph, so the node may legitimately still hold the (variant-detached) base
+        // terminal — neither add a vertex nor check occupancy against the graph.
+        if (isActiveBranchAttachTarget()) {
+            return;
+        }
         graph.addVertexIfNotPresent(node);
         if (graph.getVertexObject(node) != null) {
             throw new ValidationException(terminal.getConnectable(),
@@ -1180,6 +1190,11 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
     public void attach(TerminalExt terminal, boolean test) {
         checkTerminal(terminal);
         if (test) {
+            return;
+        }
+        // Structural variants: record into the variant-scoped membership instead of mutating the shared
+        // graph (no-op in normal use).
+        if (branchAttachIntercept(terminal)) {
             return;
         }
         int node = ((NodeTerminal) terminal).getNode();

@@ -9,6 +9,7 @@ package com.powsybl.iidm.network;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * This class provides methods to manage variants of the network (create and
@@ -91,6 +92,89 @@ public interface VariantManager {
      *      *                         the mayOverwrite parameter is set to {@code false}
      */
     void cloneVariant(String sourceVariantId, String targetVariantId, boolean mayOverwrite);
+
+    /**
+     * The capability a cloned variant has to diverge from its source. Mirrors network-store's
+     * <em>full</em> vs <em>partial</em> variant distinction. See {@code structural-variant-public-api.md}.
+     */
+    enum VariantCloneStrategy {
+
+        /**
+         * Current behaviour (default): the target variant gets an independent copy of every per-variant
+         * <b>state</b> value (setpoints, tap positions, switch open, terminal p/q) and shares the network
+         * <b>structure</b> with all other variants. Structural changes made while it is active are
+         * network-wide.
+         */
+        STATE_ONLY,
+
+        /**
+         * The target variant may diverge <b>structurally</b>: objects can be added, removed, or
+         * re-connected in it without affecting any other variant. For a network that has at least one
+         * structural variant, object existence and topology are resolved against the active variant.
+         */
+        STRUCTURAL
+    }
+
+    /**
+     * Create a new variant by cloning an existing one, with an explicit clone strategy.
+     *
+     * <p>{@link VariantCloneStrategy#STATE_ONLY} is the historical behaviour and the default of every
+     * other {@code cloneVariant} overload. {@link VariantCloneStrategy#STRUCTURAL} additionally lets the
+     * target variant diverge structurally (see the enum and {@code structural-variant-public-api.md}).</p>
+     *
+     * @param sourceVariantId the source variant id
+     * @param targetVariantId the target variant id (the one that will be created)
+     * @param strategy        the clone strategy
+     */
+    default void cloneVariant(String sourceVariantId, String targetVariantId, VariantCloneStrategy strategy) {
+        cloneVariant(sourceVariantId, List.of(targetVariantId), strategy, false);
+    }
+
+    /**
+     * Create or overwrite variants by cloning an existing one, with an explicit clone strategy.
+     *
+     * @param sourceVariantId  the source variant id
+     * @param targetVariantIds the target variant id list
+     * @param strategy         the clone strategy
+     * @param mayOverwrite     indicates if a target can be overwritten when it already exists
+     */
+    default void cloneVariant(String sourceVariantId, List<String> targetVariantIds, VariantCloneStrategy strategy, boolean mayOverwrite) {
+        Objects.requireNonNull(strategy);
+        if (strategy == VariantCloneStrategy.STATE_ONLY) {
+            cloneVariant(sourceVariantId, targetVariantIds, mayOverwrite);
+        } else {
+            throw new UnsupportedOperationException(
+                    "STRUCTURAL variant clone is a proposed API not yet implemented; see structural-variant-public-api.md");
+        }
+    }
+
+    /**
+     * Pre-allocate storage capacity for {@code number} additional variants, without creating them.
+     * <p>
+     * This is the enabler for thread-safe, on-demand variant creation. Once capacity has been reserved (on
+     * the main thread), creating a variant with the {@code cloneVariant} methods becomes safe to call
+     * concurrently from several threads while {@link #allowVariantMultiThreadAccess(boolean)} is enabled,
+     * because such a creation only reuses an already-reserved slot and never resizes the underlying
+     * per-variant arrays. Reads and writes of variant-dependent attributes on the created variants stay
+     * concurrent as before (each thread on its own variant).
+     * <p>
+     * The reservation grows the per-variant arrays once, on the calling (main) thread. Creating more
+     * variants than were reserved while multi-thread access is enabled would require resizing those arrays
+     * from a worker thread, which is not thread safe; such an overflow throws a
+     * {@link com.powsybl.commons.PowsyblException} instead. While multi-thread access is enabled the
+     * per-variant arrays are never shrunk either, so removing a variant frees its slot for reuse but keeps
+     * the reserved capacity.
+     * <p>
+     * Call this on the main thread, once the network structure is complete and before enabling multi-thread
+     * access. Reserved slots that are never used cost only memory. The default implementation does nothing:
+     * implementations that do not support thread-safe on-demand creation simply grow their storage lazily on
+     * clone, as before.
+     *
+     * @param number the number of additional variant slots to reserve (must be {@code >= 0})
+     */
+    default void preAllocateVariants(int number) {
+        // no-op by default: implementations supporting thread-safe on-demand variant creation override this
+    }
 
     /**
      * Remove a variant.

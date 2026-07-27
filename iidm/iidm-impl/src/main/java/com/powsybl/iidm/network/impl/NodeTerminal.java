@@ -57,7 +57,7 @@ class NodeTerminal extends AbstractTerminal {
     };
 
     private NodeBreakerTopologyModel getTopologyModel() {
-        return (NodeBreakerTopologyModel) voltageLevel.getTopologyModel();
+        return (NodeBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final BusBreakerViewExt busBreakerView = new BusBreakerViewExt() {
