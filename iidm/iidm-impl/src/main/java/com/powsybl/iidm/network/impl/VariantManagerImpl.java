@@ -11,6 +11,7 @@ import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.primitives.Ints;
 import com.powsybl.commons.PowsyblException;
+import com.powsybl.iidm.network.Identifiable;
 import com.powsybl.iidm.network.VariantManager;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import org.slf4j.Logger;
@@ -43,8 +44,10 @@ public class VariantManagerImpl implements VariantManager {
 
     private final Deque<Integer> unusedIndexes = new ArrayDeque<>();
 
-    // Clone parentage, copy-on-write (STRUCTURAL) variant marks and the copy-on-write master gate, shared
-    // with every columnar variant store. Drives copy-on-write existence AND state resolution.
+    // Clone parentage, copy-on-write variant marks and the copy-on-write master gate, shared with every
+    // columnar variant store. Drives copy-on-write existence AND state resolution. Every clone is a
+    // copy-on-write (partial) variant; only the initial variant is dense, and it is where a resolution walk
+    // stops -- the same shape as network-store's full variant / partial variant storage.
     private final VariantCowState cowState = new VariantCowState();
 
     // Guards every read and write of the variant bookkeeping (id2index, unusedIndexes, variantArraySize,
@@ -156,12 +159,6 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public void cloneVariant(String sourceVariantId, List<String> targetVariantIds, boolean mayOverwrite) {
-        cloneVariant(sourceVariantId, targetVariantIds, VariantCloneStrategy.STATE_ONLY, mayOverwrite);
-    }
-
-    @Override
-    public void cloneVariant(String sourceVariantId, List<String> targetVariantIds, VariantCloneStrategy strategy, boolean mayOverwrite) {
-        Objects.requireNonNull(strategy);
         if (targetVariantIds.isEmpty()) {
             throw new IllegalArgumentException("Empty target variant id list");
         }
@@ -206,8 +203,6 @@ public class VariantManagerImpl implements VariantManager {
                 }
             }
 
-            boolean structural = strategy == VariantCloneStrategy.STRUCTURAL;
-
             // compute the stateful objects list only once for the whole clone operation
             List<MultiVariantObject> statefulObjects = getStafulObjects();
 
@@ -217,28 +212,26 @@ public class VariantManagerImpl implements VariantManager {
                 network.materializeCowInheritorsOf(index);
             }
 
-            // Record the clone parentage (and, for a STRUCTURAL clone, the copy-on-write marks) before driving
-            // the owners, so the stores resolve through a consistent parentage while cloning. An object added
-            // in a structural variant resolves its visibility through this same tree instead of being hidden in
-            // every other variant eagerly. The parentage follows every clone, whatever the strategy.
+            // Record the clone parentage before driving the owners, so the stores resolve through a consistent
+            // parentage while cloning. An object added in a variant resolves its visibility through this same
+            // tree instead of being hidden in every other variant eagerly.
             for (String targetVariantId : targetVariantIds) {
-                cowState.recordClone(id2index.get(targetVariantId), sourceIndex, structural);
+                cowState.recordClone(id2index.get(targetVariantId), sourceIndex);
             }
 
-            allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects, structural);
+            allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
 
             if (extendedCount > 0) {
                 for (MultiVariantObject obj : statefulObjects) {
-                    obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex, structural);
+                    obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
                 }
                 LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
             }
 
-            if (structural) {
-                // the network resolves object existence and terminal membership against the active variant
-                network.enableVariantScopedExistence();
-                network.enableVariantScopedMembership();
-            }
+            // from the first clone on, object existence and terminal membership are resolved against the
+            // active variant, in every variant including the initial one
+            network.enableVariantScopedExistence();
+            network.enableVariantScopedMembership();
         }
     }
 
@@ -252,16 +245,16 @@ public class VariantManagerImpl implements VariantManager {
                 return;
             }
             int initVariantArraySize = variantArraySize;
-            // Reserve capacity by driving the same cascade a STRUCTURAL clone uses (copy-on-write: O(1) for
-            // the columnar stores -- grows variantSize AND the cowBands band table, but no rows). This is the
-            // key point: it pre-sizes cowBands so a later on-demand STRUCTURAL clone into a reserved slot, and
-            // any divergent write on it, never grow cowBands on a worker thread. The eager per-variant trove /
-            // cache state is grown here from the initial variant and re-initialised from the real source when
-            // the slot is claimed. It does NOT flip the network into copy-on-write mode (no variant is marked
-            // yet); that happens on the first real STRUCTURAL clone.
+            // Reserve capacity by driving the same cascade a clone uses (copy-on-write: O(1) for the columnar
+            // stores -- grows variantSize AND the cowBands band table, but no rows). This is the key point: it
+            // pre-sizes cowBands so a later on-demand clone into a reserved slot, and any divergent write on
+            // it, never grow cowBands on a worker thread. The eager per-variant trove / cache state is grown
+            // here from the initial variant and re-initialised from the real source when the slot is claimed.
+            // It does NOT flip the network into copy-on-write mode (no variant is marked yet); that happens on
+            // the first real clone.
             List<MultiVariantObject> statefulObjects = getStafulObjects();
             for (MultiVariantObject obj : statefulObjects) {
-                obj.extendVariantArraySize(initVariantArraySize, number, INITIAL_VARIANT_INDEX, true);
+                obj.extendVariantArraySize(initVariantArraySize, number, INITIAL_VARIANT_INDEX);
             }
             // park the freshly grown indexes as reusable capacity (not yet live variants); a later clone will
             // claim them through the recycle path, which does not resize anything
@@ -274,7 +267,19 @@ public class VariantManagerImpl implements VariantManager {
         }
     }
 
-    /** The shared copy-on-write bookkeeping (parentage, structural marks, master gate). */
+    // Remove from the network index every object whose only variant has just been removed. Done after the
+    // variant bookkeeping is updated, so visibility is resolved against the variants that remain.
+    private void dropOrphanedObjects(VariantScopedExistence existence) {
+        if (existence == null) {
+            return;
+        }
+        Set<Identifiable<?>> orphans = existence.collectOrphans(id2index.values());
+        for (Identifiable<?> orphan : orphans) {
+            networkIndex.remove(orphan);
+        }
+    }
+
+    /** The shared copy-on-write bookkeeping (parentage, partial-variant marks, master gate). */
     VariantCowState getCowState() {
         return cowState;
     }
@@ -295,11 +300,11 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten,
-                                              List<MultiVariantObject> statefulObjects, boolean structural) {
+                                              List<MultiVariantObject> statefulObjects) {
         if (!recycled.isEmpty()) {
             int[] indexes = Ints.toArray(recycled);
             for (MultiVariantObject obj : statefulObjects) {
-                obj.allocateVariantArrayElement(indexes, sourceIndex, structural);
+                obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("Recycling variant array indexes {}", Arrays.toString(indexes));
@@ -308,7 +313,7 @@ public class VariantManagerImpl implements VariantManager {
         if (!overwritten.isEmpty()) {
             int[] indexes = Ints.toArray(overwritten);
             for (MultiVariantObject obj : statefulObjects) {
-                obj.allocateVariantArrayElement(indexes, sourceIndex, structural);
+                obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
                 LOGGER.trace("Overwriting variant array indexes {}", Arrays.toString(indexes));
@@ -316,8 +321,15 @@ public class VariantManagerImpl implements VariantManager {
         }
     }
 
-    /** Whether structural mutations (add/remove/reconnect) made now are scoped to the working variant. */
-    boolean isCurrentVariantStructural() {
+    /**
+     * Whether structural mutations (add/remove/reconnect) made now are scoped to the working variant.
+     * <p>
+     * True while the working variant is a cloned (partial) one. The initial variant is the shared base -- the
+     * counterpart of network-store's full variant -- so a structural edit made there is seen by every variant
+     * that has not overridden that object, exactly as it is today and as a partial variant resolves against
+     * its full variant in network-store.
+     */
+    boolean isVariantScopedStructure() {
         return variantContext.isIndexSet() && cowState.isCow(variantContext.getVariantIndex());
     }
 
@@ -373,6 +385,10 @@ public class VariantManagerImpl implements VariantManager {
             }
             // if the removed variant is the working variant, unset the working variant
             variantContext.resetIfVariantIndexIs(index);
+
+            // objects that existed only in the removed variant are now visible nowhere: drop them from the
+            // network index, so they stop holding an id that could never be reused
+            dropOrphanedObjects(existence);
 
             network.getListeners().notifyVariantRemoved(variantId);
         }

@@ -11,7 +11,6 @@ import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.test.EurostagTutorialExample1Factory;
 import org.junit.jupiter.api.Test;
@@ -54,9 +53,9 @@ class VariantPreAllocationStructuralCloneTest {
         assertEquals(Collections.singleton(INITIAL), vm.getVariantIds());
 
         // three structural clones consume the reserved slots without any further array growth
-        vm.cloneVariant(INITIAL, "v1", VariantCloneStrategy.STRUCTURAL);
-        vm.cloneVariant(INITIAL, "v2", VariantCloneStrategy.STRUCTURAL);
-        vm.cloneVariant(INITIAL, "v3", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "v1");
+        vm.cloneVariant(INITIAL, "v2");
+        vm.cloneVariant(INITIAL, "v3");
         assertEquals(4, vm.getVariantArraySize());
         assertEquals(4, vm.getVariantIds().size());
     }
@@ -69,9 +68,9 @@ class VariantPreAllocationStructuralCloneTest {
         vm.preAllocateVariants(1);
         vm.allowVariantMultiThreadAccess(true);
 
-        vm.cloneVariant(INITIAL, "v1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "v1");
         PowsyblException e = assertThrows(PowsyblException.class,
-            () -> vm.cloneVariant(INITIAL, "v2", VariantCloneStrategy.STRUCTURAL));
+            () -> vm.cloneVariant(INITIAL, "v2"));
         assertTrue(e.getMessage().contains("No pre-allocated variant capacity left"));
     }
 
@@ -99,7 +98,7 @@ class VariantPreAllocationStructuralCloneTest {
                     double value = baseTargetP + k + 1;
                     barrier.await(); // maximise contention: everyone forks at once
                     // each worker forks its own structural variant from the shared, unwritten base
-                    vm.cloneVariant(INITIAL, vid, VariantCloneStrategy.STRUCTURAL);
+                    vm.cloneVariant(INITIAL, vid);
                     vm.setWorkingVariant(vid);
                     // the fork inherits the base value (copy-on-write, no copy), then diverges in isolation
                     assertEquals(baseTargetP, gen.getTargetP(), 0.0);

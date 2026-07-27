@@ -7,8 +7,10 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Identifiable;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -16,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * <p><b>Variant-scoped existence.</b> See {@code structural-variant-public-api.md}.</p>
+ * <p><b>Variant-scoped existence.</b></p>
  *
  * <p>Object <em>existence</em> is a function of the <b>active variant</b>, tracked <b>per object</b> (by
  * identity) so two different objects may share an id across sibling variants; the {@link NetworkIndex}
@@ -24,23 +26,28 @@ import java.util.Set;
  *
  * <p>Existence is stored <b>copy-on-write</b> on the shared {@link VariantCowState}, exactly like the
  * columnar state stores. A variant records only the objects whose visibility it <em>diverges</em> from its
- * parent: {@code present} (shown here) and {@code absent} (hidden here). A structural ({@code STRUCTURAL})
- * clone copies nothing (O(1)); a read resolves through the clone parentage until it hits an explicit entry
- * or a <em>dense</em> variant (the initial variant or a {@code STATE_ONLY} clone, which own their full view).
- * A write to a variant first <b>freezes</b> the touched object into the copy-on-write children still
- * inheriting it, so a later change to a parent never leaks into a variant forked earlier. Eager
- * ({@code STATE_ONLY}) clones materialise the source's resolved view, so they are dense and independent.</p>
+ * parent: {@code present} (shown here) and {@code absent} (hidden here). A clone copies nothing (O(1)); a
+ * read resolves through the clone parentage until it hits an explicit entry or the <em>dense</em> initial
+ * variant, which owns the base view.</p>
  *
- * <p>This is a {@link MultiVariantObject}: it rides the real variant lifecycle. Registered on a network only
- * when structural branching is used; absent (null) for every normal network, so the index hot path is
- * unchanged.</p>
+ * <p>The delta is <b>live</b>, not a snapshot — the same contract as a network-store partial variant
+ * resolved against its full variant. A structural change made in the initial variant is therefore seen by
+ * every variant that has not recorded its own entry for that object, which is how {@code iidm-impl} has
+ * always behaved for structure. Per-variant <em>state</em> is different: it is snapshotted on clone
+ * (freeze-on-write in the columnar stores), because a variant has always owned its own state values.</p>
  *
- * @author Claude
+ * <p>This is a {@link MultiVariantObject}: it rides the real variant lifecycle. Registered on a network on
+ * its first clone; absent (null) while a network has a single variant, so the index hot path is unchanged
+ * for networks that never fork.</p>
+ *
+ * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
 final class VariantScopedExistence implements MultiVariantObject {
 
+    /** The shared base view: network-store's full variant. */
+    private static final int BASE_VARIANT = 0;
+
     private final VariantManagerHolder holder;
-    private final VariantCowState cowState;
     // Per variant, the objects it diverges from its parent: present (shown) / absent (hidden). A variant with
     // no entry for an object inherits it through the parentage (or, at a dense variant, the base default).
     private final Map<Integer, Set<Identifiable<?>>> presentByVariant = new HashMap<>();
@@ -53,9 +60,8 @@ final class VariantScopedExistence implements MultiVariantObject {
     private int variantArraySize;
     private boolean anyScoped;
 
-    VariantScopedExistence(VariantManagerHolder holder, int variantArraySize, VariantCowState cowState) {
+    VariantScopedExistence(VariantManagerHolder holder, int variantArraySize) {
         this.holder = holder;
-        this.cowState = cowState;
         this.variantArraySize = variantArraySize;
     }
 
@@ -71,18 +77,47 @@ final class VariantScopedExistence implements MultiVariantObject {
         return absentByVariant.computeIfAbsent(variant, k -> identitySet());
     }
 
-    private boolean hasExplicitEntry(int variant, Identifiable<?> obj) {
-        Set<Identifiable<?>> p = presentByVariant.get(variant);
-        if (p != null && p.contains(obj)) {
-            return true;
-        }
-        Set<Identifiable<?>> a = absentByVariant.get(variant);
-        return a != null && a.contains(obj);
+    /** Whether structure is variant-scoped (so a newly-added object should exist only in the working variant). */
+    boolean isVariantScopedStructure() {
+        return holder.getVariantManager().isVariantScopedStructure();
     }
 
-    /** Whether the working variant is a structural one (so a newly-added object should exist only in it). */
-    boolean isCurrentVariantStructural() {
-        return holder.getVariantManager().isCurrentVariantStructural();
+    /**
+     * Structural edits mutate state shared by every variant (the network index, and these per-variant
+     * deltas), so unlike variant-dependent attributes they cannot be made from several threads at once.
+     * Doing it anyway used to corrupt the index or throw {@link java.util.ConcurrentModificationException}
+     * from an unrelated read; fail fast with an actionable message instead. Reads and writes of
+     * variant-dependent attributes stay concurrent, which is what {@code allowVariantMultiThreadAccess}
+     * has always covered.
+     */
+    void checkStructuralEditAllowed(String id) {
+        if (holder.getVariantManager().isVariantMultiThreadAccessAllowed()) {
+            throw new PowsyblException("Adding or removing '" + id + "' is not allowed while multi-thread "
+                    + "variant access is enabled: structure is shared by all variants and can only be "
+                    + "changed from the main thread. Disable multi-thread access first.");
+        }
+    }
+
+    /**
+     * The objects that were added in a variant and are no longer visible in any of {@code liveVariants} —
+     * their only variant is gone. They must be dropped from the network index, otherwise they stay
+     * invisible for ever while still holding their id, and that id can never be used again.
+     */
+    Set<Identifiable<?>> collectOrphans(Collection<Integer> liveVariants) {
+        Set<Identifiable<?>> orphans = identitySet();
+        for (Identifiable<?> obj : everAdded) {
+            boolean visibleSomewhere = false;
+            for (int v : liveVariants) {
+                if (isVisibleInVariant(obj, v)) {
+                    visibleSomewhere = true;
+                    break;
+                }
+            }
+            if (!visibleSomewhere) {
+                orphans.add(obj);
+            }
+        }
+        return orphans;
     }
 
     /** True if {@code obj} is visible (exists) in the network's current working variant. */
@@ -93,27 +128,30 @@ final class VariantScopedExistence implements MultiVariantObject {
         return isVisibleInVariant(obj, holder.getVariantIndex());
     }
 
-    // Resolve visibility of obj as seen from variant v: walk the clone parentage while the variant is
-    // copy-on-write, stopping at the first explicit entry or at a dense variant (which owns its full view).
+    // Resolve visibility of obj as seen from variant v: the variant's own entry wins, otherwise the shared
+    // base view answers. Two steps, never a walk -- a partial variant is a delta on the full variant, as in
+    // network-store, so there is no inheritance chain to follow even when a variant was cloned from another
+    // (the source's delta is copied into the clone, see copyDelta).
     private boolean isVisibleInVariant(Identifiable<?> obj, int v) {
-        int variant = v;
-        while (true) {
-            Set<Identifiable<?>> a = absentByVariant.get(variant);
+        if (v != BASE_VARIANT) {
+            Set<Identifiable<?>> a = absentByVariant.get(v);
             if (a != null && a.contains(obj)) {
                 return false;
             }
-            Set<Identifiable<?>> p = presentByVariant.get(variant);
+            Set<Identifiable<?>> p = presentByVariant.get(v);
             if (p != null && p.contains(obj)) {
                 return true;
             }
-            if (!cowState.isCow(variant)) {
-                return !everAdded.contains(obj); // dense variant: base default
-            }
-            variant = cowState.getParent(variant);
-            if (variant == VariantCowState.NO_PARENT) {
-                return !everAdded.contains(obj);
-            }
         }
+        Set<Identifiable<?>> baseAbsent = absentByVariant.get(BASE_VARIANT);
+        if (baseAbsent != null && baseAbsent.contains(obj)) {
+            return false;
+        }
+        Set<Identifiable<?>> basePresent = presentByVariant.get(BASE_VARIANT);
+        if (basePresent != null && basePresent.contains(obj)) {
+            return true;
+        }
+        return !everAdded.contains(obj);
     }
 
     /** True if any object is hidden or added in any variant — lets the index skip filtering when nothing is. */
@@ -129,7 +167,6 @@ final class VariantScopedExistence implements MultiVariantObject {
     /** Hide {@code obj} in the current working variant only (a variant-scoped tombstone). */
     void hideInCurrentVariant(Identifiable<?> obj) {
         int current = holder.getVariantIndex();
-        freezeInheritors(current, obj); // obj is currently visible here; children keep seeing it
         absent(current).add(obj);
         Set<Identifiable<?>> p = presentByVariant.get(current);
         if (p != null) {
@@ -140,14 +177,14 @@ final class VariantScopedExistence implements MultiVariantObject {
     }
 
     /**
-     * Make {@code obj} exist <em>only</em> in the current working variant (and, by parentage, variants later
-     * forked from it). Marking it added first makes its base default "absent", so the freeze correctly hides
-     * it from the variants forked before this add.
+     * Make {@code obj} exist <em>only</em> in the current working variant (and, by parentage, the variants
+     * that resolve through it). Marking it added makes its base default "absent", so it stays invisible in
+     * the initial variant and in sibling variants. Only called while a cloned variant is the working one:
+     * an object added in the initial variant is a base object, visible wherever it is not tombstoned.
      */
     void existOnlyInCurrentVariant(Identifiable<?> obj) {
         int current = holder.getVariantIndex();
         everAdded.add(obj);
-        freezeInheritors(current, obj); // obj now resolves as absent; children forked earlier stay without it
         present(current).add(obj);
         everScoped.add(obj);
         anyScoped = true;
@@ -156,7 +193,6 @@ final class VariantScopedExistence implements MultiVariantObject {
     /** Show {@code obj} again in the current working variant (undo a variant-scoped tombstone). */
     void showInCurrentVariant(Identifiable<?> obj) {
         int current = holder.getVariantIndex();
-        freezeInheritors(current, obj);
         Set<Identifiable<?>> a = absentByVariant.get(current);
         if (a != null) {
             a.remove(obj);
@@ -167,62 +203,7 @@ final class VariantScopedExistence implements MultiVariantObject {
         recomputeAnyScoped();
     }
 
-    // Before variant p's entry for obj changes, freeze p's current resolved visibility of obj into every
-    // copy-on-write child still inheriting it, so the change does not leak into a variant forked earlier.
-    private void freezeInheritors(int p, Identifiable<?> obj) {
-        int[] children = cowState.getCowChildren(p);
-        if (children.length == 0) {
-            return;
-        }
-        boolean visibleInParent = isVisibleInVariant(obj, p);
-        for (int c : children) {
-            if (!hasExplicitEntry(c, obj)) {
-                if (visibleInParent) {
-                    present(c).add(obj);
-                } else {
-                    absent(c).add(obj);
-                }
-            }
-        }
-    }
-
-    /**
-     * Freeze into its copy-on-write children everything {@code variant} diverges, before it is removed or
-     * overwritten (its children are about to be re-parented onto its own parent). Mirrors
-     * {@link VariantColumnStore#materializeInheritors(int)}.
-     */
-    void materializeInheritors(int variant) {
-        int[] children = cowState.getCowChildren(variant);
-        if (children.length == 0) {
-            return;
-        }
-        Set<Identifiable<?>> diverged = identitySet();
-        Set<Identifiable<?>> p = presentByVariant.get(variant);
-        if (p != null) {
-            diverged.addAll(p);
-        }
-        Set<Identifiable<?>> a = absentByVariant.get(variant);
-        if (a != null) {
-            diverged.addAll(a);
-        }
-        for (Identifiable<?> obj : diverged) {
-            boolean visible = isVisibleInVariant(obj, variant);
-            for (int c : children) {
-                if (!hasExplicitEntry(c, obj)) {
-                    if (visible) {
-                        present(c).add(obj);
-                    } else {
-                        absent(c).add(obj);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Forget a removed variant. Its copy-on-write children were materialised before this call
-     * (see {@code NetworkImpl#materializeCowInheritorsOf}), so just drop its own divergence.
-     */
+    /** Forget a removed variant: no other variant resolves through it, so just drop its own delta. */
     void forgetVariant(int index) {
         presentByVariant.remove(index);
         absentByVariant.remove(index);
@@ -248,58 +229,43 @@ final class VariantScopedExistence implements MultiVariantObject {
         anyScoped = !everScoped.isEmpty();
     }
 
-    // Eagerly materialise, into dense variant {@code target}, the resolved view of {@code source} — every
-    // scoped object whose visibility from source differs from the base default. Used for STATE_ONLY clones,
-    // which are dense (resolution stops at them) and therefore independent of later parent writes.
-    private void materializeResolvedInto(int target, int source) {
-        for (Identifiable<?> obj : everScoped) {
-            boolean visible = isVisibleInVariant(obj, source);
-            boolean base = !everAdded.contains(obj);
-            if (visible != base) {
-                if (visible) {
-                    present(target).add(obj);
-                } else {
-                    absent(target).add(obj);
-                }
-            }
-        }
-    }
-
     // --- MultiVariantObject: existence rides the real variant lifecycle, exactly like state ---
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        extendVariantArraySize(initVariantArraySize, number, sourceIndex, false);
-    }
-
-    @Override
-    public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex, boolean structuralClone) {
-        if (!structuralClone) {
-            for (int i = 0; i < number; i++) {
-                materializeResolvedInto(initVariantArraySize + i, sourceIndex);
-            }
+        for (int i = 0; i < number; i++) {
+            copyDelta(sourceIndex, initVariantArraySize + i);
         }
-        // structural clone copies nothing — the new variants inherit through the parentage
         variantArraySize = initVariantArraySize + number;
         recomputeAnyScoped();
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        allocateVariantArrayElement(indexes, sourceIndex, false);
-    }
-
-    @Override
-    public void allocateVariantArrayElement(int[] indexes, int sourceIndex, boolean structuralClone) {
         for (int index : indexes) {
-            // a recycled index must start clean before it inherits or is materialised
+            // a recycled index starts clean, then takes over the source's delta
             presentByVariant.remove(index);
             absentByVariant.remove(index);
-            if (!structuralClone) {
-                materializeResolvedInto(index, sourceIndex);
-            }
+            copyDelta(sourceIndex, index);
         }
         recomputeAnyScoped();
+    }
+
+    // Cloning from a variant that carries a delta copies that delta, so the clone is a delta on the base
+    // like every other variant and is independent of what its source does next. Cloning from the base copies
+    // nothing: the base view is shared and read live. Deltas hold only diverged objects, so this is cheap.
+    private void copyDelta(int source, int target) {
+        if (source == BASE_VARIANT || source == target) {
+            return;
+        }
+        Set<Identifiable<?>> p = presentByVariant.get(source);
+        if (p != null && !p.isEmpty()) {
+            present(target).addAll(p);
+        }
+        Set<Identifiable<?>> a = absentByVariant.get(source);
+        if (a != null && !a.isEmpty()) {
+            absent(target).addAll(a);
+        }
     }
 
     @Override

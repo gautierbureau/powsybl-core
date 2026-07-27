@@ -36,8 +36,8 @@ class NumericVariantStoreCowTest {
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {true});
         int r1 = store.allocateRow(new double[] {20.0, 2.0}, new int[] {8}, new boolean[] {false});
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         assertEquals(0, store.cowRowsMaterialized(1));
         assertEquals(10.0, store.getDouble(1, 0, r0), EPS); // reads through
@@ -67,8 +67,8 @@ class NumericVariantStoreCowTest {
         NumericVariantStore store = newStore(cow);
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {false});
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         store.setInt(0, 0, r0, 42); // write the dense parent
 
@@ -83,8 +83,8 @@ class NumericVariantStoreCowTest {
         NumericVariantStore store = newStore(cow);
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {true});
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setInt(1, 0, r0, 88); // diverge the row in the fork
 
         store.fillInt(0, r0, -5);       // fill = the same value in EVERY variant, diverged or not
@@ -103,8 +103,8 @@ class NumericVariantStoreCowTest {
         NumericVariantStore store = newStore(cow);
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {false});
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setDouble(1, 0, r0, 99.0);
         assertEquals(1, store.cowRowsMaterialized(1));
 
@@ -122,11 +122,11 @@ class NumericVariantStoreCowTest {
         NumericVariantStore store = newStore(cow);
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {false});
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setDouble(1, 0, r0, 99.0);
-        cow.recordClone(2, 1, true);
-        store.extendStructural(1, 1);
+        cow.recordClone(2, 1);
+        store.extend(1, 1);
 
         // remove the middle variant: the grandchild keeps the values it inherited through it
         store.materializeInheritors(1);
@@ -134,8 +134,8 @@ class NumericVariantStoreCowTest {
         store.delete(1);
         assertEquals(99.0, store.getDouble(2, 0, r0), EPS);
 
-        // recycle index 1 as an eager clone of the root: dense, sees the root's values
-        cow.recordClone(1, 0, false);
+        // recycle index 1 as a clone of the root: inherits its values, then diverges
+        cow.recordClone(1, 0);
         store.allocate(new int[] {1}, 0);
         assertEquals(10.0, store.getDouble(1, 0, r0), EPS);
         store.setDouble(1, 0, r0, 55.0);
@@ -143,8 +143,8 @@ class NumericVariantStoreCowTest {
         assertEquals(10.0, store.getDouble(0, 0, r0), EPS);
         assertEquals(99.0, store.getDouble(2, 0, r0), EPS); // untouched by the recycling
 
-        // a STATE_ONLY clone of the (still copy-on-write) grandchild copies its resolved band
-        cow.recordClone(3, 2, false);
+        // a clone of the grandchild resolves through it
+        cow.recordClone(3, 2);
         store.extend(1, 2);
         assertEquals(99.0, store.getDouble(3, 0, r0), EPS);
         assertEquals(7, store.getInt(3, 0, r0));
@@ -155,8 +155,8 @@ class NumericVariantStoreCowTest {
         VariantCowState cow = new VariantCowState();
         NumericVariantStore store = newStore(cow);
         int r0 = store.allocateRow(new double[] {10.0, 1.0}, new int[] {7}, new boolean[] {true});
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setDouble(1, 0, r0, 99.0);
         store.setInt(1, 0, r0, 88);
 

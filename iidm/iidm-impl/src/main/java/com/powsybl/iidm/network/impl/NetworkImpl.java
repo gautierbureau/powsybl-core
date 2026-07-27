@@ -221,30 +221,28 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     /**
      * Enable — and return — the layer that makes an object's existence depend on the active variant, so a
-     * cloned variant is a structural variant of this same network. Idempotent. See
-     * {@code structural-variant-public-api.md}.
+     * cloned variant is a branch of this same network. Called on the first clone; idempotent.
      */
     VariantScopedExistence enableVariantScopedExistence() {
         VariantScopedExistence current = index.getVariantScopedExistence();
         if (current != null) {
             return current;
         }
-        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize(), variantManager.getCowState());
+        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize());
         index.setVariantScopedExistence(created);
         return created;
     }
 
     /**
      * Enable — and return — variant-scoped terminal membership (the {@code attached} / {@code detached}
-     * delta resolved against the active variant). Idempotent. See
-     * {@code structural-variant-public-api.md}.
+     * delta resolved against the active variant). Called on the first clone; idempotent.
      */
     VariantScopedMembership enableVariantScopedMembership() {
         VariantScopedMembership current = index.getVariantScopedMembership();
         if (current != null) {
             return current;
         }
-        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize(), variantManager.getCowState());
+        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize());
         index.setVariantScopedMembership(created);
         return created;
     }
@@ -257,12 +255,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return index.getVariantScopedExistence();
     }
 
-    /** Whether structural mutations (add/remove) made now are scoped to the working (structural) variant. */
-    boolean isCurrentVariantStructural() {
-        return variantManager.isCurrentVariantStructural();
+    /**
+     * Whether structural mutations (add/remove) made now are scoped to the working variant. True as soon as
+     * the network has more than one variant, whichever variant is the working one.
+     */
+    boolean isVariantScopedStructure() {
+        return variantManager.isVariantScopedStructure();
     }
 
-    /** Whether {@code id} is an object created in a structural variant (so extending/removing it is variant-scoped). */
+    /** Whether {@code id} is an object created in a variant (so extending/removing it is variant-scoped). */
     boolean isVariantAddedObject(String id) {
         VariantScopedExistence existence = getVariantScopedExistence();
         if (existence == null) {
@@ -273,29 +274,29 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     }
 
     /**
-     * A structural variant supports adding variant-scoped equipment (routed through the membership intercept)
-     * and removing connectables (tombstoned). Editing shared containers, switches or buses instead mutates the
-     * single shared graph seen by every variant, so those operations are rejected in a structural variant
-     * rather than silently corrupting the base and sibling variants. This is a documented limitation, pending
-     * variant-scoped support for that structure.
+     * Adding and removing identifiables is variant-scoped (existence tombstones plus the membership
+     * intercept). A voltage level's internal topology — its switches, buses and internal connections — still
+     * lives in a single graph shared by every variant, so editing it once the network has more than one
+     * variant would silently change the topology (calculated buses, connected components) of all of them.
+     * Such an edit is rejected rather than allowed to corrupt the other variants. This is the remaining gap
+     * versus network-store, where those objects are variant-scoped rows like any other.
      */
     void rejectSharedStructuralEdit(String operation) {
-        if (isCurrentVariantStructural()) {
-            throw new PowsyblException(operation + " is not supported in a structural variant "
-                    + "(it would modify structure shared by all variants).");
+        if (isVariantScopedStructure()) {
+            throw new PowsyblException(operation + " is not supported once the network has several variants "
+                    + "(it would modify topology shared by all variants).");
         }
     }
 
     /**
-     * Reject {@code operation} that would extend a shared container in a structural variant. Extending a
-     * container created in the same variant is fine (it exists only in that variant); extending a shared one
-     * would leak into every variant.
+     * Reject {@code operation} that would extend a shared container. Extending a container created in the
+     * working variant is fine (it exists only there); extending a shared one would leak into every variant.
      */
     void rejectStructuralEditOnSharedContainer(String containerId, String operation) {
-        if (isCurrentVariantStructural() && !isVariantAddedObject(containerId)) {
+        if (isVariantScopedStructure() && !isVariantAddedObject(containerId)) {
             throw new PowsyblException(operation + " onto shared container '" + containerId
-                    + "' is not supported in a structural variant "
-                    + "(only a container created in the same variant can be extended).");
+                    + "' is not supported once the network has several variants "
+                    + "(only a container created in the working variant can be extended).");
         }
     }
 
@@ -1323,24 +1324,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, final int sourceIndex) {
-        extendVariantArraySize(initVariantArraySize, number, sourceIndex, false);
-    }
-
-    @Override
-    public void extendVariantArraySize(int initVariantArraySize, int number, final int sourceIndex, boolean structuralClone) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
         // columnar variant stores (terminal p/q, switch open/retained, node terminal, bus...):
-        // extended once for the whole network instead of once per object. A STRUCTURAL clone extends them
-        // copy-on-write (O(1)); everything else above stays eager (caches and delta-sized maps, all cheap).
+        // extended once for the whole network instead of once per object, copy-on-write (O(1)); everything
+        // else above stays eager (caches and delta-sized maps, all cheap).
         for (VariantColumnStore store : variantColumnStores) {
-            if (structuralClone) {
-                store.extendStructural(number, sourceIndex);
-            } else {
-                store.extend(number, sourceIndex);
-            }
+            store.extend(number, sourceIndex);
         }
 
         variants.push(number, () -> variants.copy(sourceIndex));
@@ -1374,21 +1366,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
-        allocateVariantArrayElement(indexes, sourceIndex, false);
-    }
-
-    @Override
-    public void allocateVariantArrayElement(int[] indexes, final int sourceIndex, boolean structuralClone) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
         dcTopologyModel.allocateVariantArrayElement(indexes, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
 
         for (VariantColumnStore store : variantColumnStores) {
-            if (structuralClone) {
-                store.allocateStructural(indexes, sourceIndex);
-            } else {
-                store.allocate(indexes, sourceIndex);
-            }
+            store.allocate(indexes, sourceIndex);
         }
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
@@ -1402,15 +1385,6 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     void materializeCowInheritorsOf(int variantIndex) {
         for (VariantColumnStore store : variantColumnStores) {
             store.materializeInheritors(variantIndex);
-        }
-        // existence and membership ride the same copy-on-write parentage — freeze what their children inherit
-        VariantScopedExistence existence = index.getVariantScopedExistence();
-        if (existence != null) {
-            existence.materializeInheritors(variantIndex);
-        }
-        VariantScopedMembership membership = index.getVariantScopedMembership();
-        if (membership != null) {
-            membership.materializeInheritors(variantIndex);
         }
     }
 

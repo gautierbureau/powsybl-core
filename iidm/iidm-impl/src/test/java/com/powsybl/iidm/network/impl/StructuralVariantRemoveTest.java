@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * The public structural-variant API (see {@code structural-variant-public-api.md}): a {@code STRUCTURAL}
+ * The public variant API: a cloned
  * clone plus an ordinary {@code remove()} works end-to-end through the real API, with <b>no</b> internal
  * helper calls. Removing an object while a structural variant is the working variant scopes the removal to
  * that variant; the base and other variants keep it.
@@ -59,7 +58,7 @@ class StructuralVariantRemoveTest {
         VoltageLevel vl1 = n.getVoltageLevel("VL1");
 
         // ---- the whole public API surface: a STRUCTURAL clone + an ordinary remove() ----
-        vm.cloneVariant(INITIAL, "n-1-gen1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "n-1-gen1");
         vm.setWorkingVariant("n-1-gen1");
         n.getGenerator("GEN1").remove();
 
@@ -76,28 +75,13 @@ class StructuralVariantRemoveTest {
     }
 
     @Test
-    void removeInAStateOnlyVariantStaysNetworkWide() {
-        // Backward compatibility: without STRUCTURAL, remove() is network-wide exactly as before.
-        Network n = smallGrid();
-        VariantManager vm = n.getVariantManager();
-
-        vm.cloneVariant(INITIAL, "state", VariantCloneStrategy.STATE_ONLY);
-        vm.setWorkingVariant("state");
-        n.getGenerator("GEN1").remove();
-
-        assertNull(n.getGenerator("GEN1"));
-        vm.setWorkingVariant(INITIAL);
-        assertNull(n.getGenerator("GEN1")); // gone everywhere — historical behaviour preserved
-    }
-
-    @Test
     void addInAStructuralVariantIsScopedToIt() {
         Network n = smallGrid();
         VariantManager vm = n.getVariantManager();
         VoltageLevel vl1 = n.getVoltageLevel("VL1");
 
         // ---- the whole public API surface: a STRUCTURAL clone + an ordinary newGenerator().add() ----
-        vm.cloneVariant(INITIAL, "expansion", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "expansion");
         vm.setWorkingVariant("expansion");
         vl1.newGenerator().setId("NEW_CCGT").setConnectableBus("b1").setBus("b1")
                 .setMinP(0).setMaxP(400).setTargetP(350).setTargetV(400).setVoltageRegulatorOn(true)
@@ -122,7 +106,7 @@ class StructuralVariantRemoveTest {
         VariantManager vm = n.getVariantManager();
         VoltageLevel vl1 = n.getVoltageLevel("VL1");
 
-        vm.cloneVariant(INITIAL, "swap", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "swap");
         vm.setWorkingVariant("swap");
         n.getGenerator("GEN1").remove();
         vl1.newGenerator().setId("REPLACEMENT").setConnectableBus("b1").setBus("b1")
@@ -144,8 +128,8 @@ class StructuralVariantRemoveTest {
         Network n = smallGrid();
         VariantManager vm = n.getVariantManager();
 
-        vm.cloneVariant(INITIAL, "n-1-gen1", VariantCloneStrategy.STRUCTURAL);
-        vm.cloneVariant(INITIAL, "n-1-line12", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "n-1-gen1");
+        vm.cloneVariant(INITIAL, "n-1-line12");
 
         vm.setWorkingVariant("n-1-gen1");
         n.getGenerator("GEN1").remove();

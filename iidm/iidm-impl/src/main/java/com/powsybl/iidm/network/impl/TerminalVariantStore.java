@@ -25,15 +25,15 @@ import java.util.Deque;
  * is essential: allocating a fresh band per clone reintroduces the very garbage the layout is meant to
  * avoid and turns the win into a regression.</p>
  *
- * <h2>Copy-on-write ({@code STRUCTURAL}) variants</h2>
+ * <h2>Copy-on-write (cloned) variants</h2>
  *
- * <p>A variant cloned with {@code VariantCloneStrategy.STRUCTURAL} is stored copy-on-write:
- * {@link #extendStructural} copies <b>nothing</b> (O(1)) —
+ * <p>A cloned variant is stored copy-on-write:
+ * {@link #extend} copies <b>nothing</b> (O(1)) —
  * the new variant owns no rows and resolves reads through the clone parentage ({@link VariantCowState})
  * to its nearest ancestor that holds the row. Rows diverge one by one: writing a copy-on-write variant
  * first materialises the touched row into its sparse band ({@code CowBand}), and — to preserve the clone
  * snapshot — writing any variant first freezes the touched row into the copy-on-write children that still
- * inherit it. Dense variants (the initial variant and {@code STATE_ONLY} clones) keep today's eager
+ * inherit it. The dense initial variant keeps the eager
  * behaviour exactly; while no copy-on-write variant exists (the {@link VariantCowState#isActive()} gate,
  * i.e. every network today) every read and write takes the plain dense path.</p>
  *
@@ -365,30 +365,6 @@ class TerminalVariantStore implements VariantColumnStore {
 
     @Override
     public void extend(int number, int sourceIndex) {
-        int newSize = variantSize + number;
-        ensureVariantCapacity(newSize);
-        int stride = rowStride;
-        double[] pd = p;
-        double[] qd = q;
-        if (!cowState.isActive() || !cowState.isCow(sourceIndex)) {
-            int srcOff = sourceIndex * stride;
-            for (int i = 0; i < number; i++) {
-                int dstOff = (variantSize + i) * stride;
-                System.arraycopy(pd, srcOff, pd, dstOff, rowCount);
-                System.arraycopy(qd, srcOff, qd, dstOff, rowCount);
-            }
-        } else {
-            // the source is copy-on-write: an eager (STATE_ONLY) clone of it copies its resolved band
-            copyResolvedRows(sourceIndex, pd, qd, dst -> (variantSize + dst) * stride, number);
-        }
-        p = pd;
-        q = qd;
-        variantSize = newSize;
-        flatSize = Math.max(flatSize, newSize);
-    }
-
-    @Override
-    public void extendStructural(int number, int sourceIndex) {
         // O(1): the new copy-on-write variants own no rows and inherit through the parentage. Pre-size the
         // band table on the main thread so worker-thread writes never resize it.
         variantSize += number;
@@ -425,35 +401,6 @@ class TerminalVariantStore implements VariantColumnStore {
 
     @Override
     public void allocate(int[] indexes, int sourceIndex) {
-        int required = flatSize;
-        for (int index : indexes) {
-            required = Math.max(required, index + 1);
-        }
-        ensureVariantCapacity(required);
-        int stride = rowStride;
-        double[] pd = p;
-        double[] qd = q;
-        if (!cowState.isActive() || !cowState.isCow(sourceIndex)) {
-            int srcOff = sourceIndex * stride;
-            for (int index : indexes) {
-                int dstOff = index * stride;
-                System.arraycopy(pd, srcOff, pd, dstOff, rowCount);
-                System.arraycopy(qd, srcOff, qd, dstOff, rowCount);
-            }
-        } else {
-            copyResolvedRows(sourceIndex, pd, qd, dst -> indexes[dst] * stride, indexes.length);
-        }
-        p = pd;
-        q = qd;
-        // the target becomes (or stays) dense: it owns its flat band, any copy-on-write past is dropped
-        for (int index : indexes) {
-            dropCowBand(index);
-        }
-        flatSize = required;
-    }
-
-    @Override
-    public void allocateStructural(int[] indexes, int sourceIndex) {
         // O(1) per band: recycled/overwritten indexes become fresh copy-on-write variants owning no rows
         CowBand[] bands = cowBands;
         int required = variantSize;

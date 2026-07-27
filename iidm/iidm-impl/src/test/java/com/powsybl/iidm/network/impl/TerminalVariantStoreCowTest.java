@@ -10,7 +10,6 @@ package com.powsybl.iidm.network.impl;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -26,21 +25,21 @@ class TerminalVariantStoreCowTest {
     private static final double EPS = 0.0;
 
     @Test
-    void stateOnlyClonesStayOnTheDenseFastPath() {
+    void aCloneReadsThroughAndDivergesIndependently() {
         VariantCowState cow = new VariantCowState();
         TerminalVariantStore store = new TerminalVariantStore(1, cow);
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
         store.setQ(0, r0, 1.0);
 
-        cow.recordClone(1, 0, false);
+        cow.recordClone(1, 0);
         store.extend(1, 0);
-        assertFalse(cow.isActive());
+        assertTrue(cow.isActive()); // every clone is copy-on-write
 
         store.setP(1, r0, 55.0);
         assertEquals(55.0, store.getP(1, r0), EPS);
         assertEquals(10.0, store.getP(0, r0), EPS);
-        assertEquals(1.0, store.getQ(1, r0), EPS); // eagerly copied
+        assertEquals(1.0, store.getQ(1, r0), EPS); // untouched: still resolved through the parentage
     }
 
     @Test
@@ -53,8 +52,8 @@ class TerminalVariantStoreCowTest {
         store.setQ(0, r0, 1.0);
         store.setP(0, r1, 20.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         assertTrue(cow.isActive());
         assertEquals(0, store.cowRowsMaterialized(1)); // O(1): nothing copied
@@ -78,8 +77,8 @@ class TerminalVariantStoreCowTest {
         store.setP(0, r0, 10.0);
         store.setQ(0, r0, 1.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         store.setP(0, r0, 77.0); // mutate the DENSE parent after the structural fork
 
@@ -95,10 +94,10 @@ class TerminalVariantStoreCowTest {
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
-        cow.recordClone(2, 1, true); // structural grandchild forked from the structural child
-        store.extendStructural(1, 1);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
+        cow.recordClone(2, 1); // structural grandchild forked from the structural child
+        store.extend(1, 1);
 
         store.setP(1, r0, 50.0);                    // write the middle variant
         assertEquals(10.0, store.getP(2, r0), EPS); // grandchild frozen with the pre-write value
@@ -119,11 +118,11 @@ class TerminalVariantStoreCowTest {
         store.setP(0, r0, 10.0);
         store.setP(0, r1, 20.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setP(1, r0, 99.0); // diverge one row only
 
-        cow.recordClone(2, 1, false); // eager clone FROM the copy-on-write variant
+        cow.recordClone(2, 1); // clone FROM the copy-on-write variant
         store.extend(1, 1);
 
         assertEquals(99.0, store.getP(2, r0), EPS); // diverged row from the structural source
@@ -142,12 +141,12 @@ class TerminalVariantStoreCowTest {
         store.setP(0, r0, 10.0);
         store.setP(0, r1, 20.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setP(1, r0, 99.0);
 
-        cow.recordClone(2, 1, true); // structural grandchild inherits r1 from variant 0 through variant 1
-        store.extendStructural(1, 1);
+        cow.recordClone(2, 1); // structural grandchild inherits r1 from variant 0 through variant 1
+        store.extend(1, 1);
 
         // remove variant 1: what the grandchild inherited through it must be frozen first
         store.materializeInheritors(1);
@@ -162,23 +161,23 @@ class TerminalVariantStoreCowTest {
     }
 
     @Test
-    void overwritingAStructuralVariantWithAnEagerCloneMakesItDenseAgain() {
+    void overwritingAVariantDropsItsDivergence() {
         VariantCowState cow = new VariantCowState();
         TerminalVariantStore store = new TerminalVariantStore(1, cow);
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setP(1, r0, 99.0);
 
-        // overwrite variant 1 with a STATE_ONLY clone of the root, as the variant manager drives it
+        // overwrite variant 1 with a fresh clone of the root, as the variant manager drives it
         store.materializeInheritors(1); // no children: no-op
-        cow.recordClone(1, 0, false);
+        cow.recordClone(1, 0);
         store.allocate(new int[] {1}, 0);
 
-        assertFalse(cow.isActive());                // last copy-on-write variant gone: fast path is back
-        assertEquals(10.0, store.getP(1, r0), EPS); // the copy-on-write past was dropped
+        assertTrue(cow.isActive());                 // still a clone, still copy-on-write
+        assertEquals(10.0, store.getP(1, r0), EPS); // its divergence was dropped
         store.setP(1, r0, 33.0);
         assertEquals(33.0, store.getP(1, r0), EPS);
         assertEquals(10.0, store.getP(0, r0), EPS);
@@ -191,14 +190,14 @@ class TerminalVariantStoreCowTest {
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setP(1, r0, 99.0);
 
         // overwrite the structural variant with a fresh structural clone of the root
         store.materializeInheritors(1);
-        cow.recordClone(1, 0, true);
-        store.allocateStructural(new int[] {1}, 0);
+        cow.recordClone(1, 0);
+        store.allocate(new int[] {1}, 0);
 
         assertEquals(0, store.cowRowsMaterialized(1));
         assertEquals(10.0, store.getP(1, r0), EPS); // inherits the root again, 99.0 is gone
@@ -211,8 +210,8 @@ class TerminalVariantStoreCowTest {
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
 
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
 
         // a row allocated after the fork reads NaN everywhere, then diverges normally
         int r1 = store.allocateRow();
@@ -238,8 +237,8 @@ class TerminalVariantStoreCowTest {
         TerminalVariantStore store = new TerminalVariantStore(1, cow);
         int r0 = store.allocateRow();
         store.setP(0, r0, 10.0);
-        cow.recordClone(1, 0, true);
-        store.extendStructural(1, 0);
+        cow.recordClone(1, 0);
+        store.extend(1, 0);
         store.setP(1, r0, 99.0);
 
         // grow past the default row capacity (16) to force a restride of flat and copy-on-write bands

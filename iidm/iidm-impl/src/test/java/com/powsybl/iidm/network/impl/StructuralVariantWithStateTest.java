@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -55,14 +54,14 @@ class StructuralVariantWithStateTest {
         VariantManager vm = n.getVariantManager();
 
         // structural variant: a structural change (line out) AND a state change (generator setpoint)
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         vm.setWorkingVariant("fault");
         n.getLine("L").remove();                    // structural, scoped to "fault"
         n.getGenerator("GEN1").setTargetP(150.0);   // state, scoped to "fault"
 
         // fork a STATE-ONLY variant FROM the structural variant: it inherits the structure (line still
         // out) and the state (150), then diverges only the state
-        vm.cloneVariant("fault", "fault-lowload", VariantCloneStrategy.STATE_ONLY);
+        vm.cloneVariant("fault", "fault-lowload");
         vm.setWorkingVariant("fault-lowload");
         assertNull(n.getLine("L"));                                 // structure inherited from "fault"
         assertEquals(150.0, n.getGenerator("GEN1").getTargetP());   // state inherited from "fault"

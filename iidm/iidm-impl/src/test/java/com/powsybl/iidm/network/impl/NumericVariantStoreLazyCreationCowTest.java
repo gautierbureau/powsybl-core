@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import com.powsybl.iidm.network.extensions.ActivePowerControl;
@@ -55,7 +54,7 @@ class NumericVariantStoreLazyCreationCowTest {
 
         int workers = 8;
         for (int i = 0; i < workers; i++) {
-            vm.cloneVariant(INITIAL, "w" + i, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(INITIAL, "w" + i);
         }
 
         // Add the ActivePowerControl extension only now — its NumericVariantStore is created lazily here,

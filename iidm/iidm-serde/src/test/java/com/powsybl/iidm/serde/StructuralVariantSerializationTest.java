@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -64,7 +63,7 @@ class StructuralVariantSerializationTest {
         VariantManager vm = n.getVariantManager();
 
         // split L on a structural "fault" variant, entirely through the public API
-        vm.cloneVariant(INITIAL, "fault", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "fault");
         vm.setWorkingVariant("fault");
         double r = n.getLine("L").getR();
         double x = n.getLine("L").getX();

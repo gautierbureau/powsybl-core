@@ -17,7 +17,6 @@ import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.TwoSides;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import org.junit.jupiter.api.Test;
@@ -97,7 +96,7 @@ class StructuralVariantBusViewMembershipTest {
     void addedEquipmentOnASharedBusShowsInBusViewAndBusBreakerViewReads() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "expansion", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "expansion");
         vm.setWorkingVariant("expansion");
 
         // add onto pre-existing shared buses: a generator on B1 and a shortcut line B0-B2
@@ -144,7 +143,7 @@ class StructuralVariantBusViewMembershipTest {
     void removedEquipmentDisappearsFromBusReadsInItsVariantOnly() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
-        vm.cloneVariant(INITIAL, "n-1", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "n-1");
         vm.setWorkingVariant("n-1");
 
         n.getLoad("LOAD1").remove();

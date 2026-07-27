@@ -94,9 +94,9 @@ class VoltageLevelAdderImpl extends AbstractIdentifiableAdder<VoltageLevelAdderI
         ValidationUtil.checkVoltageLimits(this, lowVoltageLimit, highVoltageLimit);
         ValidationUtil.checkTopologyKind(this, topologyKind);
 
-        // Adding a voltage level under a pre-existing (shared) substation in a structural variant would leak
-        // it into every variant via the substation's voltage-level set; only a substation created in the same
-        // variant can be extended. A substation-less voltage level is variant-scoped by its own existence.
+        // Adding a voltage level under a pre-existing (shared) substation would leak it into every variant
+        // via the substation's voltage-level set; only a substation created in the working variant can be
+        // extended. A substation-less voltage level is variant-scoped by its own existence.
         if (substation != null) {
             getNetwork().rejectStructuralEditOnSharedContainer(substation.getId(), "Adding a voltage level");
         }
