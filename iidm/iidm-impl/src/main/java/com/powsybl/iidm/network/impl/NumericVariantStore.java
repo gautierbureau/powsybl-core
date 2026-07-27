@@ -360,6 +360,7 @@ public class NumericVariantStore implements VariantColumnStore {
     }
 
     private void freezeInheritors(int variant, int row) {
+        cowState.checkWritable(variant);
         for (int child : cowState.getCowChildren(variant)) {
             CowBand band = bandOf(child);
             if (band == null || !band.materialized.get(row)) {
