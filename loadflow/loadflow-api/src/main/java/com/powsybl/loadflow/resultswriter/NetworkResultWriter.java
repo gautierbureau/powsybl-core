@@ -8,7 +8,8 @@
 package com.powsybl.loadflow.resultswriter;
 
 /**
- * A streaming sink for network computation results (branch flows, bus voltages, generator dispatch).
+ * A streaming sink for network computation results (branch and three-winding transformer flows, bus voltages,
+ * generator dispatch).
  *
  * <p>This is a provider-agnostic seam shared by any analysis that solves the same network many times and produces a
  * large, wide result set: security analysis (one state per contingency / operator strategy) and time-series load flow
@@ -63,6 +64,31 @@ public interface NetworkResultWriter extends AutoCloseable {
     default void writeBranchResult(String stateId, String subStateId, String status, String branchId,
                                    double p1, double q1, double i1,
                                    double p2, double q2, double i2, double flowTransfer) {
+        // no-op by default
+    }
+
+    /**
+     * Write one three-winding transformer flow row (one active/reactive power and current per leg).
+     *
+     * @param stateId                     the primary state key (empty string for the reference/base state)
+     * @param subStateId                  the secondary state key (empty string when not applicable)
+     * @param status                      the computation status of the state the flow belongs to
+     * @param threeWindingsTransformerId  the id of the three-winding transformer
+     * @param p1                          active power at leg 1 (MW)
+     * @param q1                          reactive power at leg 1 (MVar)
+     * @param i1                          current at leg 1 (A)
+     * @param p2                          active power at leg 2 (MW)
+     * @param q2                          reactive power at leg 2 (MVar)
+     * @param i2                          current at leg 2 (A)
+     * @param p3                          active power at leg 3 (MW)
+     * @param q3                          reactive power at leg 3 (MVar)
+     * @param i3                          current at leg 3 (A)
+     */
+    default void writeThreeWindingsTransformerResult(String stateId, String subStateId, String status,
+                                                     String threeWindingsTransformerId,
+                                                     double p1, double q1, double i1,
+                                                     double p2, double q2, double i2,
+                                                     double p3, double q3, double i3) {
         // no-op by default
     }
 

@@ -89,6 +89,34 @@ class ParquetNetworkResultWriterTest {
     }
 
     @Test
+    void writeAndReadBackThreeWindingsTransformers(@TempDir Path dir) throws IOException {
+        try (ParquetNetworkResultWriter writer = new ParquetNetworkResultWriter(
+                dataset -> dir.resolve(dataset + ".parquet").toFile())) {
+            writer.writeThreeWindingsTransformerResult("", "", "CONVERGED", "T3W1",
+                    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
+            writer.writeThreeWindingsTransformerResult("2025-01-01T00:00:00Z", "s1", "CONVERGED", "T3W2",
+                    10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0);
+        }
+
+        List<Map<String, Object>> rows = readBack(dir.resolve(CsvNetworkResultWriter.THREE_WINDINGS_TRANSFORMERS + ".parquet").toFile());
+        assertEquals(2, rows.size());
+        Map<String, Map<String, Object>> byTwt = byId(rows, "threeWindingsTransformerId");
+
+        Map<String, Object> t1 = byTwt.get("T3W1");
+        assertEquals("", String.valueOf(t1.get("stateId")));
+        assertEquals("CONVERGED", String.valueOf(t1.get("status")));
+        assertEquals(1.0, (double) t1.get("p1"));
+        assertEquals(6.0, (double) t1.get("i2"));
+        assertEquals(7.0, (double) t1.get("p3"));
+        assertEquals(9.0, (double) t1.get("i3"));
+
+        Map<String, Object> t2 = byTwt.get("T3W2");
+        assertEquals("2025-01-01T00:00:00Z", String.valueOf(t2.get("stateId")));
+        assertEquals("s1", String.valueOf(t2.get("subStateId")));
+        assertEquals(90.0, (double) t2.get("i3"));
+    }
+
+    @Test
     void writeAndReadBackBusesAndGenerators(@TempDir Path dir) throws IOException {
         try (ParquetNetworkResultWriter writer = new ParquetNetworkResultWriter(
                 dataset -> dir.resolve(dataset + ".parquet").toFile())) {
@@ -112,12 +140,13 @@ class ParquetNetworkResultWriterTest {
 
     @Test
     void datasetFilesAreCreatedLazily(@TempDir Path dir) throws IOException {
-        // a producer that only writes branch rows must not create bus/generator files
+        // a producer that only writes branch rows must not create 3WT/bus/generator files
         try (ParquetNetworkResultWriter writer = new ParquetNetworkResultWriter(
                 dataset -> dir.resolve(dataset + ".parquet").toFile())) {
             writer.writeBranchResult("", "", "CONVERGED", "L1", 1.0, 2.0, 3.0, -1.0, -2.0, 3.5, Double.NaN);
         }
         assertTrue(Files.exists(dir.resolve(CsvNetworkResultWriter.BRANCHES + ".parquet")));
+        assertFalse(Files.exists(dir.resolve(CsvNetworkResultWriter.THREE_WINDINGS_TRANSFORMERS + ".parquet")));
         assertFalse(Files.exists(dir.resolve(CsvNetworkResultWriter.BUSES + ".parquet")));
         assertFalse(Files.exists(dir.resolve(CsvNetworkResultWriter.GENERATORS + ".parquet")));
     }

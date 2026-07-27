@@ -23,6 +23,7 @@ import java.util.function.Function;
  * A {@link NetworkResultWriter} that streams results to CSV outputs, one dataset per element type:
  * <ul>
  *     <li>{@code branches}: {@code stateId; subStateId; status; branchId; p1; q1; i1; p2; q2; i2; flowTransfer}</li>
+ *     <li>{@code threeWindingsTransformers}: {@code stateId; subStateId; status; threeWindingsTransformerId; p1; q1; i1; p2; q2; i2; p3; q3; i3}</li>
  *     <li>{@code buses}: {@code stateId; subStateId; status; busId; v; angle}</li>
  *     <li>{@code generators}: {@code stateId; subStateId; status; generatorId; targetP; p}</li>
  * </ul>
@@ -40,6 +41,7 @@ import java.util.function.Function;
 public class CsvNetworkResultWriter implements NetworkResultWriter {
 
     static final String BRANCHES = "branches";
+    static final String THREE_WINDINGS_TRANSFORMERS = "threeWindingsTransformers";
     static final String BUSES = "buses";
     static final String GENERATORS = "generators";
 
@@ -47,6 +49,7 @@ public class CsvNetworkResultWriter implements NetworkResultWriter {
     private final TableFormatterConfig config;
 
     private TableFormatter branchFormatter;
+    private TableFormatter threeWindingsTransformerFormatter;
     private TableFormatter busFormatter;
     private TableFormatter generatorFormatter;
 
@@ -76,6 +79,26 @@ public class CsvNetworkResultWriter implements NetworkResultWriter {
                     new Column("flowTransfer"));
         }
         return branchFormatter;
+    }
+
+    private TableFormatter threeWindingsTransformerFormatter() {
+        if (threeWindingsTransformerFormatter == null) {
+            threeWindingsTransformerFormatter = new CsvTableFormatter(writerProvider.apply(THREE_WINDINGS_TRANSFORMERS), "", config,
+                    new Column("stateId"),
+                    new Column("subStateId"),
+                    new Column("status"),
+                    new Column("threeWindingsTransformerId"),
+                    new Column("p1"),
+                    new Column("q1"),
+                    new Column("i1"),
+                    new Column("p2"),
+                    new Column("q2"),
+                    new Column("i2"),
+                    new Column("p3"),
+                    new Column("q3"),
+                    new Column("i3"));
+        }
+        return threeWindingsTransformerFormatter;
     }
 
     private TableFormatter busFormatter() {
@@ -126,6 +149,31 @@ public class CsvNetworkResultWriter implements NetworkResultWriter {
     }
 
     @Override
+    public void writeThreeWindingsTransformerResult(String stateId, String subStateId, String status,
+                                                    String threeWindingsTransformerId,
+                                                    double p1, double q1, double i1,
+                                                    double p2, double q2, double i2,
+                                                    double p3, double q3, double i3) {
+        try {
+            threeWindingsTransformerFormatter().writeCell(stateId)
+                    .writeCell(subStateId)
+                    .writeCell(status)
+                    .writeCell(threeWindingsTransformerId)
+                    .writeCell(p1)
+                    .writeCell(q1)
+                    .writeCell(i1)
+                    .writeCell(p2)
+                    .writeCell(q2)
+                    .writeCell(i2)
+                    .writeCell(p3)
+                    .writeCell(q3)
+                    .writeCell(i3);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
     public void writeBusResult(String stateId, String subStateId, String status, String busId,
                                double v, double angle) {
         try {
@@ -160,6 +208,9 @@ public class CsvNetworkResultWriter implements NetworkResultWriter {
         try {
             if (branchFormatter != null) {
                 branchFormatter.close();
+            }
+            if (threeWindingsTransformerFormatter != null) {
+                threeWindingsTransformerFormatter.close();
             }
             if (busFormatter != null) {
                 busFormatter.close();

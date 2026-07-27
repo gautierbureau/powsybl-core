@@ -10,6 +10,7 @@ package com.powsybl.loadflow.resultswriter;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.BranchFlow;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.BusVoltage;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.GeneratorDispatch;
+import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.ThreeWindingsTransformerFlow;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -28,6 +29,7 @@ class InMemoryNetworkResultWriterTest {
         InMemoryNetworkResultWriter writer = new InMemoryNetworkResultWriter();
         writer.writeBranchResult("", "", "CONVERGED", "L1", 1.0, 2.0, 3.0, -1.0, -2.0, 3.5, Double.NaN);
         writer.writeBranchResult("c1", "s1", "CONVERGED", "L2", 10.0, 20.0, 30.0, -10.0, -20.0, 35.0, 0.5);
+        writer.writeThreeWindingsTransformerResult("c1", "", "CONVERGED", "T3W1", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
         writer.writeBusResult("c1", "", "CONVERGED", "B1", 400.0, -1.25);
         writer.writeGeneratorResult("c1", "", "CONVERGED", "G1", 100.0, 102.3);
 
@@ -37,6 +39,8 @@ class InMemoryNetworkResultWriterTest {
         assertEquals("L2", branches.get(1).branchId());
         assertEquals("s1", branches.get(1).subStateId());
 
+        assertEquals(List.of(new ThreeWindingsTransformerFlow("c1", "", "CONVERGED", "T3W1", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)),
+                writer.getThreeWindingsTransformerResults());
         assertEquals(List.of(new BusVoltage("c1", "", "CONVERGED", "B1", 400.0, -1.25)), writer.getBusResults());
         assertEquals(List.of(new GeneratorDispatch("c1", "", "CONVERGED", "G1", 100.0, 102.3)), writer.getGeneratorResults());
     }

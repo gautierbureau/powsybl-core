@@ -10,6 +10,7 @@ package com.powsybl.loadflow.resultswriter;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.BranchFlow;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.BusVoltage;
 import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.GeneratorDispatch;
+import com.powsybl.loadflow.resultswriter.InMemoryNetworkResultWriter.ThreeWindingsTransformerFlow;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +45,17 @@ public class InMemoryNetworkResultWriterFactory implements NetworkResultWriterFa
         List<BranchFlow> merged = new ArrayList<>();
         for (InMemoryNetworkResultWriter writer : writers) {
             merged.addAll(writer.getBranchResults());
+        }
+        return Collections.unmodifiableList(merged);
+    }
+
+    /**
+     * The three-winding transformer flow rows of all partitions, concatenated.
+     */
+    public List<ThreeWindingsTransformerFlow> getThreeWindingsTransformerResults() {
+        List<ThreeWindingsTransformerFlow> merged = new ArrayList<>();
+        for (InMemoryNetworkResultWriter writer : writers) {
+            merged.addAll(writer.getThreeWindingsTransformerResults());
         }
         return Collections.unmodifiableList(merged);
     }

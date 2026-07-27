@@ -22,7 +22,8 @@ import java.util.function.Function;
 
 /**
  * A {@link NetworkResultWriter} that streams results to Parquet files, one dataset (schema) per element type: branch
- * flows, bus voltages and generator dispatch. Each dataset has its own {@code File}, obtained lazily on the first row
+ * flows, three-winding transformer flows, bus voltages and generator dispatch. Each dataset has its own {@code File},
+ * obtained lazily on the first row
  * of that dataset from the {@code fileProvider} passed at construction (keyed by dataset name). A producer that only
  * emits some datasets (e.g. security analysis, branches only) never creates a file for the others.
  *
@@ -52,6 +53,22 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
             .required(PrimitiveTypeName.DOUBLE).named("flowTransfer")
             .named("branchFlow");
 
+    static final MessageType THREE_WINDINGS_TRANSFORMER_SCHEMA = Types.buildMessage()
+            .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("stateId")
+            .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("subStateId")
+            .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("status")
+            .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("threeWindingsTransformerId")
+            .required(PrimitiveTypeName.DOUBLE).named("p1")
+            .required(PrimitiveTypeName.DOUBLE).named("q1")
+            .required(PrimitiveTypeName.DOUBLE).named("i1")
+            .required(PrimitiveTypeName.DOUBLE).named("p2")
+            .required(PrimitiveTypeName.DOUBLE).named("q2")
+            .required(PrimitiveTypeName.DOUBLE).named("i2")
+            .required(PrimitiveTypeName.DOUBLE).named("p3")
+            .required(PrimitiveTypeName.DOUBLE).named("q3")
+            .required(PrimitiveTypeName.DOUBLE).named("i3")
+            .named("threeWindingsTransformerFlow");
+
     static final MessageType BUS_SCHEMA = Types.buildMessage()
             .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("stateId")
             .required(PrimitiveTypeName.BINARY).as(LogicalTypeAnnotation.stringType()).named("subStateId")
@@ -74,6 +91,7 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
 
     // One writer per dataset, created lazily. Only the datasets that receive at least one row are opened.
     private ParquetWriter<ParquetNetworkResultWriter> branchWriter;
+    private ParquetWriter<ParquetNetworkResultWriter> threeWindingsTransformerWriter;
     private ParquetWriter<ParquetNetworkResultWriter> busWriter;
     private ParquetWriter<ParquetNetworkResultWriter> generatorWriter;
 
@@ -90,6 +108,10 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
     private double q2;
     private double i2;
     private double flowTransfer;
+    private String threeWindingsTransformerId;
+    private double p3;
+    private double q3;
+    private double i3;
     private String busId;
     private double v;
     private double angle;
@@ -118,6 +140,28 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
             });
         }
         return branchWriter;
+    }
+
+    private ParquetWriter<ParquetNetworkResultWriter> threeWindingsTransformerWriter() {
+        if (threeWindingsTransformerWriter == null) {
+            threeWindingsTransformerWriter = writeFile(THREE_WINDINGS_TRANSFORMER_SCHEMA,
+                    CsvNetworkResultWriter.THREE_WINDINGS_TRANSFORMERS, (row, valueWriter) -> {
+                        valueWriter.write("stateId", row.stateId);
+                        valueWriter.write("subStateId", row.subStateId);
+                        valueWriter.write("status", row.status);
+                        valueWriter.write("threeWindingsTransformerId", row.threeWindingsTransformerId);
+                        valueWriter.write("p1", row.p1);
+                        valueWriter.write("q1", row.q1);
+                        valueWriter.write("i1", row.i1);
+                        valueWriter.write("p2", row.p2);
+                        valueWriter.write("q2", row.q2);
+                        valueWriter.write("i2", row.i2);
+                        valueWriter.write("p3", row.p3);
+                        valueWriter.write("q3", row.q3);
+                        valueWriter.write("i3", row.i3);
+                    });
+        }
+        return threeWindingsTransformerWriter;
     }
 
     private ParquetWriter<ParquetNetworkResultWriter> busWriter() {
@@ -180,6 +224,32 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
     }
 
     @Override
+    public void writeThreeWindingsTransformerResult(String stateId, String subStateId, String status,
+                                                    String threeWindingsTransformerId,
+                                                    double p1, double q1, double i1,
+                                                    double p2, double q2, double i2,
+                                                    double p3, double q3, double i3) {
+        this.stateId = stateId;
+        this.subStateId = subStateId;
+        this.status = status;
+        this.threeWindingsTransformerId = threeWindingsTransformerId;
+        this.p1 = p1;
+        this.q1 = q1;
+        this.i1 = i1;
+        this.p2 = p2;
+        this.q2 = q2;
+        this.i2 = i2;
+        this.p3 = p3;
+        this.q3 = q3;
+        this.i3 = i3;
+        try {
+            threeWindingsTransformerWriter().write(this);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Override
     public void writeBusResult(String stateId, String subStateId, String status, String busId,
                                double v, double angle) {
         this.stateId = stateId;
@@ -216,6 +286,9 @@ public class ParquetNetworkResultWriter implements NetworkResultWriter {
         try {
             if (branchWriter != null) {
                 branchWriter.close();
+            }
+            if (threeWindingsTransformerWriter != null) {
+                threeWindingsTransformerWriter.close();
             }
             if (busWriter != null) {
                 busWriter.close();

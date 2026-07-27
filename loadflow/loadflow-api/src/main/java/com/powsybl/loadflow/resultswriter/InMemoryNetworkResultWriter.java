@@ -37,6 +37,17 @@ public class InMemoryNetworkResultWriter implements NetworkResultWriter {
     }
 
     /**
+     * One three-winding transformer flow row, mirroring the arguments of
+     * {@link #writeThreeWindingsTransformerResult}.
+     */
+    public record ThreeWindingsTransformerFlow(String stateId, String subStateId, String status,
+                                               String threeWindingsTransformerId,
+                                               double p1, double q1, double i1,
+                                               double p2, double q2, double i2,
+                                               double p3, double q3, double i3) {
+    }
+
+    /**
      * One bus voltage row, mirroring the arguments of {@link #writeBusResult}.
      */
     public record BusVoltage(String stateId, String subStateId, String status, String busId,
@@ -51,6 +62,7 @@ public class InMemoryNetworkResultWriter implements NetworkResultWriter {
     }
 
     private final List<BranchFlow> branchResults = new ArrayList<>();
+    private final List<ThreeWindingsTransformerFlow> threeWindingsTransformerResults = new ArrayList<>();
     private final List<BusVoltage> busResults = new ArrayList<>();
     private final List<GeneratorDispatch> generatorResults = new ArrayList<>();
 
@@ -59,6 +71,16 @@ public class InMemoryNetworkResultWriter implements NetworkResultWriter {
                                   double p1, double q1, double i1,
                                   double p2, double q2, double i2, double flowTransfer) {
         branchResults.add(new BranchFlow(stateId, subStateId, status, branchId, p1, q1, i1, p2, q2, i2, flowTransfer));
+    }
+
+    @Override
+    public void writeThreeWindingsTransformerResult(String stateId, String subStateId, String status,
+                                                    String threeWindingsTransformerId,
+                                                    double p1, double q1, double i1,
+                                                    double p2, double q2, double i2,
+                                                    double p3, double q3, double i3) {
+        threeWindingsTransformerResults.add(new ThreeWindingsTransformerFlow(stateId, subStateId, status,
+                threeWindingsTransformerId, p1, q1, i1, p2, q2, i2, p3, q3, i3));
     }
 
     @Override
@@ -78,6 +100,13 @@ public class InMemoryNetworkResultWriter implements NetworkResultWriter {
      */
     public List<BranchFlow> getBranchResults() {
         return Collections.unmodifiableList(branchResults);
+    }
+
+    /**
+     * The three-winding transformer flow rows collected so far, in write order.
+     */
+    public List<ThreeWindingsTransformerFlow> getThreeWindingsTransformerResults() {
+        return Collections.unmodifiableList(threeWindingsTransformerResults);
     }
 
     /**
