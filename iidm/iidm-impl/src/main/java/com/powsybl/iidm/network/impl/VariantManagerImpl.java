@@ -36,9 +36,22 @@ public class VariantManagerImpl implements VariantManager {
 
     private int variantArraySize;
 
+    // Set once preAllocateVariants has been called: opts this manager into the managed-capacity contract
+    // (thread-safe on-demand creation into reserved slots, overflow throws, no array shrink while multi-thread
+    // access is on). When false, behaviour is unchanged from the legacy variant manager.
+    private boolean preAllocated;
+
     private final Deque<Integer> unusedIndexes = new ArrayDeque<>();
 
     private final NetworkImpl network;
+
+    // Guards every read and write of the variant bookkeeping (id2index, unusedIndexes, variantArraySize).
+    // The per-variant data arrays themselves are written concurrently by worker threads, each on its own
+    // variant band; this lock only serialises variant creation/removal and the id<->index resolution, so
+    // that on-demand creation into pre-allocated capacity (see preAllocateVariants) cannot race a concurrent
+    // setWorkingVariant / creation on another thread. It is not held on the variant-dependent attribute hot
+    // path (that resolves a thread-local index and reads the data arrays directly).
+    private final Object variantLock = new Object();
 
     VariantManagerImpl(NetworkImpl network) {
         this.network = network;
@@ -55,7 +68,10 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public Collection<String> getVariantIds() {
-        return Collections.unmodifiableSet(id2index.keySet());
+        synchronized (variantLock) {
+            // snapshot: the backing key set is a live view that could be mutated by a concurrent creation
+            return Collections.unmodifiableSet(new LinkedHashSet<>(id2index.keySet()));
+        }
     }
 
     /**
@@ -65,17 +81,25 @@ public class VariantManagerImpl implements VariantManager {
      * @return the size of the variant array
      */
     public int getVariantArraySize() {
-        return variantArraySize;
+        synchronized (variantLock) {
+            return variantArraySize;
+        }
     }
 
     int getVariantCount() {
-        return id2index.size();
+        synchronized (variantLock) {
+            return id2index.size();
+        }
     }
 
     Collection<Integer> getVariantIndexes() {
-        return id2index.values();
+        synchronized (variantLock) {
+            // id2index.values() is a Set (indexes are unique); snapshot it to avoid exposing the live view
+            return new LinkedHashSet<>(id2index.values());
+        }
     }
 
+    // callers must hold variantLock
     private int getVariantIndex(String variantId) {
         Integer index = id2index.get(variantId);
         if (index == null) {
@@ -85,7 +109,9 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     public String getVariantId(int variantIndex) {
-        return id2index.inverse().get(variantIndex);
+        synchronized (variantLock) {
+            return id2index.inverse().get(variantIndex);
+        }
     }
 
     @Override
@@ -96,7 +122,10 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public void setWorkingVariant(String variantId) {
-        int index = getVariantIndex(variantId);
+        int index;
+        synchronized (variantLock) {
+            index = getVariantIndex(variantId);
+        }
         variantContext.setVariantIndex(index);
     }
 
@@ -127,46 +156,84 @@ public class VariantManagerImpl implements VariantManager {
             throw new IllegalArgumentException("Empty target variant id list");
         }
         LOGGER.debug("Creating variants {}", targetVariantIds);
-        if (!mayOverwrite) {
-            checkExistingVariantIds(targetVariantIds);
-        }
-        int sourceIndex = getVariantIndex(sourceVariantId);
-        int initVariantArraySize = variantArraySize;
-        int extendedCount = 0;
-        List<Integer> recycled = new ArrayList<>();
-        List<Integer> overwritten = new ArrayList<>();
-        for (String targetVariantId : targetVariantIds) {
-            if (id2index.containsKey(targetVariantId)) {
-                overwritten.add(id2index.get(targetVariantId));
+        synchronized (variantLock) {
+            if (!mayOverwrite) {
+                checkExistingVariantIds(targetVariantIds);
+            }
+            int sourceIndex = getVariantIndex(sourceVariantId);
+            int initVariantArraySize = variantArraySize;
+            int extendedCount = 0;
+            List<Integer> recycled = new ArrayList<>();
+            List<Integer> overwritten = new ArrayList<>();
+            for (String targetVariantId : targetVariantIds) {
+                if (id2index.containsKey(targetVariantId)) {
+                    overwritten.add(id2index.get(targetVariantId));
 
-                network.getListeners().notifyVariantOverwritten(sourceVariantId, targetVariantId);
-            } else if (unusedIndexes.isEmpty()) {
-                // extend variant array size
-                id2index.put(targetVariantId, variantArraySize);
-                variantArraySize++;
-                extendedCount++;
+                    network.getListeners().notifyVariantOverwritten(sourceVariantId, targetVariantId);
+                } else if (!unusedIndexes.isEmpty()) {
+                    // reuse a free slot (recycled from a removed variant, or reserved by preAllocateVariants):
+                    // this only overwrites an existing band, it never resizes the per-variant arrays, so it is
+                    // safe to run while multi-thread access is enabled
+                    int index = unusedIndexes.pollLast();
+                    id2index.put(targetVariantId, index);
+                    recycled.add(index);
 
-                network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
-            } else {
-                // recycle an index
-                int index = unusedIndexes.pollLast();
-                id2index.put(targetVariantId, index);
-                recycled.add(index);
+                    network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+                } else if (preAllocated && isVariantMultiThreadAccessAllowed()) {
+                    // managed-capacity mode with no reserved slot left: extending the arrays now would resize
+                    // them from a (possibly worker) thread while other threads read/write variants, which is
+                    // not thread safe. Fail fast instead - callers must reserve enough capacity up front.
+                    throw new PowsyblException("No pre-allocated variant capacity left to create variant '"
+                            + targetVariantId + "' while multi-thread access is enabled; reserve capacity with "
+                            + "preAllocateVariants(int) before calling allowVariantMultiThreadAccess(true)");
+                } else {
+                    // extend variant array size (main thread, single-thread access)
+                    id2index.put(targetVariantId, variantArraySize);
+                    variantArraySize++;
+                    extendedCount++;
 
-                network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+                    network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+                }
+            }
+
+            // compute the stateful objects list only once for the whole clone operation
+            List<MultiVariantObject> statefulObjects = getStafulObjects();
+
+            allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
+
+            if (extendedCount > 0) {
+                for (MultiVariantObject obj : statefulObjects) {
+                    obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
+                }
+                LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
             }
         }
+    }
 
-        // compute the stateful objects list only once for the whole clone operation
-        List<MultiVariantObject> statefulObjects = getStafulObjects();
-
-        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
-
-        if (extendedCount > 0) {
+    @Override
+    public void preAllocateVariants(int number) {
+        if (number < 0) {
+            throw new IllegalArgumentException("Number of variants to pre-allocate must be >= 0, got " + number);
+        }
+        synchronized (variantLock) {
+            if (number == 0) {
+                return;
+            }
+            int initVariantArraySize = variantArraySize;
+            // grow every per-variant array once, on the main thread, initialising the reserved slots from the
+            // initial variant; this reuses the exact same extend path as a normal clone
+            List<MultiVariantObject> statefulObjects = getStafulObjects();
             for (MultiVariantObject obj : statefulObjects) {
-                obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
+                obj.extendVariantArraySize(initVariantArraySize, number, INITIAL_VARIANT_INDEX);
             }
-            LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
+            // park the freshly grown indexes as reusable capacity (not yet live variants); a later clone
+            // will claim them through the recycle path, which does not resize anything
+            for (int i = 0; i < number; i++) {
+                unusedIndexes.add(initVariantArraySize + i);
+            }
+            variantArraySize += number;
+            preAllocated = true;
+            LOGGER.debug("Pre-allocated {} variant slot(s) (variant array size is now {})", number, variantArraySize);
         }
     }
 
@@ -207,41 +274,47 @@ public class VariantManagerImpl implements VariantManager {
         if (VariantManagerConstants.INITIAL_VARIANT_ID.equals(variantId)) {
             throw new PowsyblException("Removing initial variant is forbidden");
         }
-        int index = getVariantIndex(variantId);
-        id2index.remove(variantId);
-        LOGGER.debug("Removing variant '{}'", variantId);
-        if (index == variantArraySize - 1) {
-            // remove consecutive unsused index starting from the end
-            int number = 0; // number of elements to remove
-            Set<Integer> removed = new HashSet<>();
-            for (int j = index; j >= 0; j--) {
-                if (id2index.containsValue(j)) {
-                    break;
-                } else {
-                    number++;
-                    removed.add(j);
+        synchronized (variantLock) {
+            int index = getVariantIndex(variantId);
+            id2index.remove(variantId);
+            LOGGER.debug("Removing variant '{}'", variantId);
+            // In managed-capacity mode while multi-thread access is enabled the per-variant arrays must not be
+            // shrunk (that would resize them while other threads read/write variants); the freed slot is only
+            // parked for reuse, preserving the reserved capacity. Shrinking resumes once single-thread access
+            // is restored. Outside that mode, behaviour is unchanged.
+            if (index == variantArraySize - 1 && !(preAllocated && isVariantMultiThreadAccessAllowed())) {
+                // remove consecutive unsused index starting from the end
+                int number = 0; // number of elements to remove
+                Set<Integer> removed = new HashSet<>();
+                for (int j = index; j >= 0; j--) {
+                    if (id2index.containsValue(j)) {
+                        break;
+                    } else {
+                        number++;
+                        removed.add(j);
+                    }
                 }
+                unusedIndexes.removeAll(removed);
+                // reduce variant array size
+                for (MultiVariantObject obj : getStafulObjects()) {
+                    obj.reduceVariantArraySize(number);
+                }
+                variantArraySize -= number;
+                LOGGER.trace("Reducing variant array size to {}", variantArraySize);
+            } else {
+                unusedIndexes.add(index);
+                // delete variant array element at the unused index to avoid memory leak
+                // (so that variant data can be garbage collected)
+                for (MultiVariantObject obj : getStafulObjects()) {
+                    obj.deleteVariantArrayElement(index);
+                }
+                LOGGER.trace("Deleting variant array element at index {}", index);
             }
-            unusedIndexes.removeAll(removed);
-            // reduce variant array size
-            for (MultiVariantObject obj : getStafulObjects()) {
-                obj.reduceVariantArraySize(number);
-            }
-            variantArraySize -= number;
-            LOGGER.trace("Reducing variant array size to {}", variantArraySize);
-        } else {
-            unusedIndexes.add(index);
-            // delete variant array element at the unused index to avoid memory leak
-            // (so that variant data can be garbage collected)
-            for (MultiVariantObject obj : getStafulObjects()) {
-                obj.deleteVariantArrayElement(index);
-            }
-            LOGGER.trace("Deleting variant array element at index {}", index);
-        }
-        // if the removed variant is the working variant, unset the working variant
-        variantContext.resetIfVariantIndexIs(index);
+            // if the removed variant is the working variant, unset the working variant
+            variantContext.resetIfVariantIndexIs(index);
 
-        network.getListeners().notifyVariantRemoved(variantId);
+            network.getListeners().notifyVariantRemoved(variantId);
+        }
     }
 
     @Override
@@ -272,8 +345,12 @@ public class VariantManagerImpl implements VariantManager {
 
     void forEachVariant(Runnable r) {
         int currentVariantIndex = variantContext.getVariantIndex();
+        List<Integer> indexes;
+        synchronized (variantLock) {
+            indexes = new ArrayList<>(id2index.values());
+        }
         try {
-            for (int index : id2index.values()) {
+            for (int index : indexes) {
                 variantContext.setVariantIndex(index);
                 r.run();
             }

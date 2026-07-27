@@ -100,6 +100,34 @@ public interface VariantManager {
     void removeVariant(String variantId);
 
     /**
+     * Pre-allocate storage capacity for {@code number} additional variants, without creating them.
+     * <p>
+     * This is the enabler for thread-safe, on-demand variant creation. Once capacity has been reserved (on
+     * the main thread), creating a variant with the {@code cloneVariant} methods becomes safe to call
+     * concurrently from several threads while {@link #allowVariantMultiThreadAccess(boolean)} is enabled,
+     * because such a creation only reuses an already-reserved slot and never resizes the underlying
+     * per-variant arrays. Reads and writes of variant-dependent attributes on the created variants stay
+     * concurrent as before (each thread on its own variant).
+     * <p>
+     * The reservation grows the per-variant arrays once, on the calling (main) thread. Creating more
+     * variants than were reserved while multi-thread access is enabled would require resizing those arrays
+     * from a worker thread, which is not thread safe; such an overflow throws a
+     * {@link com.powsybl.commons.PowsyblException} instead. While multi-thread access is enabled the
+     * per-variant arrays are never shrunk either, so removing a variant frees its slot for reuse but keeps
+     * the reserved capacity.
+     * <p>
+     * Call this on the main thread, once the network structure is complete and before enabling multi-thread
+     * access. Reserved slots that are never used cost only memory. The default implementation does nothing:
+     * implementations that do not support thread-safe on-demand creation simply grow their storage lazily on
+     * clone, as before.
+     *
+     * @param number the number of additional variant slots to reserve (must be {@code >= 0})
+     */
+    default void preAllocateVariants(int number) {
+        // no-op by default: implementations supporting thread-safe on-demand variant creation override this
+    }
+
+    /**
      * Allows variants to be accessed simultaneously by different threads. When
      * this option is activated, the working variant can have a different value
      * for each thread.
