@@ -77,36 +77,39 @@ Row 1 is the pre-alloc PR's job; rows 2–4 are new work the CoW engine introduc
 
 ### Two scopes
 
-- [ ] **B1 — bounded concurrent structural clone (recommended; the practical full-#721).**
-      `CoW engine` + **the pre-alloc PR ported onto this stack** + a **`VariantCowState`
+- [~] **B1 — bounded concurrent structural clone (recommended; the practical full-#721).**
+      `CoW engine` + **the pre-alloc mechanism ported onto this stack** + a **`VariantCowState`
       concurrency pass**. Workers create structural variants **on demand, concurrently,
       O(1)**, each cloning from the shared base, up to a reserved capacity. This is what
-      OLF / OpenRao actually need and reuses the pre-alloc PR heavily.
+      OLF / OpenRao actually need. **Core implemented on this branch** (see
+      `VariantPreAllocationStructuralCloneTest`); the two open items below remain.
   - Row 4 (freeze race) **disappears by construction** in the disciplined pattern *clone
     from the unwritten base, each worker writes only its own leaf variant* (a leaf has no
     CoW children, so `freezeInheritors` is a no-op) — the very pattern already documented
-    as safe. Enforce it with a guard rather than solving the general race.
-  - Remaining real work items:
-    - [ ] Port the pre-alloc PR (`preAllocateVariants`, `variantLock`, `preAllocated`
-          guards, overflow-throws / no-shrink, concurrent stress test) onto this branch.
-          **Merge note:** the pre-alloc PR and the CoW engine both branch off PR #5 and
-          both rewrote `cloneVariant` (engine added the `VariantCloneStrategy`/`structural`
-          parameter; pre-alloc PR added the lock + guards + `preAllocateVariants`). Neither
-          contains the other → rebase + reconcile the two `cloneVariant` rewrites, and
-          thread the lock through the `STRUCTURAL` path too.
-    - [ ] Generalise reservation to pre-size the CoW metadata, not just the data arrays:
-          each store's `cowBands` table **and** `VariantCowState.parent/cow/cowChildren`
-          to the reserved capacity, so a worker's `recordClone` only sets entries.
-    - [ ] **`VariantCowState` concurrency pass** (the one genuinely new item): make
-          `parent`/`cow`/`cowChildren` reader-safe under a concurrent clone — publish via
-          `volatile` with a copy-on-write swap (so `recordClone` sets entries + swaps a
-          volatile reference instead of racing a non-volatile whole-array rebuild that a
-          resolving reader may observe half-updated). Pre-sizing alone is insufficient
-          because `rebuildDerivedState` reallocates `cowChildren` on every clone.
-    - [ ] Relax `extendStructural` / `ensureBand` to run under the creation lock (their
-          `volatile CowBand[]` publication is already reader-safe).
-    - [ ] Enforce the clone-from-unwritten-base guard; add the multi-core soak test
-          (supersedes the "concurrency unproven" item above for the structural path).
+    as safe. The concurrent test uses it; nothing yet *enforces* it (see below).
+  - Work items:
+    - [x] Port the pre-alloc mechanism (`preAllocateVariants`, `variantLock`, `preAllocated`
+          guards, overflow-throws / no-shrink) onto this branch, threaded through the
+          `STRUCTURAL` clone path. Done: `VariantManagerImpl` runs every clone/remove under
+          `variantLock`; reservation drives the same `structural=true` extend cascade a
+          structural clone uses, so it needs **no new store or `MultiVariantObject` API**.
+    - [x] Pre-size the CoW metadata via the reservation: `preAllocateVariants` grows each
+          store's `cowBands` table (through `extendStructural`) so a worker's structural
+          claim (`allocateStructural`) and any divergent write (`ensureBand`) never grow
+          `cowBands` off the main thread. Dense arrays / eager trove state grow too.
+    - [x] **`VariantCowState` concurrency pass** (the one genuinely new item): `parent` /
+          `cow` / `cowChildren` are now bundled into an immutable `State` published through
+          a single `volatile` reference. Readers (`getParent` / `getCowChildren` / `isCow` /
+          `isActive`) take one volatile read and see a consistent tuple with no lock;
+          `recordClone` / `forgetVariant` build a fresh `State` and swap it in (serialized by
+          `variantLock`). Replaces the previous non-volatile in-place rebuild.
+    - [ ] **Enforce the clone-from-unwritten-base guard.** Today the safe pattern (fork from
+          a variant no other thread is writing) is a convention the test follows but nothing
+          rejects a concurrent clone-from-a-written-parent, which would hit the freeze race.
+          Add a fail-fast guard (or a documented precondition) before relying on it in OLF.
+    - [ ] **Multi-core soak test on real hardware.** The concurrent test passes here but the
+          sandbox is effectively single-core; run it under real parallelism (supersedes the
+          "concurrency unproven" item above for the structural path).
 - [ ] **B2 — unbounded, arbitrary concurrent clone (sylvlecl's literal
       `CopyOnWriteArrayList`, no pre-alloc).** Everything in B1 minus pre-allocation, plus
       fully CoW-published growable tables everywhere **and** a general solution to the
