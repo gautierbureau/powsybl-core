@@ -236,6 +236,7 @@ class SwitchVariantStore implements VariantColumnStore {
     }
 
     private void freezeInheritors(int variantIndex, int row) {
+        cowState.checkWritable(variantIndex);
         for (int child : cowState.getCowChildren(variantIndex)) {
             CowBand band = bandOf(child);
             if (band == null || !band.materialized.get(row)) {

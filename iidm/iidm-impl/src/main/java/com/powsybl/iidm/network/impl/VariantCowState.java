@@ -7,6 +7,8 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.commons.PowsyblException;
+
 import java.util.Arrays;
 
 /**
@@ -63,6 +65,15 @@ final class VariantCowState {
     private static final State EMPTY = new State(new boolean[0], new int[0], new int[0][], false);
 
     private volatile State state = EMPTY;
+
+    private static final int[] NO_FROZEN = {};
+
+    // Variant indexes that are frozen concurrent structural-clone bases: a variant becomes frozen when a
+    // STRUCTURAL variant is forked from it while multi-thread access is enabled, and must not be written for
+    // the duration of that parallel region (writing it would freeze state into every worker variant that
+    // inherits from it, racing their own writes). Published through one volatile reference; readers on the
+    // write hot path take a single volatile read that short-circuits on the empty (common) case.
+    private volatile int[] frozenBases = NO_FROZEN;
 
     /** True while at least one copy-on-write variant exists; stores bypass all of this while false. */
     boolean isActive() {
@@ -133,6 +144,52 @@ final class VariantCowState {
         parent[removed] = NO_PARENT;
         cow[removed] = false;
         state = build(cow, parent);
+    }
+
+    /** Whether {@code variant} is a frozen concurrent structural-clone base (must not be written). */
+    boolean isFrozenBase(int variant) {
+        int[] fb = frozenBases;
+        for (int b : fb) {
+            if (b == variant) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Mark {@code variant} as a frozen base for the current parallel region. Idempotent. Must be called under
+     * the {@link VariantManagerImpl} variant lock (serialized with other mutators).
+     */
+    void freezeBase(int variant) {
+        int[] fb = frozenBases;
+        for (int b : fb) {
+            if (b == variant) {
+                return;
+            }
+        }
+        int[] next = Arrays.copyOf(fb, fb.length + 1);
+        next[fb.length] = variant;
+        frozenBases = next;
+    }
+
+    /** Clear all frozen bases (the parallel region has ended). */
+    void clearFrozenBases() {
+        frozenBases = NO_FROZEN;
+    }
+
+    /**
+     * Throw if {@code variant} is a frozen concurrent structural-clone base. Called on the columnar write path
+     * so an unsafe write to the shared base of concurrent structural clones fails fast instead of racing the
+     * worker variants that inherit from it.
+     */
+    void checkWritable(int variant) {
+        if (isFrozenBase(variant)) {
+            throw new PowsyblException("Variant index " + variant + " is the shared base of concurrent "
+                    + "structural clones and must not be written while multi-thread access is enabled: writing "
+                    + "it would freeze state into the worker variants that fork from it, racing their own "
+                    + "writes. Write only the per-worker structural variants during the parallel region.");
+        }
     }
 
     // Build a fresh immutable snapshot (derived cow-children lists + master gate) from the given parent/cow
