@@ -20,7 +20,7 @@ import java.util.Deque;
  * <p>Reusable form of {@link TerminalVariantStore}: a variant's cells for all columns of a given primitive
  * type are contiguous, so a clone copies one flat block per variant with {@link System#arraycopy} instead of
  * one method call per object. Layout, per array, is variant-major then column-major then row, e.g.
- * {@code doubles[(v * nDouble + col) * rowStride + row]}. Per-column default values initialise new rows and
+ * {@code doubles[v][row >>> SHIFT][col * CHUNK + slot]}. Per-column default values initialise new rows and
  * grown capacity, so behaviour matches the former per-object {@code TDoubleArrayList}/{@code TIntArrayList}/
  * {@code TBooleanArrayList} defaults.</p>
  *
@@ -56,19 +56,22 @@ public class NumericVariantStore implements VariantColumnStore {
     private final int[] intDefaults;
     private final boolean[] booleanDefaults;
 
-    private volatile double[] doubles;
-    private volatile int[] ints;
-    private volatile boolean[] booleans;
+    // Rows live in fixed-size chunks: value(v, col, row) = doubles[v][row >>> SHIFT][col * CHUNK + slot].
+    // Growing either axis appends to a directory of references and never moves a chunk, so a reader holding
+    // one is never invalidated -- see SwitchVariantStore for the rationale and the measurement.
+    private static final int CHUNK = 128;
+    private static final int SHIFT = Integer.numberOfTrailingZeros(CHUNK);
+    private static final int MASK = CHUNK - 1;
 
-    // Geometry fields (rowStride, rowCount, variantSize, variantCapacity) are deliberately NOT volatile: a
-    // read computes its index from the volatile array reference AND rowStride, so publishing only the array
-    // is not by itself sufficient to safely observe a resized store. Correctness relies entirely on the
-    // VariantManager contract that geometry-changing operations (grow/allocate/extend, which reassign the
-    // array and mutate rowStride together) run on the main thread only, with a happens-before edge before any
-    // worker thread starts reading. Do not mutate geometry from a worker thread (e.g. via a lazy store
-    // creation or a late equipment add during a parallel analysis): a reader could then observe a new, wider
-    // array with the old stride and index out of bounds / into the wrong variant.
-    private int rowStride;
+    private volatile double[][][] doubles;
+    private volatile int[][][] ints;
+    private volatile boolean[][][] booleans;
+
+    // Geometry fields are not volatile, and no longer need to be for row growth: a row is addressed as
+    // [v][row >>> SHIFT][col * CHUNK + slot] with CHUNK a constant, so adding rows only appends chunks and a
+    // reader holding a chunk keeps reading valid data. Growing the *variant* axis still re-allocates the
+    // per-variant directory, so it remains a main-thread operation under the VariantManager contract (and
+    // is what preAllocateVariants reserves for).
     private int rowCount;
     private int variantSize;    // number of live variant indexes (dense + copy-on-write)
     private int flatSize;       // high-water variant index (+1) physically held by the flat arrays
@@ -82,36 +85,78 @@ public class NumericVariantStore implements VariantColumnStore {
     // sparse bands of the copy-on-write variants, indexed by variant; see TerminalVariantStore
     private volatile CowBand[] cowBands = new CowBand[0];
 
-    // The diverged rows of one copy-on-write variant, all columns column-major: d[col * rowStride + row].
+    // The diverged rows of one copy-on-write variant, chunked like the dense storage.
     private static final class CowBand {
-        final BitSet materialized;
-        final double[] doubles;
-        final int[] ints;
-        final boolean[] booleans;
+        final BitSet materialized = new BitSet();
+        private final int nDouble;
+        private final int nInt;
+        private final int nBoolean;
+        volatile double[][] doubles = new double[0][];
+        volatile int[][] ints = new int[0][];
+        volatile boolean[][] booleans = new boolean[0][];
 
-        CowBand(int rowStride, int nDouble, int nInt, int nBoolean) {
-            this.materialized = new BitSet(rowStride);
-            this.doubles = new double[nDouble * rowStride];
-            this.ints = new int[nInt * rowStride];
-            this.booleans = new boolean[nBoolean * rowStride];
+        CowBand(int nDouble, int nInt, int nBoolean) {
+            this.nDouble = nDouble;
+            this.nInt = nInt;
+            this.nBoolean = nBoolean;
         }
 
-        CowBand(CowBand from, int oldStride, int newStride, int nDouble, int nInt, int nBoolean, int rowCount) {
-            this.materialized = new BitSet(newStride);
-            this.materialized.or(from.materialized);
-            this.doubles = new double[nDouble * newStride];
-            this.ints = new int[nInt * newStride];
-            this.booleans = new boolean[nBoolean * newStride];
-            for (int c = 0; c < nDouble; c++) {
-                System.arraycopy(from.doubles, c * oldStride, this.doubles, c * newStride, rowCount);
-            }
-            for (int c = 0; c < nInt; c++) {
-                System.arraycopy(from.ints, c * oldStride, this.ints, c * newStride, rowCount);
-            }
-            for (int c = 0; c < nBoolean; c++) {
-                System.arraycopy(from.booleans, c * oldStride, this.booleans, c * newStride, rowCount);
+        double getDouble(int col, int row) {
+            return doubles[row >>> SHIFT][col * CHUNK + (row & MASK)];
+        }
+
+        void setDouble(int col, int row, double value) {
+            doubles[row >>> SHIFT][col * CHUNK + (row & MASK)] = value;
+        }
+
+        int getInt(int col, int row) {
+            return ints[row >>> SHIFT][col * CHUNK + (row & MASK)];
+        }
+
+        void setInt(int col, int row, int value) {
+            ints[row >>> SHIFT][col * CHUNK + (row & MASK)] = value;
+        }
+
+        boolean getBoolean(int col, int row) {
+            return booleans[row >>> SHIFT][col * CHUNK + (row & MASK)];
+        }
+
+        void setBoolean(int col, int row, boolean value) {
+            booleans[row >>> SHIFT][col * CHUNK + (row & MASK)] = value;
+        }
+
+        void ensureRow(int row) {
+            int needed = (row >>> SHIFT) + 1;
+            if (doubles.length < needed) {
+                doubles = growChunks(doubles, needed, nDouble);
+                ints = growIntChunks(ints, needed, nInt);
+                booleans = growBoolChunks(booleans, needed, nBoolean);
             }
         }
+    }
+
+    private static double[][] growChunks(double[][] chunks, int needed, int nCol) {
+        double[][] grown = Arrays.copyOf(chunks, needed);
+        for (int c = chunks.length; c < needed; c++) {
+            grown[c] = new double[nCol * CHUNK];
+        }
+        return grown;
+    }
+
+    private static int[][] growIntChunks(int[][] chunks, int needed, int nCol) {
+        int[][] grown = Arrays.copyOf(chunks, needed);
+        for (int c = chunks.length; c < needed; c++) {
+            grown[c] = new int[nCol * CHUNK];
+        }
+        return grown;
+    }
+
+    private static boolean[][] growBoolChunks(boolean[][] chunks, int needed, int nCol) {
+        boolean[][] grown = Arrays.copyOf(chunks, needed);
+        for (int c = chunks.length; c < needed; c++) {
+            grown[c] = new boolean[nCol * CHUNK];
+        }
+        return grown;
     }
 
     NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults,
@@ -123,14 +168,18 @@ public class NumericVariantStore implements VariantColumnStore {
         this.doubleDefaults = doubleDefaults.clone();
         this.intDefaults = intDefaults.clone();
         this.booleanDefaults = booleanDefaults.clone();
-        this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
         this.flatSize = variantArraySize;
         this.variantCapacity = Math.max(variantArraySize, 1);
-        this.doubles = new double[variantCapacity * nDouble * rowStride];
-        this.ints = new int[variantCapacity * nInt * rowStride];
-        this.booleans = new boolean[variantCapacity * nBoolean * rowStride];
+        this.doubles = new double[variantCapacity][][];
+        this.ints = new int[variantCapacity][][];
+        this.booleans = new boolean[variantCapacity][][];
+        for (int v = 0; v < variantCapacity; v++) {
+            this.doubles[v] = new double[0][];
+            this.ints[v] = new int[0][];
+            this.booleans[v] = new boolean[0][];
+        }
         // Pre-size the copy-on-write band table to the current variant count so it is never grown on a worker
         // thread. extend keeps this invariant on clone, but a store created lazily (a new columnar
         // type first used after structural variants already exist) would otherwise start empty and let
@@ -138,16 +187,54 @@ public class NumericVariantStore implements VariantColumnStore {
         this.cowBands = new CowBand[variantSize];
     }
 
-    private int doubleIndex(int variant, int col, int row) {
-        return (variant * nDouble + col) * rowStride + row;
+    private static int slot(int col, int row) {
+        return col * CHUNK + (row & MASK);
     }
 
-    private int intIndex(int variant, int col, int row) {
-        return (variant * nInt + col) * rowStride + row;
+    private double denseDouble(int variant, int col, int row) {
+        return doubles[variant][row >>> SHIFT][slot(col, row)];
     }
 
-    private int booleanIndex(int variant, int col, int row) {
-        return (variant * nBoolean + col) * rowStride + row;
+    private int denseInt(int variant, int col, int row) {
+        return ints[variant][row >>> SHIFT][slot(col, row)];
+    }
+
+    private boolean denseBoolean(int variant, int col, int row) {
+        return booleans[variant][row >>> SHIFT][slot(col, row)];
+    }
+
+    private void setDenseDouble(int variant, int col, int row, double value) {
+        doubles[variant][row >>> SHIFT][slot(col, row)] = value;
+    }
+
+    private void setDenseInt(int variant, int col, int row, int value) {
+        ints[variant][row >>> SHIFT][slot(col, row)] = value;
+    }
+
+    private void setDenseBoolean(int variant, int col, int row, boolean value) {
+        booleans[variant][row >>> SHIFT][slot(col, row)] = value;
+    }
+
+    /** Make {@code row} addressable in every dense band and every copy-on-write band. */
+    private void ensureRow(int row) {
+        int needed = (row >>> SHIFT) + 1;
+        double[][][] dd = doubles;
+        int[][][] id = ints;
+        boolean[][][] bd = booleans;
+        for (int v = 0; v < dd.length; v++) {
+            if (dd[v].length < needed) {
+                dd[v] = growChunks(dd[v], needed, nDouble);
+                id[v] = growIntChunks(id[v], needed, nInt);
+                bd[v] = growBoolChunks(bd[v], needed, nBoolean);
+            }
+        }
+        CowBand[] bands = cowBands;
+        for (CowBand band : bands) {
+            if (band != null) {
+                band.ensureRow(row);
+            }
+        }
+        cowBands = bands;
     }
 
     /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
@@ -157,23 +244,18 @@ public class NumericVariantStore implements VariantColumnStore {
             row = freeRows.pop();
             clearRowInCowBands(row);
         } else {
-            if (rowCount == rowStride) {
-                growRowStride();
-            }
             row = rowCount++;
+            ensureRow(row);
         }
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
         for (int v = 0; v < flatSize; v++) {
             for (int c = 0; c < nDouble; c++) {
-                dd[doubleIndex(v, c, row)] = doubleDefaults[c];
+                setDenseDouble(v, c, row, doubleDefaults[c]);
             }
             for (int c = 0; c < nInt; c++) {
-                id[intIndex(v, c, row)] = intDefaults[c];
+                setDenseInt(v, c, row, intDefaults[c]);
             }
             for (int c = 0; c < nBoolean; c++) {
-                bd[booleanIndex(v, c, row)] = booleanDefaults[c];
+                setDenseBoolean(v, c, row, booleanDefaults[c]);
             }
         }
         return row;
@@ -186,18 +268,15 @@ public class NumericVariantStore implements VariantColumnStore {
      */
     public int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
         int row = allocateRow();
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
         for (int v = 0; v < flatSize; v++) {
             for (int c = 0; c < nDouble; c++) {
-                dd[doubleIndex(v, c, row)] = doubleInit[c];
+                setDenseDouble(v, c, row, doubleInit[c]);
             }
             for (int c = 0; c < nInt; c++) {
-                id[intIndex(v, c, row)] = intInit[c];
+                setDenseInt(v, c, row, intInit[c]);
             }
             for (int c = 0; c < nBoolean; c++) {
-                bd[booleanIndex(v, c, row)] = booleanInit[c];
+                setDenseBoolean(v, c, row, booleanInit[c]);
             }
         }
         return row;
@@ -210,73 +289,62 @@ public class NumericVariantStore implements VariantColumnStore {
 
     public double getDouble(int variant, int col, int row) {
         if (!cowState.isActive()) {
-            return doubles[doubleIndex(variant, col, row)]; // FAST PATH: no copy-on-write variant exists
+            return denseDouble(variant, col, row); // FAST PATH: no copy-on-write variant exists
         }
         int v = resolve(variant, row);
         CowBand band = bandOf(v);
-        return band == null ? doubles[doubleIndex(v, col, row)] : band.doubles[col * rowStride + row];
+        return band == null ? denseDouble(v, col, row) : band.getDouble(col, row);
     }
 
     public double setDouble(int variant, int col, int row, double value) {
         if (!cowState.isActive()) { // FAST PATH
-            double[] data = doubles;
-            int i = doubleIndex(variant, col, row);
-            double old = data[i];
-            data[i] = value;
+            double old = denseDouble(variant, col, row);
+            setDenseDouble(variant, col, row, value);
             return old;
         }
         freezeInheritors(variant, row);
         if (cowState.isCow(variant)) {
             CowBand band = materializeRow(variant, row);
-            int i = col * rowStride + row;
-            double old = band.doubles[i];
-            band.doubles[i] = value;
+            double old = band.getDouble(col, row);
+            band.setDouble(col, row, value);
             return old;
         }
-        double[] data = doubles;
-        int i = doubleIndex(variant, col, row);
-        double old = data[i];
-        data[i] = value;
+        double old = denseDouble(variant, col, row);
+        setDenseDouble(variant, col, row, value);
         return old;
     }
 
     public int getInt(int variant, int col, int row) {
         if (!cowState.isActive()) {
-            return ints[intIndex(variant, col, row)]; // FAST PATH
+            return denseInt(variant, col, row); // FAST PATH
         }
         int v = resolve(variant, row);
         CowBand band = bandOf(v);
-        return band == null ? ints[intIndex(v, col, row)] : band.ints[col * rowStride + row];
+        return band == null ? denseInt(v, col, row) : band.getInt(col, row);
     }
 
     public int setInt(int variant, int col, int row, int value) {
         if (!cowState.isActive()) { // FAST PATH
-            int[] data = ints;
-            int i = intIndex(variant, col, row);
-            int old = data[i];
-            data[i] = value;
+            int old = denseInt(variant, col, row);
+            setDenseInt(variant, col, row, value);
             return old;
         }
         freezeInheritors(variant, row);
         if (cowState.isCow(variant)) {
             CowBand band = materializeRow(variant, row);
-            int i = col * rowStride + row;
-            int old = band.ints[i];
-            band.ints[i] = value;
+            int old = band.getInt(col, row);
+            band.setInt(col, row, value);
             return old;
         }
-        int[] data = ints;
-        int i = intIndex(variant, col, row);
-        int old = data[i];
-        data[i] = value;
+        int old = denseInt(variant, col, row);
+        setDenseInt(variant, col, row, value);
         return old;
     }
 
     /** Set an int column of a row to the same value in every live variant band. */
     public void fillInt(int col, int row, int value) {
-        int[] data = ints;
         for (int v = 0; v < flatSize; v++) {
-            data[intIndex(v, col, row)] = value;
+            setDenseInt(v, col, row, value);
         }
         if (cowState.isActive()) {
             // every variant gets the value: also the copy-on-write bands that diverged the row (the others
@@ -284,7 +352,7 @@ public class NumericVariantStore implements VariantColumnStore {
             CowBand[] bands = cowBands;
             for (CowBand band : bands) {
                 if (band != null && band.materialized.get(row)) {
-                    band.ints[col * rowStride + row] = value;
+                    band.setInt(col, row, value);
                 }
             }
             cowBands = bands;
@@ -293,15 +361,14 @@ public class NumericVariantStore implements VariantColumnStore {
 
     /** Set a boolean column of a row to the same value in every live variant band. */
     public void fillBoolean(int col, int row, boolean value) {
-        boolean[] data = booleans;
         for (int v = 0; v < flatSize; v++) {
-            data[booleanIndex(v, col, row)] = value;
+            setDenseBoolean(v, col, row, value);
         }
         if (cowState.isActive()) {
             CowBand[] bands = cowBands;
             for (CowBand band : bands) {
                 if (band != null && band.materialized.get(row)) {
-                    band.booleans[col * rowStride + row] = value;
+                    band.setBoolean(col, row, value);
                 }
             }
             cowBands = bands;
@@ -310,33 +377,28 @@ public class NumericVariantStore implements VariantColumnStore {
 
     public boolean getBoolean(int variant, int col, int row) {
         if (!cowState.isActive()) {
-            return booleans[booleanIndex(variant, col, row)]; // FAST PATH
+            return denseBoolean(variant, col, row); // FAST PATH
         }
         int v = resolve(variant, row);
         CowBand band = bandOf(v);
-        return band == null ? booleans[booleanIndex(v, col, row)] : band.booleans[col * rowStride + row];
+        return band == null ? denseBoolean(v, col, row) : band.getBoolean(col, row);
     }
 
     public boolean setBoolean(int variant, int col, int row, boolean value) {
         if (!cowState.isActive()) { // FAST PATH
-            boolean[] data = booleans;
-            int i = booleanIndex(variant, col, row);
-            boolean old = data[i];
-            data[i] = value;
+            boolean old = denseBoolean(variant, col, row);
+            setDenseBoolean(variant, col, row, value);
             return old;
         }
         freezeInheritors(variant, row);
         if (cowState.isCow(variant)) {
             CowBand band = materializeRow(variant, row);
-            int i = col * rowStride + row;
-            boolean old = band.booleans[i];
-            band.booleans[i] = value;
+            boolean old = band.getBoolean(col, row);
+            band.setBoolean(col, row, value);
             return old;
         }
-        boolean[] data = booleans;
-        int i = booleanIndex(variant, col, row);
-        boolean old = data[i];
-        data[i] = value;
+        boolean old = denseBoolean(variant, col, row);
+        setDenseBoolean(variant, col, row, value);
         return old;
     }
 
@@ -385,23 +447,23 @@ public class NumericVariantStore implements VariantColumnStore {
         CowBand srcBand = bandOf(src);
         if (srcBand == null) {
             for (int c = 0; c < nDouble; c++) {
-                band.doubles[c * rowStride + row] = doubles[doubleIndex(src, c, row)];
+                band.setDouble(c, row, denseDouble(src, c, row));
             }
             for (int c = 0; c < nInt; c++) {
-                band.ints[c * rowStride + row] = ints[intIndex(src, c, row)];
+                band.setInt(c, row, denseInt(src, c, row));
             }
             for (int c = 0; c < nBoolean; c++) {
-                band.booleans[c * rowStride + row] = booleans[booleanIndex(src, c, row)];
+                band.setBoolean(c, row, denseBoolean(src, c, row));
             }
         } else {
             for (int c = 0; c < nDouble; c++) {
-                band.doubles[c * rowStride + row] = srcBand.doubles[c * rowStride + row];
+                band.setDouble(c, row, srcBand.getDouble(c, row));
             }
             for (int c = 0; c < nInt; c++) {
-                band.ints[c * rowStride + row] = srcBand.ints[c * rowStride + row];
+                band.setInt(c, row, srcBand.getInt(c, row));
             }
             for (int c = 0; c < nBoolean; c++) {
-                band.booleans[c * rowStride + row] = srcBand.booleans[c * rowStride + row];
+                band.setBoolean(c, row, srcBand.getBoolean(c, row));
             }
         }
     }
@@ -414,7 +476,10 @@ public class NumericVariantStore implements VariantColumnStore {
         }
         CowBand band = bands[variant];
         if (band == null) {
-            band = new CowBand(rowStride, nDouble, nInt, nBoolean);
+            band = new CowBand(nDouble, nInt, nBoolean);
+            for (int row = 0; row < rowCount; row++) {
+                band.ensureRow(row);
+            }
             bands[variant] = band;
             cowBands = bands;
         }
@@ -511,31 +576,28 @@ public class NumericVariantStore implements VariantColumnStore {
 
     // Copy the resolved band of a copy-on-write source, row by row, into a flat destination band.
     private void copyResolvedBandToFlat(int sourceIndex, int dst) {
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
         for (int row = 0; row < rowCount; row++) {
             int src = resolve(sourceIndex, row);
             CowBand srcBand = bandOf(src);
             if (srcBand == null) {
                 for (int c = 0; c < nDouble; c++) {
-                    dd[doubleIndex(dst, c, row)] = dd[doubleIndex(src, c, row)];
+                    setDenseDouble(dst, c, row, denseDouble(src, c, row));
                 }
                 for (int c = 0; c < nInt; c++) {
-                    id[intIndex(dst, c, row)] = id[intIndex(src, c, row)];
+                    setDenseInt(dst, c, row, denseInt(src, c, row));
                 }
                 for (int c = 0; c < nBoolean; c++) {
-                    bd[booleanIndex(dst, c, row)] = bd[booleanIndex(src, c, row)];
+                    setDenseBoolean(dst, c, row, denseBoolean(src, c, row));
                 }
             } else {
                 for (int c = 0; c < nDouble; c++) {
-                    dd[doubleIndex(dst, c, row)] = srcBand.doubles[c * rowStride + row];
+                    setDenseDouble(dst, c, row, srcBand.getDouble(c, row));
                 }
                 for (int c = 0; c < nInt; c++) {
-                    id[intIndex(dst, c, row)] = srcBand.ints[c * rowStride + row];
+                    setDenseInt(dst, c, row, srcBand.getInt(c, row));
                 }
                 for (int c = 0; c < nBoolean; c++) {
-                    bd[booleanIndex(dst, c, row)] = srcBand.booleans[c * rowStride + row];
+                    setDenseBoolean(dst, c, row, srcBand.getBoolean(c, row));
                 }
             }
         }
@@ -550,47 +612,24 @@ public class NumericVariantStore implements VariantColumnStore {
     }
 
     // Move each live variant band (flat and copy-on-write) to a wider row stride.
-    private void growRowStride() {
-        int newStride = rowStride * 2;
-        double[] nd = new double[variantCapacity * nDouble * newStride];
-        int[] ni = new int[variantCapacity * nInt * newStride];
-        boolean[] nb = new boolean[variantCapacity * nBoolean * newStride];
-        for (int v = 0; v < flatSize; v++) {
-            for (int c = 0; c < nDouble; c++) {
-                System.arraycopy(doubles, (v * nDouble + c) * rowStride, nd, (v * nDouble + c) * newStride, rowCount);
-            }
-            for (int c = 0; c < nInt; c++) {
-                System.arraycopy(ints, (v * nInt + c) * rowStride, ni, (v * nInt + c) * newStride, rowCount);
-            }
-            for (int c = 0; c < nBoolean; c++) {
-                System.arraycopy(booleans, (v * nBoolean + c) * rowStride, nb, (v * nBoolean + c) * newStride, rowCount);
-            }
-        }
-        doubles = nd;
-        ints = ni;
-        booleans = nb;
-        CowBand[] bands = cowBands;
-        boolean changed = false;
-        for (int v = 0; v < bands.length; v++) {
-            if (bands[v] != null) {
-                bands[v] = new CowBand(bands[v], rowStride, newStride, nDouble, nInt, nBoolean, rowCount);
-                changed = true;
-            }
-        }
-        if (changed) {
-            cowBands = bands;
-        }
-        rowStride = newStride;
-    }
 
     private void ensureVariantCapacity(int required) {
         if (required <= variantCapacity) {
             return;
         }
         int newCapacity = Math.max(required, variantCapacity * 2);
-        doubles = Arrays.copyOf(doubles, newCapacity * nDouble * rowStride);
-        ints = Arrays.copyOf(ints, newCapacity * nInt * rowStride);
-        booleans = Arrays.copyOf(booleans, newCapacity * nBoolean * rowStride);
+        double[][][] dd = Arrays.copyOf(doubles, newCapacity);
+        int[][][] id = Arrays.copyOf(ints, newCapacity);
+        boolean[][][] bd = Arrays.copyOf(booleans, newCapacity);
+        int needed = rowCount == 0 ? 0 : ((rowCount - 1) >>> SHIFT) + 1;
+        for (int v = variantCapacity; v < newCapacity; v++) {
+            dd[v] = growChunks(new double[0][], needed, nDouble);
+            id[v] = growIntChunks(new int[0][], needed, nInt);
+            bd[v] = growBoolChunks(new boolean[0][], needed, nBoolean);
+        }
+        doubles = dd;
+        ints = id;
+        booleans = bd;
         variantCapacity = newCapacity;
     }
 }
