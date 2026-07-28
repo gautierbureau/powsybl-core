@@ -29,13 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for concurrent, on-demand {@code STRUCTURAL} variant creation into pre-allocated capacity — the
- * full-#721 scope (B1) on top of the copy-on-write engine. {@link VariantManager#preAllocateVariants(int)}
- * reserves the {@code cowBands} table (and the eager per-variant state) up front so that a later structural
- * clone into a reserved slot, and the copy-on-write bookkeeping it records, never resize anything on a
- * worker thread; workers then fork one structural variant each from the shared (unwritten) base.
+ * Tests for concurrent, on-demand variant creation into pre-allocated capacity — the full-#721 scope on top
+ * of the copy-on-write engine. {@link VariantManager#preAllocateVariants(int)} reserves the {@code cowBands}
+ * table (and the eager per-variant state) up front so that a later clone into a reserved slot, and the
+ * copy-on-write bookkeeping it records, never resize anything on a worker thread; workers then fork one
+ * variant each from the shared (unwritten) base.
  *
- * @author Claude Code
+ * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
 class VariantPreAllocationStructuralCloneTest {
 
@@ -75,20 +75,20 @@ class VariantPreAllocationStructuralCloneTest {
     }
 
     @Test
-    void concurrentStructuralCloneMustForkFromNonStructuralBase() {
+    void aConcurrentCloneMustForkFromTheBaseVariant() {
         Network network = EurostagTutorialExample1Factory.create();
         VariantManager vm = network.getVariantManager();
         vm.preAllocateVariants(4);
 
-        // single-thread nested structural forks are allowed (chains are fine off the parallel region)
+        // single-thread nested forks are allowed (chains are fine off the parallel region)
         vm.cloneVariant(INITIAL, "s1");
         vm.cloneVariant("s1", "s2");
 
-        // once multi-thread access is enabled, forking from a structural variant is rejected fail-fast...
+        // once multi-thread access is enabled, forking from another clone is rejected fail-fast...
         vm.allowVariantMultiThreadAccess(true);
         PowsyblException e = assertThrows(PowsyblException.class,
             () -> vm.cloneVariant("s1", "s3"));
-        assertTrue(e.getMessage().contains("must fork from a non-structural"));
+        assertTrue(e.getMessage().contains("must fork from the base variant"), e::getMessage);
 
         // ...the rejected clone left no partial state, and forking from the base is still fine
         assertTrue(vm.getVariantIds().contains("s1"));
@@ -97,36 +97,63 @@ class VariantPreAllocationStructuralCloneTest {
         assertTrue(vm.getVariantIds().contains("s4"));
     }
 
+    /**
+     * Enabling multi-thread access and cloning is not by itself a parallel region: preparing the variants on
+     * the main thread before handing them to workers is the long-standing way callers set this up, and it
+     * writes the base with no other thread in sight. The guard must wait for a second thread to appear.
+     */
     @Test
-    void writingTheSharedBaseDuringTheParallelRegionIsRejected() {
+    void writingTheSharedBaseBeforeAnyWorkerAppearsIsAllowed() {
         Network network = EurostagTutorialExample1Factory.create();
         Generator gen = network.getGenerator("GEN");
-        double baseTargetP = gen.getTargetP();
         VariantManager vm = network.getVariantManager();
 
         vm.preAllocateVariants(2);
         vm.allowVariantMultiThreadAccess(true);
+        vm.cloneVariant(INITIAL, "w"); // the base is now a fork source...
 
-        // writing the base is still fine before it becomes a fork source
-        gen.setTargetP(baseTargetP + 1);
+        double forkedTargetP = gen.getTargetP();
+        vm.setWorkingVariant(INITIAL); // ...but this thread is still the only one here
+        gen.setTargetP(400.0);
+        assertEquals(400.0, gen.getTargetP(), 0.0);
 
-        // forking a structural variant off the base freezes the base for the parallel region
+        // and the write froze the pre-write value into the clone, which keeps the snapshot it forked with —
+        // that push-down is precisely what makes the same write unsafe once a worker owns the clone
+        vm.setWorkingVariant("w");
+        assertEquals(forkedTargetP, gen.getTargetP(), 0.0);
+    }
+
+    @Test
+    void writingTheSharedBaseWhileWorkersHoldForksIsRejected() throws Exception {
+        Network network = EurostagTutorialExample1Factory.create();
+        Generator gen = network.getGenerator("GEN");
+        VariantManager vm = network.getVariantManager();
+
+        vm.preAllocateVariants(2);
+        vm.allowVariantMultiThreadAccess(true);
         vm.cloneVariant(INITIAL, "w");
 
-        // writing the worker's own leaf is fine
-        vm.setWorkingVariant("w");
-        gen.setTargetP(123.0);
-        assertEquals(123.0, gen.getTargetP(), 0.0);
+        // a worker binds its own fork and keeps it: the network is genuinely shared from here on
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        pool.submit(() -> {
+            vm.setWorkingVariant("w");
+            gen.setTargetP(123.0);
+        }).get();
 
-        // writing the shared base while the region is active is rejected fail-fast
+        // writing the shared base now would push its value down into that worker's fork, racing it
         vm.setWorkingVariant(INITIAL);
         PowsyblException e = assertThrows(PowsyblException.class, () -> gen.setTargetP(500.0));
-        assertTrue(e.getMessage().contains("must not be written while multi-thread access is enabled"));
+        assertTrue(e.getMessage().contains("must not be written while they do"), e::getMessage);
 
         // once the region ends, the base is writable again
+        pool.shutdown();
+        assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
         vm.allowVariantMultiThreadAccess(false);
         gen.setTargetP(500.0);
         assertEquals(500.0, gen.getTargetP(), 0.0);
+
+        vm.setWorkingVariant("w");
+        assertEquals(123.0, gen.getTargetP(), 0.0); // the worker's divergence survived
     }
 
     @Test

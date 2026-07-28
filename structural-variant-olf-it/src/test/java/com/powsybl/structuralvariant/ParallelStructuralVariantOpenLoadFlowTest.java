@@ -13,7 +13,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.network.VoltageLevel;
 import com.powsybl.loadflow.LoadFlow;
@@ -101,7 +100,7 @@ class ParallelStructuralVariantOpenLoadFlowTest {
 
         // --- main thread: fork the structural variants and apply their expansions (structural ops) ---
         for (int k = 0; k < VARIANTS; k++) {
-            vm.cloneVariant(INITIAL, "v" + k, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(INITIAL, "v" + k);
             vm.setWorkingVariant("v" + k);
             applyExpansion(n, k);
         }

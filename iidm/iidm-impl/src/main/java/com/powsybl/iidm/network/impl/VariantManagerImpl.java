@@ -64,6 +64,9 @@ public class VariantManagerImpl implements VariantManager {
         this.network = network;
         this.variantContext = new MultiVariantContext(INITIAL_VARIANT_INDEX);
         this.networkIndex = network.getIndex();
+        // read through the field, not a captured value: the context is replaced when multi-thread access is
+        // toggled, and the write guard must follow the current one
+        cowState.setSharedAcrossThreadsProbe(() -> variantContext.isSharedAcrossThreads());
         // the network has always a zero index initial variant
         id2index.put(VariantManagerConstants.INITIAL_VARIANT_ID, INITIAL_VARIANT_INDEX);
         variantArraySize = INITIAL_VARIANT_INDEX + 1;

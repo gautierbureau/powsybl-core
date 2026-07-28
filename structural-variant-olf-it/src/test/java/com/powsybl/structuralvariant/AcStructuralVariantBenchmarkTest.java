@@ -13,7 +13,6 @@ import com.powsybl.iidm.network.Bus;
 import com.powsybl.iidm.network.Line;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.serde.NetworkSerDe;
 import com.powsybl.loadflow.LoadFlow;
@@ -191,7 +190,7 @@ class AcStructuralVariantBenchmarkTest {
 
         long t0 = System.nanoTime();
         for (int k = 0; k < K; k++) {
-            vm.cloneVariant(INITIAL, "v" + k, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(INITIAL, "v" + k);
             vm.setWorkingVariant("v" + k);
             applyExpansion(n, k, expansions.get(k));
         }

@@ -10,6 +10,7 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.PowsyblException;
 
 import java.util.Arrays;
+import java.util.function.BooleanSupplier;
 
 /**
  * Shared bookkeeping for the columnar copy-on-write variant storage: the clone parentage (each variant
@@ -69,12 +70,17 @@ final class VariantCowState {
 
     private static final int[] NO_FROZEN = {};
 
-    // Variant indexes that are frozen concurrent structural-clone bases: a variant becomes frozen when a
-    // STRUCTURAL variant is forked from it while multi-thread access is enabled, and must not be written for
-    // the duration of that parallel region (writing it would freeze state into every worker variant that
+    // Variant indexes that are frozen concurrent-clone bases: a variant becomes frozen when a variant is
+    // forked from it while multi-thread access is enabled, and must not be written once the network is
+    // genuinely shared between threads (writing it would freeze state into every worker variant that
     // inherits from it, racing their own writes). Published through one volatile reference; readers on the
     // write hot path take a single volatile read that short-circuits on the empty (common) case.
     private volatile int[] frozenBases = NO_FROZEN;
+
+    // Whether the network is actually being touched by more than one thread (see
+    // VariantContext#isSharedAcrossThreads). Enabling multi-thread access only declares the intent; the
+    // freeze-on-write race needs a second thread to exist, so the write guard below waits for the fact.
+    private volatile BooleanSupplier sharedAcrossThreads = () -> false;
 
     /** True while at least one copy-on-write variant exists; stores bypass all of this while false. */
     boolean isActive() {
@@ -147,7 +153,12 @@ final class VariantCowState {
         state = build(cow, parent);
     }
 
-    /** Whether {@code variant} is a frozen concurrent structural-clone base (must not be written). */
+    /** Wire the probe telling whether more than one thread is actually accessing the network. */
+    void setSharedAcrossThreadsProbe(BooleanSupplier probe) {
+        this.sharedAcrossThreads = probe;
+    }
+
+    /** Whether {@code variant} has been recorded as a concurrent-clone base. */
     boolean isFrozenBase(int variant) {
         int[] fb = frozenBases;
         for (int b : fb) {
@@ -180,16 +191,22 @@ final class VariantCowState {
     }
 
     /**
-     * Throw if {@code variant} is a frozen concurrent structural-clone base. Called on the columnar write path
-     * so an unsafe write to the shared base of concurrent structural clones fails fast instead of racing the
-     * worker variants that inherit from it.
+     * Throw if {@code variant} is the shared base of clones that other threads are working on. Called on the
+     * columnar write path so an unsafe write fails fast instead of racing the variants that inherit from it:
+     * writing a base pushes its current value down into every copy-on-write child that has not diverged yet,
+     * and that push-down races a worker writing the same child.
+     *
+     * <p>Both conditions are needed. Being a fork source is not enough — the long-standing pattern of
+     * enabling multi-thread access, cloning, and preparing the variants on the main thread before handing
+     * them to workers writes the base with no other thread in sight, and stays legal. It is the second thread
+     * binding a working variant that makes the push-down unsafe.</p>
      */
     void checkWritable(int variant) {
-        if (isFrozenBase(variant)) {
-            throw new PowsyblException("Variant index " + variant + " is the shared base of concurrent "
-                    + "structural clones and must not be written while multi-thread access is enabled: writing "
-                    + "it would freeze state into the worker variants that fork from it, racing their own "
-                    + "writes. Write only the per-worker structural variants during the parallel region.");
+        if (isFrozenBase(variant) && sharedAcrossThreads.getAsBoolean()) {
+            throw new PowsyblException("Variant index " + variant + " is the shared base of variants that "
+                    + "other threads are working on, and must not be written while they do: writing it would "
+                    + "freeze state into the variants that fork from it, racing their own writes. Write only "
+                    + "the per-worker variants during the parallel region.");
         }
     }
 

@@ -21,4 +21,13 @@ interface VariantContext {
 
     boolean isIndexSet();
 
+    /**
+     * Whether more than one thread has bound a working variant on this context, i.e. whether the network is
+     * actually being accessed concurrently rather than merely allowed to be. Enabling multi-thread access is
+     * a declaration of intent; this reports the fact. Always {@code false} for a single-threaded context.
+     */
+    default boolean isSharedAcrossThreads() {
+        return false;
+    }
+
 }
