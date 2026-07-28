@@ -12,10 +12,10 @@ import com.powsybl.iidm.network.Identifiable;
 
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * <p><b>Variant-scoped existence.</b></p>
@@ -50,15 +50,19 @@ final class VariantScopedExistence implements MultiVariantObject {
     private final VariantManagerHolder holder;
     // Per variant, the objects it diverges from its parent: present (shown) / absent (hidden). A variant with
     // no entry for an object inherits it through the parentage (or, at a dense variant, the base default).
-    private final Map<Integer, Set<Identifiable<?>>> presentByVariant = new HashMap<>();
-    private final Map<Integer, Set<Identifiable<?>>> absentByVariant = new HashMap<>();
-    // Objects added in a structural variant — their base default is "does not exist" (visible only where an
-    // ancestor makes them present); every other object is a base object, visible unless made absent.
-    private final Set<Identifiable<?>> everAdded = identitySet();
-    // Every object that has any explicit entry anywhere — for eager materialisation and cleanup.
-    private final Set<Identifiable<?>> everScoped = identitySet();
+    //
+    // Thread-safety: a variant is edited by at most one thread (the multi-thread contract is one thread per
+    // variant), so the per-variant sets are thread-confined and stay plain. The maps keyed by variant, and
+    // the sets spanning every variant below, are shared between those threads and are concurrent.
+    private final Map<Integer, Set<Identifiable<?>>> presentByVariant = new ConcurrentHashMap<>();
+    private final Map<Integer, Set<Identifiable<?>>> absentByVariant = new ConcurrentHashMap<>();
+    // Objects added in a variant — their base default is "does not exist" (visible only where an ancestor
+    // makes them present); every other object is a base object, visible unless made absent.
+    private final Set<Identifiable<?>> everAdded = concurrentIdentitySet();
+    // Every object that has any explicit entry anywhere — for cleanup and the anyScoped gate.
+    private final Set<Identifiable<?>> everScoped = concurrentIdentitySet();
     private int variantArraySize;
-    private boolean anyScoped;
+    private volatile boolean anyScoped;
 
     VariantScopedExistence(VariantManagerHolder holder, int variantArraySize) {
         this.holder = holder;
@@ -67,6 +71,11 @@ final class VariantScopedExistence implements MultiVariantObject {
 
     private static Set<Identifiable<?>> identitySet() {
         return Collections.newSetFromMap(new IdentityHashMap<>());
+    }
+
+    // Identifiables do not override equals/hashCode, so a plain concurrent set already compares by identity.
+    private static Set<Identifiable<?>> concurrentIdentitySet() {
+        return ConcurrentHashMap.newKeySet();
     }
 
     private Set<Identifiable<?>> present(int variant) {
@@ -83,18 +92,22 @@ final class VariantScopedExistence implements MultiVariantObject {
     }
 
     /**
-     * Structural edits mutate state shared by every variant (the network index, and these per-variant
-     * deltas), so unlike variant-dependent attributes they cannot be made from several threads at once.
-     * Doing it anyway used to corrupt the index or throw {@link java.util.ConcurrentModificationException}
-     * from an unrelated read; fail fast with an actionable message instead. Reads and writes of
-     * variant-dependent attributes stay concurrent, which is what {@code allowVariantMultiThreadAccess}
-     * has always covered.
+     * Creating an object, or deleting one network-wide, mutates state shared by every variant — the network
+     * index and the columnar row storage, which has to grow — so it cannot yet be done from several threads
+     * at once. Diverging a variant structurally (removing equipment in it, or reconnecting it) is recorded
+     * in this per-variant delta and <em>is</em> supported concurrently, one thread per variant, as is every
+     * read and write of a variant-dependent attribute.
+     *
+     * <p>Doing the unsupported thing anyway used to corrupt the index or throw
+     * {@link java.util.ConcurrentModificationException} from an unrelated read; fail fast with an actionable
+     * message instead.</p>
      */
     void checkStructuralEditAllowed(String id) {
         if (holder.getVariantManager().isVariantMultiThreadAccessAllowed()) {
-            throw new PowsyblException("Adding or removing '" + id + "' is not allowed while multi-thread "
-                    + "variant access is enabled: structure is shared by all variants and can only be "
-                    + "changed from the main thread. Disable multi-thread access first.");
+            throw new PowsyblException("Creating or deleting '" + id + "' is not allowed while multi-thread "
+                    + "variant access is enabled: it changes the network index and the row storage shared by "
+                    + "every variant. Removing equipment inside a variant is supported concurrently; creating "
+                    + "it is not. Disable multi-thread access first.");
         }
     }
 

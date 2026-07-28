@@ -106,8 +106,9 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
 
     // When true, this voltage level has a variant-scoped terminal membership delta,
     // so enumeration folds in the active variant's attached/detached terminals. Default false -> the
-    // common path is exactly getTerminals().
-    private boolean branchAttachmentHint = false;
+    // common path is exactly getTerminals(). Volatile: set by whichever thread diverges a variant, read by
+    // every terminal enumeration, and it only ever goes false -> true.
+    private volatile boolean branchAttachmentHint = false;
 
     void setBranchAttachmentHint(boolean branchAttachmentHint) {
         this.branchAttachmentHint = branchAttachmentHint;
