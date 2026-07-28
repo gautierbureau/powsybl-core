@@ -146,6 +146,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
+        // identifiables may be created/removed from worker threads only while multi-thread variant access is
+        // on; the index keeps its per-class sets copy-on-write for exactly that window
+        index.setConcurrentWritesProbe(variantManager::isVariantMultiThreadAccessAllowed);
         terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
         switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
         variantColumnStores.add(terminalVariantStore);
