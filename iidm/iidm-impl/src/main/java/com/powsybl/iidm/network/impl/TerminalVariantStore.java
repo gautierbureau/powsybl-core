@@ -19,7 +19,7 @@ import java.util.Deque;
  * <p>Instead of each terminal owning its own {@code TDoubleArrayList} indexed by variant
  * (array-of-structures), all terminals share two
  * network-level, <em>variant-major</em>, <em>flat</em> arrays: the {@code p} of terminal {@code row} in
- * variant {@code v} is {@code p[v * rowStride + row]}. A variant clone is then a couple of
+ * variant {@code v} is {@code p[v][row >>> SHIFT][row & MASK]}. A variant clone is then a couple of
  * {@link System#arraycopy} calls over contiguous bands <em>within the existing array</em> — no per-clone
  * allocation — instead of one method call per terminal. A flat pre-grown array (not {@code double[][]})
  * is essential: allocating a fresh band per clone reintroduces the very garbage the layout is meant to
@@ -56,13 +56,15 @@ import java.util.Deque;
  */
 class TerminalVariantStore implements VariantColumnStore {
 
-    private static final int DEFAULT_ROW_CAPACITY = 16;
+    // Rows live in fixed-size chunks: value(variant v, row r) = p[v][r >>> SHIFT][r & MASK]. Growing either
+    // axis appends to a directory of references and never moves a chunk, so a reader holding one is never
+    // invalidated -- see SwitchVariantStore for the rationale and the measurement.
+    private static final int CHUNK = 128;
+    private static final int SHIFT = Integer.numberOfTrailingZeros(CHUNK);
+    private static final int MASK = CHUNK - 1;
 
-    // flat variant-major layout: value(variant v, row r) = data[v * rowStride + r]
-    private volatile double[] p;
-    private volatile double[] q;
-
-    private int rowStride;      // capacity (in rows) of each variant band
+    private volatile double[][][] p;
+    private volatile double[][][] q;
     private int rowCount;       // high-water mark of allocated rows
     private int variantSize;    // number of live variant indexes (dense + copy-on-write)
     private int flatSize;       // high-water variant index (+1) physically held by the flat arrays
@@ -81,36 +83,64 @@ class TerminalVariantStore implements VariantColumnStore {
     // The diverged rows of one copy-on-write variant: values are only read for rows whose materialized bit
     // is set, and the BitSet is pre-sized to the row stride so setting a bit never reallocates its words.
     private static final class CowBand {
-        final BitSet materialized;
-        final double[] p;
-        final double[] q;
+        final BitSet materialized = new BitSet();
+        volatile double[][] p = new double[0][];
+        volatile double[][] q = new double[0][];
 
-        CowBand(int rowStride) {
-            this.materialized = new BitSet(rowStride);
-            this.p = new double[rowStride];
-            this.q = new double[rowStride];
+        double p(int row) {
+            return p[row >>> SHIFT][row & MASK];
         }
 
-        CowBand(CowBand from, int newStride, int rowCount) {
-            this.materialized = new BitSet(newStride);
-            this.materialized.or(from.materialized);
-            this.p = Arrays.copyOf(from.p, newStride);
-            this.q = Arrays.copyOf(from.q, newStride);
+        double q(int row) {
+            return q[row >>> SHIFT][row & MASK];
         }
+
+        void setP(int row, double value) {
+            p[row >>> SHIFT][row & MASK] = value;
+        }
+
+        void setQ(int row, double value) {
+            q[row >>> SHIFT][row & MASK] = value;
+        }
+
+        void ensureRow(int row) {
+            p = growChunks(p, row);
+            q = growChunks(q, row);
+        }
+    }
+
+    /** Append NaN-filled chunks until {@code row} is addressable; existing chunks are never moved. */
+    private static double[][] growChunks(double[][] chunks, int row) {
+        int needed = (row >>> SHIFT) + 1;
+        if (chunks.length >= needed) {
+            return chunks;
+        }
+        double[][] grown = Arrays.copyOf(chunks, needed);
+        for (int c = chunks.length; c < needed; c++) {
+            grown[c] = newData(CHUNK);
+        }
+        return grown;
     }
 
     TerminalVariantStore(int variantArraySize, VariantCowState cowState) {
         this.cowState = cowState;
-        this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
         this.flatSize = variantArraySize;
         this.variantCapacity = Math.max(variantArraySize, 1);
-        this.p = newData(variantCapacity * rowStride);
-        this.q = newData(variantCapacity * rowStride);
+        this.p = newBands(variantCapacity);
+        this.q = newBands(variantCapacity);
         // Pre-size the copy-on-write band table to the current variant count so it is never grown on a worker
         // thread (see NumericVariantStore for the full rationale).
         this.cowBands = new CowBand[variantSize];
+    }
+
+    private static double[][][] newBands(int variants) {
+        double[][][] bands = new double[variants][][];
+        for (int v = 0; v < variants; v++) {
+            bands[v] = new double[0][];
+        }
+        return bands;
     }
 
     private static double[] newData(int length) {
@@ -129,9 +159,7 @@ class TerminalVariantStore implements VariantColumnStore {
             resetRow(row);
             return row;
         }
-        if (rowCount == rowStride) {
-            growRowStride();
-        }
+        ensureRow(rowCount);
         return rowCount++;
     }
 
@@ -145,11 +173,11 @@ class TerminalVariantStore implements VariantColumnStore {
     // Reset a (reused) row to NaN in every live dense band, and un-materialise it in every copy-on-write
     // band (it then resolves to the dense NaN through the parentage).
     private void resetRow(int row) {
-        double[] pd = p;
-        double[] qd = q;
+        double[][][] pd = p;
+        double[][][] qd = q;
         for (int v = 0; v < flatSize; v++) {
-            pd[v * rowStride + row] = Double.NaN;
-            qd[v * rowStride + row] = Double.NaN;
+            pd[v][row >>> SHIFT][row & MASK] = Double.NaN;
+            qd[v][row >>> SHIFT][row & MASK] = Double.NaN;
         }
         CowBand[] bands = cowBands;
         for (CowBand band : bands) {
@@ -166,36 +194,28 @@ class TerminalVariantStore implements VariantColumnStore {
      */
     int importRow(double pValue, double qValue) {
         int row = allocateRow();
-        p[row] = pValue; // variant 0 (the only variant in a merge/detach)
-        q[row] = qValue;
+        p[0][row >>> SHIFT][row & MASK] = pValue; // variant 0 (the only variant in a merge/detach)
+        q[0][row >>> SHIFT][row & MASK] = qValue;
         return row;
     }
 
-    private void growRowStride() {
-        int newStride = rowStride * 2;
-        p = restride(p, newStride);
-        q = restride(q, newStride);
+    /** Make {@code row} addressable in every dense band and every copy-on-write band. */
+    private void ensureRow(int row) {
+        double[][][] pd = p;
+        double[][][] qd = q;
+        for (int v = 0; v < pd.length; v++) {
+            pd[v] = growChunks(pd[v], row);
+            qd[v] = growChunks(qd[v], row);
+        }
+        p = pd;
+        q = qd;
         CowBand[] bands = cowBands;
-        boolean changed = false;
-        for (int v = 0; v < bands.length; v++) {
-            if (bands[v] != null) {
-                bands[v] = new CowBand(bands[v], newStride, rowCount);
-                changed = true;
+        for (CowBand band : bands) {
+            if (band != null) {
+                band.ensureRow(row);
             }
         }
-        if (changed) {
-            cowBands = bands;
-        }
-        rowStride = newStride;
-    }
-
-    // Move each flat variant band to its new, wider offset; new cells default to NaN.
-    private double[] restride(double[] data, int newStride) {
-        double[] out = newData(variantCapacity * newStride);
-        for (int v = 0; v < flatSize; v++) {
-            System.arraycopy(data, v * rowStride, out, v * newStride, rowCount);
-        }
-        return out;
+        cowBands = bands;
     }
 
     private void ensureVariantCapacity(int required) {
@@ -203,80 +223,78 @@ class TerminalVariantStore implements VariantColumnStore {
             return;
         }
         int newCapacity = Math.max(required, variantCapacity * 2);
-        int oldLength = variantCapacity * rowStride;
-        int newLength = newCapacity * rowStride;
-        // NaN-fill the grown region so a row that is only populated later (a terminal added after a clone)
-        // reads NaN, not the 0.0 that Arrays.copyOf would leave.
-        p = growNaN(p, oldLength, newLength);
-        q = growNaN(q, oldLength, newLength);
+        double[][][] pd = Arrays.copyOf(p, newCapacity);
+        double[][][] qd = Arrays.copyOf(q, newCapacity);
+        // new bands start empty and are grown to the current row count; chunks are NaN-filled, so a row only
+        // populated later (a terminal added after a clone) reads NaN rather than 0.0
+        for (int v = variantCapacity; v < newCapacity; v++) {
+            pd[v] = new double[0][];
+            qd[v] = new double[0][];
+            for (int row = 0; row < rowCount; row++) {
+                pd[v] = growChunks(pd[v], row);
+                qd[v] = growChunks(qd[v], row);
+            }
+        }
+        p = pd;
+        q = qd;
         variantCapacity = newCapacity;
-    }
-
-    private static double[] growNaN(double[] data, int oldLength, int newLength) {
-        double[] out = Arrays.copyOf(data, newLength);
-        Arrays.fill(out, oldLength, newLength, Double.NaN);
-        return out;
     }
 
     double getP(int variantIndex, int row) {
         if (!cowState.isActive()) {
-            return p[variantIndex * rowStride + row]; // FAST PATH: no copy-on-write variant exists
+            return p[variantIndex][row >>> SHIFT][row & MASK]; // FAST PATH: no copy-on-write variant exists
         }
         int v = resolve(variantIndex, row);
         CowBand band = bandOf(v);
-        return band == null ? p[v * rowStride + row] : band.p[row];
+        return band == null ? p[v][row >>> SHIFT][row & MASK] : band.p(row);
     }
 
     double setP(int variantIndex, int row, double value) {
         if (!cowState.isActive()) { // FAST PATH
-            double[] data = p;
-            int i = variantIndex * rowStride + row;
-            double old = data[i];
-            data[i] = value;
+            double[] chunk = p[variantIndex][row >>> SHIFT];
+            double old = chunk[row & MASK];
+            chunk[row & MASK] = value;
             return old;
         }
         freezeInheritors(variantIndex, row);
         if (cowState.isCow(variantIndex)) {
             CowBand band = materializeRow(variantIndex, row);
-            double old = band.p[row];
-            band.p[row] = value;
+            double old = band.p(row);
+            band.setP(row, value);
             return old;
         }
-        double[] data = p;
-        int i = variantIndex * rowStride + row;
-        double old = data[i];
-        data[i] = value;
+        double[] chunk = p[variantIndex][row >>> SHIFT];
+        double old = chunk[row & MASK];
+        chunk[row & MASK] = value;
         return old;
     }
 
     double getQ(int variantIndex, int row) {
         if (!cowState.isActive()) {
-            return q[variantIndex * rowStride + row]; // FAST PATH
+            return q[variantIndex][row >>> SHIFT][row & MASK]; // FAST PATH
         }
         int v = resolve(variantIndex, row);
         CowBand band = bandOf(v);
-        return band == null ? q[v * rowStride + row] : band.q[row];
+        return band == null ? q[v][row >>> SHIFT][row & MASK] : band.q(row);
     }
 
     double setQ(int variantIndex, int row, double value) {
         if (!cowState.isActive()) { // FAST PATH
-            double[] data = q;
-            int i = variantIndex * rowStride + row;
-            double old = data[i];
-            data[i] = value;
+            double[] chunk = q[variantIndex][row >>> SHIFT];
+            double old = chunk[row & MASK];
+            chunk[row & MASK] = value;
             return old;
         }
         freezeInheritors(variantIndex, row);
         if (cowState.isCow(variantIndex)) {
             CowBand band = materializeRow(variantIndex, row);
-            double old = band.q[row];
-            band.q[row] = value;
+            double old = band.q(row);
+            band.setQ(row, value);
             return old;
         }
-        double[] data = q;
-        int i = variantIndex * rowStride + row;
-        double old = data[i];
-        data[i] = value;
+        double[] chunk = q[variantIndex][row >>> SHIFT];
+        double old = chunk[row & MASK];
+        chunk[row & MASK] = value;
         return old;
     }
 
@@ -322,11 +340,11 @@ class TerminalVariantStore implements VariantColumnStore {
             int src = resolve(cowState.getParent(variantIndex), row);
             CowBand srcBand = bandOf(src);
             if (srcBand == null) {
-                band.p[row] = p[src * rowStride + row];
-                band.q[row] = q[src * rowStride + row];
+                band.setP(row, p[src][row >>> SHIFT][row & MASK]);
+                band.setQ(row, q[src][row >>> SHIFT][row & MASK]);
             } else {
-                band.p[row] = srcBand.p[row];
-                band.q[row] = srcBand.q[row];
+                band.setP(row, srcBand.p(row));
+                band.setQ(row, srcBand.q(row));
             }
             band.materialized.set(row);
             publishCowBands();
@@ -342,7 +360,10 @@ class TerminalVariantStore implements VariantColumnStore {
         }
         CowBand band = bands[variantIndex];
         if (band == null) {
-            band = new CowBand(rowStride);
+            band = new CowBand();
+            for (int row = 0; row < rowCount; row++) {
+                band.ensureRow(row);
+            }
             bands[variantIndex] = band;
             cowBands = bands;
         }
@@ -425,28 +446,13 @@ class TerminalVariantStore implements VariantColumnStore {
                 if (!band.materialized.get(row)) {
                     int src = resolve(cowState.getParent(child), row);
                     CowBand srcBand = bandOf(src);
-                    band.p[row] = srcBand == null ? p[src * rowStride + row] : srcBand.p[row];
-                    band.q[row] = srcBand == null ? q[src * rowStride + row] : srcBand.q[row];
+                    band.setP(row, srcBand == null ? p[src][row >>> SHIFT][row & MASK] : srcBand.p(row));
+                    band.setQ(row, srcBand == null ? q[src][row >>> SHIFT][row & MASK] : srcBand.q(row));
                     band.materialized.set(row);
                 }
             }
         }
         publishCowBands();
-    }
-
-    // Copy the resolved rows of a copy-on-write source band into `number` flat destination bands whose
-    // offsets are supplied per destination ordinal.
-    private void copyResolvedRows(int sourceIndex, double[] pd, double[] qd, java.util.function.IntUnaryOperator dstOffset, int number) {
-        for (int row = 0; row < rowCount; row++) {
-            int src = resolve(sourceIndex, row);
-            CowBand srcBand = bandOf(src);
-            double pv = srcBand == null ? pd[src * rowStride + row] : srcBand.p[row];
-            double qv = srcBand == null ? qd[src * rowStride + row] : srcBand.q[row];
-            for (int i = 0; i < number; i++) {
-                pd[dstOffset.applyAsInt(i) + row] = pv;
-                qd[dstOffset.applyAsInt(i) + row] = qv;
-            }
-        }
     }
 
     private void dropCowBand(int index) {
