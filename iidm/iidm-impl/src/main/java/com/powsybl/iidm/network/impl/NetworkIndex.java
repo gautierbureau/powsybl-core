@@ -157,11 +157,6 @@ class NetworkIndex {
 
     void checkAndAdd(Identifiable<?> obj) {
         checkId(obj.getId());
-        if (existence != null) {
-            // this index is ready for concurrent creation, but the columnar row storage a new object also
-            // needs is not: allocating a row can still grow geometry under a reader
-            existence.checkStructuralEditAllowed(obj.getId());
-        }
         synchronized (writeLock) {
             doCheckAndAdd(obj);
         }
@@ -182,18 +177,28 @@ class NetworkIndex {
                 throw new PowsyblException("Object (" + obj.getClass().getName()
                         + ") '" + id + "' already exists");
             }
+            markScoped(obj, variantScoped);
             addExtra(id, obj);
         } else {
+            markScoped(obj, variantScoped);
             putObject(id, obj);
         }
         obj.getAliases().forEach(alias -> addAlias(obj, alias));
 
         objectsByClass.computeIfAbsent(obj.getClass(), k -> new ClassBucket()).add(obj, concurrentWrites.getAsBoolean());
         statefulObjectsCache = null;
+    }
 
-        // Once the network has several variants, an object added while one of them is the working variant
-        // exists only in that variant (a connectable, a container VL/bus/substation — anything). Its terminal
-        // membership is handled separately by the topology-model branch-attach intercept.
+    /**
+     * Once the network has several variants, an object added while one of them is the working variant exists
+     * only in that variant (a connectable, a container VL/bus/substation — anything). Its terminal membership
+     * is handled separately by the topology-model branch-attach intercept.
+     * <p>
+     * This must happen <em>before</em> the object is published in the index. Otherwise another thread can find
+     * it in the window between the two and, seeing nothing marking it as variant-scoped, resolve it as a base
+     * object visible in every variant — which is how a worker briefly saw another worker's new equipment.
+     */
+    private void markScoped(Identifiable<?> obj, boolean variantScoped) {
         if (variantScoped) {
             existence.existOnlyInCurrentVariant(obj);
         }
@@ -373,9 +378,6 @@ class NetworkIndex {
     }
 
     void remove(Identifiable obj) {
-        if (existence != null) {
-            existence.checkStructuralEditAllowed(obj.getId());
-        }
         synchronized (writeLock) {
             doRemove(obj);
         }

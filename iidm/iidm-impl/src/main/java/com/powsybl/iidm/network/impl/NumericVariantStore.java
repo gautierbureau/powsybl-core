@@ -238,7 +238,7 @@ public class NumericVariantStore implements VariantColumnStore {
     }
 
     /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
-    public int allocateRow() {
+    public synchronized int allocateRow() {
         int row;
         if (!freeRows.isEmpty()) {
             row = freeRows.pop();
@@ -266,7 +266,7 @@ public class NumericVariantStore implements VariantColumnStore {
      * per-object constructor did, filling every variant with the object's initial values). The array lengths
      * must match the store's column counts.
      */
-    public int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
+    public synchronized int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
         int row = allocateRow();
         for (int v = 0; v < flatSize; v++) {
             for (int c = 0; c < nDouble; c++) {
@@ -283,7 +283,7 @@ public class NumericVariantStore implements VariantColumnStore {
     }
 
     /** Release the row of a removed object for reuse. */
-    public void freeRow(int row) {
+    public synchronized void freeRow(int row) {
         freeRows.push(row);
     }
 

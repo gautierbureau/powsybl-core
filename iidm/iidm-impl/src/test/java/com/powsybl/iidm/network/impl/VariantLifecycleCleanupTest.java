@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
@@ -20,8 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Lifecycle of objects that exist only in a variant, and the boundary of what may be done concurrently.
@@ -112,27 +109,23 @@ class VariantLifecycleCleanupTest {
     }
 
     /**
-     * Removing equipment inside a variant is supported concurrently (see
-     * {@code VariantConcurrentStructuralDivergenceTest}); <em>creating</em> it is not yet, because that grows
-     * the network index and the row storage shared by every variant. The unsupported case fails fast rather
-     * than corrupting the index or surfacing as an unrelated {@code ConcurrentModificationException}.
+     * Both halves of a structural change are now concurrent: removing equipment inside a variant and
+     * creating it (see {@code VariantConcurrentStructuralDivergenceTest}). State writes were always
+     * concurrent and still are.
      */
     @Test
-    void creatingAnObjectWhileMultiThreadAccessIsEnabledFailsFast() {
+    void creatingAndWritingWhileMultiThreadAccessIsEnabledIsAllowed() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
         vm.cloneVariant(INITIAL, "s");
         vm.allowVariantMultiThreadAccess(true);
         vm.setWorkingVariant("s");
 
-        PowsyblException e = assertThrows(PowsyblException.class, () -> addLoad(n, "LD", 1));
-        assertTrue(e.getMessage().contains("multi-thread"), () -> "unexpected message: " + e.getMessage());
-
-        // ...while state stays concurrent, which is what multi-thread access has always covered
-        vm.allowVariantMultiThreadAccess(false);
-        addLoad(n, "LD", 1);
-        vm.allowVariantMultiThreadAccess(true);
+        assertDoesNotThrow(() -> addLoad(n, "LD", 1));
         assertDoesNotThrow(() -> n.getLoad("LD").setP0(42.0));
         assertEquals(42.0, n.getLoad("LD").getP0(), 1e-9);
+
+        vm.setWorkingVariant(INITIAL);
+        assertNull(n.getLoad("LD")); // still scoped to the variant it was created in
     }
 }

@@ -153,7 +153,7 @@ class TerminalVariantStore implements VariantColumnStore {
      * Allocate a row for a new terminal. The row reads as {@code NaN} in every existing variant band. A row
      * freed by a previously removed terminal is reused if available, otherwise a fresh one is allocated.
      */
-    int allocateRow() {
+    synchronized int allocateRow() {
         if (!freeRows.isEmpty()) {
             int row = freeRows.pop();
             resetRow(row);
@@ -166,7 +166,7 @@ class TerminalVariantStore implements VariantColumnStore {
     /**
      * Release the row of a removed terminal so it can be reused. The caller must never read/write the row again.
      */
-    void freeRow(int row) {
+    synchronized void freeRow(int row) {
         freeRows.push(row);
     }
 
@@ -192,7 +192,7 @@ class TerminalVariantStore implements VariantColumnStore {
      * Allocate a fresh row and initialise it with the given single-variant {@code p}/{@code q}. Used when a
      * terminal is moved between networks (merge/detach), which the API only allows on single-variant networks.
      */
-    int importRow(double pValue, double qValue) {
+    synchronized int importRow(double pValue, double qValue) {
         int row = allocateRow();
         p[0][row >>> SHIFT][row & MASK] = pValue; // variant 0 (the only variant in a merge/detach)
         q[0][row >>> SHIFT][row & MASK] = qValue;

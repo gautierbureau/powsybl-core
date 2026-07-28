@@ -28,6 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -69,10 +71,13 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     // generic per-object-type numeric variant stores, created lazily and keyed by a type token so that adding
     // a new columnar object type needs no change here (see getOrCreateNumericVariantStore)
-    private final Map<String, NumericVariantStore> numericVariantStores = new HashMap<>();
+    // Concurrent, and the registry below is mutated under a lock: a new columnar type can first be used by
+    // a worker thread creating equipment in its own variant, while other threads are reading.
+    private final Map<String, NumericVariantStore> numericVariantStores = new ConcurrentHashMap<>();
 
-    // all columnar variant stores, driven once per variant operation instead of once per object
-    private final List<VariantColumnStore> variantColumnStores = new ArrayList<>();
+    // all columnar variant stores, driven once per variant operation instead of once per object; copy-on-write
+    // so a variant operation can iterate it while a worker registers a newly-used type
+    private final List<VariantColumnStore> variantColumnStores = new CopyOnWriteArrayList<>();
 
     private AbstractReportNodeContext reportNodeContext;
 
@@ -376,12 +381,16 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
                                                               boolean[] booleanDefaults) {
         NumericVariantStore store = numericVariantStores.get(key);
         if (store == null) {
-            // created at the current variant array size (its bands hold the column defaults); registered so
-            // that subsequent variant operations drive it. Creation happens on the main thread during build.
-            store = new NumericVariantStore(variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
-                    booleanDefaults, variantManager.getCowState());
-            numericVariantStores.put(key, store);
-            variantColumnStores.add(store);
+            // A type may first be used by a worker creating equipment in its own variant, so the
+            // create-and-register is done once, atomically: computeIfAbsent both publishes the store and
+            // registers it for subsequent variant operations. The store is sized to the current variant array
+            // so its bands already cover every live variant.
+            store = numericVariantStores.computeIfAbsent(key, k -> {
+                NumericVariantStore created = new NumericVariantStore(variantManager.getVariantArraySize(),
+                        doubleDefaults, intDefaults, booleanDefaults, variantManager.getCowState());
+                variantColumnStores.add(created);
+                return created;
+            });
         }
         return store;
     }
