@@ -8,18 +8,16 @@
 package com.powsybl.iidm.network.impl.extensions;
 
 import com.powsybl.commons.PowsyblException;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.Battery;
 import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.Injection;
 import com.powsybl.iidm.network.extensions.ActivePowerControl;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
 import com.powsybl.iidm.network.impl.NetworkImpl;
-import gnu.trove.list.array.TDoubleArrayList;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.OptionalDouble;
 
 /**
@@ -29,15 +27,20 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
         implements ActivePowerControl<T> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ActivePowerControlImpl.class);
-    private final TBooleanArrayList participate;
 
-    private final TDoubleArrayList droop;
-    private final TDoubleArrayList participationFactor;
+    // participate (boolean) + droop / participationFactor / minTargetP / maxTargetP (double), held columnarly
+    private static final String STORE_KEY = "ActivePowerControl";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_DROOP = 0;
+    private static final int COL_PARTICIPATION_FACTOR = 1;
+    private static final int COL_MIN_TARGET_P = 2;
+    private static final int COL_MAX_TARGET_P = 3;
+    private static final int COL_PARTICIPATE = 0;
 
-    private final TDoubleArrayList minTargetP;
-    private final TDoubleArrayList maxTargetP;
-
-    private final List<TDoubleArrayList> allTDoubleArrayLists;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     public ActivePowerControlImpl(T component,
                                   boolean participate,
@@ -53,22 +56,11 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
                                   double minTargetP,
                                   double maxTargetP) {
         super(component);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.participate = new TBooleanArrayList(variantArraySize);
-        this.droop = new TDoubleArrayList(variantArraySize);
-        this.participationFactor = new TDoubleArrayList(variantArraySize);
-        this.minTargetP = new TDoubleArrayList(variantArraySize);
-        this.maxTargetP = new TDoubleArrayList(variantArraySize);
-        this.allTDoubleArrayLists = List.of(this.droop, this.participationFactor, this.minTargetP, this.maxTargetP);
         double checkedMinTargetP = checkTargetPLimit(minTargetP, "minTargetP", component);
         double checkedMaxTargetP = checkTargetPLimit(maxTargetP, "maxTargetP", component);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.participate.add(participate);
-            this.droop.add(droop);
-            this.participationFactor.add(participationFactor);
-            this.minTargetP.add(checkedMinTargetP);
-            this.maxTargetP.add(checkedMaxTargetP);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {droop, participationFactor, checkedMinTargetP, checkedMaxTargetP}, INT_DEFAULTS, new boolean[] {participate});
         checkLimitOrder(minTargetP, maxTargetP);
     }
 
@@ -119,14 +111,14 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
     }
 
     public boolean isParticipate() {
-        return participate.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_PARTICIPATE, variantStoreRow);
     }
 
     public void setParticipate(boolean participate) {
         int variantIndex = getVariantIndex();
-        boolean oldParticipate = this.participate.get(variantIndex);
+        boolean oldParticipate = variantStore.getBoolean(variantIndex, COL_PARTICIPATE, variantStoreRow);
         if (oldParticipate != participate) {
-            this.participate.set(variantIndex, participate);
+            variantStore.setBoolean(variantIndex, COL_PARTICIPATE, variantStoreRow, participate);
             NetworkImpl network = (NetworkImpl) getExtendable().getNetwork();
             String variantId = getVariantManagerHolder().getVariantManager().getWorkingVariantId();
             network.getListeners().notifyExtensionUpdate(this, "participate", variantId, oldParticipate, participate);
@@ -134,14 +126,14 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
     }
 
     public double getDroop() {
-        return droop.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_DROOP, variantStoreRow);
     }
 
     public void setDroop(double droop) {
         int variantIndex = getVariantIndex();
-        double oldDroop = this.droop.get(variantIndex);
+        double oldDroop = variantStore.getDouble(variantIndex, COL_DROOP, variantStoreRow);
         if (oldDroop != droop) {
-            this.droop.set(variantIndex, droop);
+            variantStore.setDouble(variantIndex, COL_DROOP, variantStoreRow, droop);
             NetworkImpl network = (NetworkImpl) getExtendable().getNetwork();
             String variantId = getVariantManagerHolder().getVariantManager().getWorkingVariantId();
             network.getListeners().notifyExtensionUpdate(this, "droop", variantId, oldDroop, droop);
@@ -149,27 +141,23 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
     }
 
     public double getParticipationFactor() {
-        return participationFactor.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_PARTICIPATION_FACTOR, variantStoreRow);
     }
 
     public void setParticipationFactor(double participationFactor) {
-        this.participationFactor.set(getVariantIndex(), participationFactor);
+        variantStore.setDouble(getVariantIndex(), COL_PARTICIPATION_FACTOR, variantStoreRow, participationFactor);
     }
 
+    // participate/droop/participationFactor/min/maxTargetP are maintained columnarly by the network-level
+    // store, driven once per variant operation by NetworkImpl; these per-extension hooks have nothing to do.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        participate.ensureCapacity(participate.size() + number);
-        allTDoubleArrayLists.forEach(dl -> dl.ensureCapacity(dl.size() + number));
-        for (int i = 0; i < number; ++i) {
-            participate.add(participate.get(sourceIndex));
-            allTDoubleArrayLists.forEach(dl -> dl.add(dl.get(sourceIndex)));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        participate.remove(participate.size() - number, number);
-        allTDoubleArrayLists.forEach(dl -> dl.remove(dl.size() - number, number));
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -179,33 +167,41 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            participate.set(index, participate.get(sourceIndex));
-            allTDoubleArrayLists.forEach(dl -> dl.set(index, dl.get(sourceIndex)));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        boolean participate0 = variantStore.getBoolean(0, COL_PARTICIPATE, variantStoreRow);
+        double droop0 = variantStore.getDouble(0, COL_DROOP, variantStoreRow);
+        double pf0 = variantStore.getDouble(0, COL_PARTICIPATION_FACTOR, variantStoreRow);
+        double min0 = variantStore.getDouble(0, COL_MIN_TARGET_P, variantStoreRow);
+        double max0 = variantStore.getDouble(0, COL_MAX_TARGET_P, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {droop0, pf0, min0, max0}, INT_DEFAULTS, new boolean[] {participate0});
     }
 
     @Override
     public OptionalDouble getMinTargetP() {
-        double result = minTargetP.get(getVariantIndex());
+        double result = variantStore.getDouble(getVariantIndex(), COL_MIN_TARGET_P, variantStoreRow);
         return Double.isNaN(result) ? OptionalDouble.empty() : OptionalDouble.of(withinPMinMax(result, getExtendable()));
     }
 
     @Override
     public void setMinTargetP(double minTargetP) {
-        checkLimitOrder(minTargetP, maxTargetP.get(getVariantIndex()));
-        this.minTargetP.set(getVariantIndex(), checkTargetPLimit(minTargetP, "minTargetP", getExtendable()));
+        checkLimitOrder(minTargetP, variantStore.getDouble(getVariantIndex(), COL_MAX_TARGET_P, variantStoreRow));
+        variantStore.setDouble(getVariantIndex(), COL_MIN_TARGET_P, variantStoreRow, checkTargetPLimit(minTargetP, "minTargetP", getExtendable()));
     }
 
     @Override
     public OptionalDouble getMaxTargetP() {
-        double result = maxTargetP.get(getVariantIndex());
+        double result = variantStore.getDouble(getVariantIndex(), COL_MAX_TARGET_P, variantStoreRow);
         return Double.isNaN(result) ? OptionalDouble.empty() : OptionalDouble.of(withinPMinMax(result, getExtendable()));
     }
 
     @Override
     public void setMaxTargetP(double maxTargetP) {
-        checkLimitOrder(minTargetP.get(getVariantIndex()), maxTargetP);
-        this.maxTargetP.set(getVariantIndex(), checkTargetPLimit(maxTargetP, "maxTargetP", getExtendable()));
+        checkLimitOrder(variantStore.getDouble(getVariantIndex(), COL_MIN_TARGET_P, variantStoreRow), maxTargetP);
+        variantStore.setDouble(getVariantIndex(), COL_MAX_TARGET_P, variantStoreRow, checkTargetPLimit(maxTargetP, "maxTargetP", getExtendable()));
     }
 }

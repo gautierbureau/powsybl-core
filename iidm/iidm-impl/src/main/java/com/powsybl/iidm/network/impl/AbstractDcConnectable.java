@@ -89,6 +89,14 @@ abstract class AbstractDcConnectable<I extends DcConnectable<I>> extends Abstrac
     }
 
     @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // extensions
+        for (DcTerminalImpl t : dcTerminals) {
+            t.reHomeVariantStores(targetNetwork);
+        }
+    }
+
+    @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
 

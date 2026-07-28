@@ -272,6 +272,17 @@ class TwoWindingsTransformerImpl extends AbstractConnectableBranch<TwoWindingsTr
         }
     }
 
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        if (ratioTapChanger != null) {
+            ratioTapChanger.reHomeVariantStores(targetNetwork);
+        }
+        if (phaseTapChanger != null) {
+            phaseTapChanger.reHomeVariantStores(targetNetwork);
+        }
+    }
+
     public Identifiable getTransformer() {
         return this;
     }

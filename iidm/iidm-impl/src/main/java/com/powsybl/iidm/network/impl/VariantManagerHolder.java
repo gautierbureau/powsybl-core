@@ -17,4 +17,24 @@ public interface VariantManagerHolder {
 
     int getVariantIndex();
 
+    /**
+     * Network-level columnar store for the variant-dependent terminal {@code p}/{@code q}. Shared by every
+     * terminal (including those in subnetworks), it is owned and structurally maintained by the root network.
+     */
+    TerminalVariantStore getTerminalVariantStore();
+
+    /**
+     * Network-level columnar store for the variant-dependent switch topology ({@code open}/{@code retained}).
+     * Shared by every switch, it is owned and structurally maintained by the root network.
+     */
+    SwitchVariantStore getSwitchVariantStore();
+
+    /**
+     * Return the shared numeric columnar variant store for a given object type, creating and registering it on
+     * first use. {@code key} identifies the type; {@code doubleDefaults}/{@code intDefaults} give the initial
+     * value of each column for a fresh row (and must be identical for every call with the same key).
+     */
+    NumericVariantStore getOrCreateNumericVariantStore(String key, double[] doubleDefaults, int[] intDefaults,
+                                                       boolean[] booleanDefaults);
+
 }

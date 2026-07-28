@@ -8,14 +8,14 @@
 package com.powsybl.iidm.network.impl.extensions;
 
 import com.powsybl.commons.report.ReportNode;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.StaticVarCompensator;
 import com.powsybl.iidm.network.ValidationException;
 import com.powsybl.iidm.network.extensions.StandbyAutomaton;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import com.powsybl.iidm.network.impl.StaticVarCompensatorImpl;
 import com.powsybl.iidm.network.util.NetworkReports;
-import gnu.trove.list.array.TDoubleArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,12 +26,20 @@ public class StandbyAutomatonImpl extends AbstractMultiVariantIdentifiableExtens
 
     private static final Logger LOGGER = LoggerFactory.getLogger(StandbyAutomatonImpl.class);
 
+    // standby (boolean) + low/high voltage setpoint / low/high voltage threshold (double), held columnarly
+    private static final String STORE_KEY = "StandbyAutomaton";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_LOW_VOLTAGE_SETPOINT = 0;
+    private static final int COL_HIGH_VOLTAGE_SETPOINT = 1;
+    private static final int COL_LOW_VOLTAGE_THRESHOLD = 2;
+    private static final int COL_HIGH_VOLTAGE_THRESHOLD = 3;
+    private static final int COL_STANDBY = 0;
+
     private double b0;
-    private final TBooleanArrayList standby;
-    private final TDoubleArrayList lowVoltageSetpoint;
-    private final TDoubleArrayList highVoltageSetpoint;
-    private final TDoubleArrayList lowVoltageThreshold;
-    private final TDoubleArrayList highVoltageThreshold;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private static double checkB0(StaticVarCompensatorImpl svc, double b0) {
         if (Double.isNaN(b0)) {
@@ -85,35 +93,29 @@ public class StandbyAutomatonImpl extends AbstractMultiVariantIdentifiableExtens
     public StandbyAutomatonImpl(StaticVarCompensatorImpl svc, double b0, boolean standby, double lowVoltageSetpoint, double highVoltageSetpoint,
                                 double lowVoltageThreshold, double highVoltageThreshold) {
         super(svc);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
         checkVoltageConfig(svc, lowVoltageSetpoint, highVoltageSetpoint, lowVoltageThreshold, highVoltageThreshold, standby);
         this.b0 = checkB0(svc, b0);
-        this.standby = new TBooleanArrayList(variantArraySize);
-        this.lowVoltageSetpoint = new TDoubleArrayList(variantArraySize);
-        this.highVoltageSetpoint = new TDoubleArrayList(variantArraySize);
-        this.lowVoltageThreshold = new TDoubleArrayList(variantArraySize);
-        this.highVoltageThreshold = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.standby.add(standby);
-            this.lowVoltageSetpoint.add(lowVoltageSetpoint);
-            this.highVoltageSetpoint.add(highVoltageSetpoint);
-            this.lowVoltageThreshold.add(lowVoltageThreshold);
-            this.highVoltageThreshold.add(highVoltageThreshold);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {lowVoltageSetpoint, highVoltageSetpoint, lowVoltageThreshold, highVoltageThreshold},
+                INT_DEFAULTS, new boolean[] {standby});
     }
 
     @Override
     public boolean isStandby() {
-        return standby.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_STANDBY, variantStoreRow);
     }
 
     @Override
     public StandbyAutomatonImpl setStandby(boolean standby) {
+        int variantIndex = getVariantIndex();
         checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(),
-                lowVoltageSetpoint.get(getVariantIndex()), highVoltageSetpoint.get(getVariantIndex()),
-                lowVoltageThreshold.get(getVariantIndex()), highVoltageThreshold.get(getVariantIndex()),
+                variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow),
+                variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow),
+                variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow),
+                variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow),
                 standby);
-        this.standby.set(getVariantIndex(), standby);
+        variantStore.setBoolean(variantIndex, COL_STANDBY, variantStoreRow, standby);
         return this;
     }
 
@@ -130,79 +132,74 @@ public class StandbyAutomatonImpl extends AbstractMultiVariantIdentifiableExtens
 
     @Override
     public double getHighVoltageSetpoint() {
-        return highVoltageSetpoint.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow);
     }
 
     @Override
     public StandbyAutomatonImpl setHighVoltageSetpoint(double highVoltageSetpoint) {
-        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), lowVoltageSetpoint.get(getVariantIndex()), highVoltageSetpoint,
-            lowVoltageThreshold.get(getVariantIndex()), highVoltageThreshold.get(getVariantIndex()), standby.get(getVariantIndex()));
-        this.highVoltageSetpoint.set(getVariantIndex(), highVoltageSetpoint);
+        int variantIndex = getVariantIndex();
+        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow), highVoltageSetpoint,
+            variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow), variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow),
+            variantStore.getBoolean(variantIndex, COL_STANDBY, variantStoreRow));
+        variantStore.setDouble(variantIndex, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow, highVoltageSetpoint);
         return this;
     }
 
     @Override
     public double getHighVoltageThreshold() {
-        return highVoltageThreshold.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow);
     }
 
     @Override
     public StandbyAutomatonImpl setHighVoltageThreshold(double highVoltageThreshold) {
-        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), lowVoltageSetpoint.get(getVariantIndex()), highVoltageSetpoint.get(getVariantIndex()),
-            lowVoltageThreshold.get(getVariantIndex()), highVoltageThreshold, standby.get(getVariantIndex()));
-        this.highVoltageThreshold.set(getVariantIndex(), highVoltageThreshold);
+        int variantIndex = getVariantIndex();
+        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow),
+            variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow),
+            variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow), highVoltageThreshold,
+            variantStore.getBoolean(variantIndex, COL_STANDBY, variantStoreRow));
+        variantStore.setDouble(variantIndex, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow, highVoltageThreshold);
         return this;
     }
 
     @Override
     public double getLowVoltageSetpoint() {
-        return lowVoltageSetpoint.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_LOW_VOLTAGE_SETPOINT, variantStoreRow);
     }
 
     @Override
     public StandbyAutomatonImpl setLowVoltageSetpoint(double lowVoltageSetpoint) {
-        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), lowVoltageSetpoint, highVoltageSetpoint.get(getVariantIndex()),
-            lowVoltageThreshold.get(getVariantIndex()), highVoltageThreshold.get(getVariantIndex()), standby.get(getVariantIndex()));
-        this.lowVoltageSetpoint.set(getVariantIndex(), lowVoltageSetpoint);
+        int variantIndex = getVariantIndex();
+        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), lowVoltageSetpoint, variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow),
+            variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow), variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow),
+            variantStore.getBoolean(variantIndex, COL_STANDBY, variantStoreRow));
+        variantStore.setDouble(variantIndex, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow, lowVoltageSetpoint);
         return this;
     }
 
     @Override
     public double getLowVoltageThreshold() {
-        return lowVoltageThreshold.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow);
     }
 
     @Override
     public StandbyAutomatonImpl setLowVoltageThreshold(double lowVoltageThreshold) {
-        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), lowVoltageSetpoint.get(getVariantIndex()), highVoltageSetpoint.get(getVariantIndex()),
-            lowVoltageThreshold, highVoltageThreshold.get(getVariantIndex()), standby.get(getVariantIndex()));
-        this.lowVoltageThreshold.set(getVariantIndex(), lowVoltageThreshold);
+        int variantIndex = getVariantIndex();
+        checkVoltageConfig((StaticVarCompensatorImpl) getExtendable(), variantStore.getDouble(variantIndex, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow),
+            variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow),
+            lowVoltageThreshold, variantStore.getDouble(variantIndex, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow),
+            variantStore.getBoolean(variantIndex, COL_STANDBY, variantStoreRow));
+        variantStore.setDouble(variantIndex, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow, lowVoltageThreshold);
         return this;
     }
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        standby.ensureCapacity(standby.size() + number);
-        lowVoltageSetpoint.ensureCapacity(lowVoltageSetpoint.size() + number);
-        highVoltageSetpoint.ensureCapacity(highVoltageSetpoint.size() + number);
-        lowVoltageThreshold.ensureCapacity(lowVoltageThreshold.size() + number);
-        highVoltageThreshold.ensureCapacity(highVoltageThreshold.size() + number);
-        for (int i = 0; i < number; i++) {
-            standby.add(standby.get(sourceIndex));
-            lowVoltageSetpoint.add(lowVoltageSetpoint.get(sourceIndex));
-            highVoltageSetpoint.add(highVoltageSetpoint.get(sourceIndex));
-            lowVoltageThreshold.add(lowVoltageThreshold.get(sourceIndex));
-            highVoltageThreshold.add(highVoltageThreshold.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        standby.remove(standby.size() - number, number);
-        lowVoltageSetpoint.remove(lowVoltageSetpoint.size() - number, number);
-        highVoltageSetpoint.remove(highVoltageSetpoint.size() - number, number);
-        lowVoltageThreshold.remove(lowVoltageThreshold.size() - number, number);
-        highVoltageThreshold.remove(highVoltageThreshold.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -212,12 +209,18 @@ public class StandbyAutomatonImpl extends AbstractMultiVariantIdentifiableExtens
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            standby.set(index, standby.get(sourceIndex));
-            lowVoltageSetpoint.set(index, lowVoltageSetpoint.get(sourceIndex));
-            highVoltageSetpoint.set(index, highVoltageSetpoint.get(sourceIndex));
-            lowVoltageThreshold.set(index, lowVoltageThreshold.get(sourceIndex));
-            highVoltageThreshold.set(index, highVoltageThreshold.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        double lowSetpoint0 = variantStore.getDouble(0, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow);
+        double highSetpoint0 = variantStore.getDouble(0, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow);
+        double lowThreshold0 = variantStore.getDouble(0, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow);
+        double highThreshold0 = variantStore.getDouble(0, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow);
+        boolean standby0 = variantStore.getBoolean(0, COL_STANDBY, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {lowSetpoint0, highSetpoint0, lowThreshold0, highThreshold0}, INT_DEFAULTS, new boolean[] {standby0});
     }
 }

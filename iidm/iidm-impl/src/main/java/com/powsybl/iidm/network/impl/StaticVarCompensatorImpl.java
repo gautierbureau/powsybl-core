@@ -11,7 +11,6 @@ import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.StaticVarCompensator;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.ValidationUtil;
-import gnu.trove.list.array.TDoubleArrayList;
 
 /**
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
@@ -26,11 +25,16 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
 
     private final RegulatingPoint regulatingPoint;
 
-    // attributes depending on the variant
+    // variant-dependent voltageSetpoint / reactivePowerSetpoint held columnarly (see NumericVariantStore)
+    private static final String STORE_KEY = "StaticVarCompensator";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_VOLTAGE_SETPOINT = 0;
+    private static final int COL_REACTIVE_POWER_SETPOINT = 1;
 
-    private final TDoubleArrayList voltageSetpoint;
-
-    private final TDoubleArrayList reactivePowerSetpoint;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     StaticVarCompensatorImpl(String id, String name, boolean fictitious, double bMin, double bMax, double voltageSetpoint, double reactivePowerSetpoint,
                              RegulationMode regulationMode, boolean regulating, TerminalExt regulatingTerminal, Ref<NetworkImpl> ref) {
@@ -38,15 +42,12 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         this.bMin = bMin;
         this.bMax = bMax;
         int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
-        this.voltageSetpoint = new TDoubleArrayList(variantArraySize);
-        this.reactivePowerSetpoint = new TDoubleArrayList(variantArraySize);
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, regulationMode != null ? regulationMode.ordinal() : -1,
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, ref, regulationMode != null ? regulationMode.ordinal() : -1,
             regulating, RegulationMode.VOLTAGE.ordinal(), regulationMode == RegulationMode.VOLTAGE);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.voltageSetpoint.add(voltageSetpoint);
-            this.reactivePowerSetpoint.add(reactivePowerSetpoint);
-        }
+        this.variantStore = ref.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {voltageSetpoint, reactivePowerSetpoint}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
@@ -89,7 +90,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
 
     @Override
     public double getVoltageSetpoint() {
-        return voltageSetpoint.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_VOLTAGE_SETPOINT, variantStoreRow);
     }
 
     @Override
@@ -98,7 +99,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         ValidationUtil.checkSvcRegulator(this, isRegulating(), voltageSetpoint, getReactivePowerSetpoint(), getRegulationMode(),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = n.getVariantIndex();
-        double oldValue = this.voltageSetpoint.set(variantIndex, voltageSetpoint);
+        double oldValue = variantStore.setDouble(variantIndex, COL_VOLTAGE_SETPOINT, variantStoreRow, voltageSetpoint);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("voltageSetpoint", variantId, oldValue, voltageSetpoint);
@@ -107,7 +108,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
 
     @Override
     public double getReactivePowerSetpoint() {
-        return reactivePowerSetpoint.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
     }
 
     @Override
@@ -116,7 +117,7 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         ValidationUtil.checkSvcRegulator(this, isRegulating(), getVoltageSetpoint(), reactivePowerSetpoint, getRegulationMode(),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = n.getVariantIndex();
-        double oldValue = this.reactivePowerSetpoint.set(variantIndex, reactivePowerSetpoint);
+        double oldValue = variantStore.setDouble(variantIndex, COL_REACTIVE_POWER_SETPOINT, variantStoreRow, reactivePowerSetpoint);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("reactivePowerSetpoint", variantId, oldValue, reactivePowerSetpoint);
@@ -166,20 +167,12 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        voltageSetpoint.ensureCapacity(voltageSetpoint.size() + number);
-        reactivePowerSetpoint.ensureCapacity(reactivePowerSetpoint.size() + number);
-        for (int i = 0; i < number; i++) {
-            voltageSetpoint.add(voltageSetpoint.get(sourceIndex));
-            reactivePowerSetpoint.add(reactivePowerSetpoint.get(sourceIndex));
-        }
         regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        voltageSetpoint.remove(voltageSetpoint.size() - number, number);
-        reactivePowerSetpoint.remove(reactivePowerSetpoint.size() - number, number);
         regulatingPoint.reduceVariantArraySize(number);
     }
 
@@ -192,11 +185,17 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            voltageSetpoint.set(index, voltageSetpoint.get(sourceIndex));
-            reactivePowerSetpoint.set(index, reactivePowerSetpoint.get(sourceIndex));
-        }
         regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        double voltageSetpoint0 = variantStore.getDouble(0, COL_VOLTAGE_SETPOINT, variantStoreRow);
+        double reactivePowerSetpoint0 = variantStore.getDouble(0, COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {voltageSetpoint0, reactivePowerSetpoint0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

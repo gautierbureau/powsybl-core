@@ -11,9 +11,7 @@ import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.ValidationException;
 import com.powsybl.iidm.network.ValidationUtil;
-import gnu.trove.list.array.TDoubleArrayList;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
@@ -22,6 +20,20 @@ import java.util.OptionalInt;
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
  */
 abstract class AbstractTapChanger<H extends TapChangerParent, C extends AbstractTapChanger<H, C, S>, S extends TapChangerStepImpl<S>> extends AbstractPropertiesHolder implements MultiVariantObject {
+
+    // targetDeadband / regulationValue (double) and tapPosition / solvedTapPosition (int) are held columnarly
+    // in a network-level NumericVariantStore (structure-of-arrays) shared by all tap changers, so a variant
+    // clone copies them all at once with a bulk array copy instead of once per tap changer. tapPosition and
+    // solvedTapPosition are nullable (unset); TAP_NULL encodes the null state in the int columns.
+    protected static final String STORE_KEY = "TapChanger";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    static final int TAP_NULL = Integer.MIN_VALUE;
+    private static final int[] INT_DEFAULTS = {TAP_NULL, TAP_NULL};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    protected static final int COL_TARGET_DEADBAND = 0;
+    protected static final int COL_REGULATION_VALUE = 1;
+    protected static final int COL_TAP_POSITION = 0;
+    protected static final int COL_SOLVED_TAP_POSITION = 1;
 
     protected final Ref<? extends VariantManagerHolder> network;
 
@@ -39,18 +51,15 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
 
     protected final RegulatingPoint regulatingPoint;
 
-    // attributes depending on the variant
-
-    protected final ArrayList<Integer> tapPosition;
-
-    protected final TDoubleArrayList targetDeadband;
-
-    protected final ArrayList<Integer> solvedTapPosition;
+    // attributes depending on the variant, held columnarly in the store above (this tap changer owns one row)
+    protected NumericVariantStore variantStore;
+    protected int variantStoreRow;
 
     protected AbstractTapChanger(H parent,
                                  int lowTapPosition, List<S> steps, TerminalExt regulationTerminal,
                                  boolean loadTapChangingCapabilities,
-                                 Integer tapPosition, Integer solvedTapPosition, boolean regulating, double targetDeadband, String type) {
+                                 Integer tapPosition, Integer solvedTapPosition, boolean regulating,
+                                 double targetDeadband, double regulationValue, String type) {
         // The Ref object should be the one corresponding to the subnetwork of the tap changer holder
         // (to avoid errors when the subnetwork is detached)
         this.network = parent.getParentNetwork().getRootNetworkRef();
@@ -59,22 +68,18 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
         this.lowTapPosition = lowTapPosition;
         this.steps = steps;
         steps.forEach(s -> s.setParent(this));
-        int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        regulatingPoint = createRegulatingPoint(variantArraySize, regulating);
+        regulatingPoint = createRegulatingPoint(regulating);
         regulatingPoint.setRegulatingTerminal(regulationTerminal);
-        this.tapPosition = new ArrayList<>(variantArraySize);
-        this.solvedTapPosition = new ArrayList<>(variantArraySize);
-        this.targetDeadband = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.tapPosition.add(tapPosition);
-            this.solvedTapPosition.add(solvedTapPosition);
-            this.targetDeadband.add(targetDeadband);
-        }
+        this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {targetDeadband, regulationValue},
+                new int[] {tapPosition == null ? TAP_NULL : tapPosition, solvedTapPosition == null ? TAP_NULL : solvedTapPosition},
+                BOOLEAN_DEFAULTS);
         this.type = Objects.requireNonNull(type);
         relativeNeutralPosition = getRelativeNeutralPosition();
     }
 
-    protected abstract RegulatingPoint createRegulatingPoint(int variantArraySize, boolean regulating);
+    protected abstract RegulatingPoint createRegulatingPoint(boolean regulating);
 
     protected NetworkImpl getNetwork() {
         return parent.getNetwork();
@@ -95,8 +100,10 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
         this.lowTapPosition = lowTapPosition;
         parent.getNetwork().getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".lowTapPosition", oldValue, lowTapPosition);
         int variantIndex = network.get().getVariantIndex();
-        Integer position = tapPosition.get(network.get().getVariantIndex());
-        this.tapPosition.set(variantIndex, position != null ? position + (this.lowTapPosition - oldValue) : null);
+        int raw = variantStore.getInt(variantIndex, COL_TAP_POSITION, variantStoreRow);
+        if (raw != TAP_NULL) {
+            variantStore.setInt(variantIndex, COL_TAP_POSITION, variantStoreRow, raw + (this.lowTapPosition - oldValue));
+        }
         return (C) this;
     }
 
@@ -105,25 +112,26 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
     }
 
     public int getTapPosition() {
-        Integer position = tapPosition.get(network.get().getVariantIndex());
-        if (position == null) {
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_TAP_POSITION, variantStoreRow);
+        if (raw == TAP_NULL) {
             throw ValidationUtil.createUndefinedValueGetterException();
         }
-        return position;
+        return raw;
     }
 
     public OptionalInt findTapPosition() {
-        Integer position = tapPosition.get(network.get().getVariantIndex());
-        return position == null ? OptionalInt.empty() : OptionalInt.of(position);
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_TAP_POSITION, variantStoreRow);
+        return raw == TAP_NULL ? OptionalInt.empty() : OptionalInt.of(raw);
     }
 
     public Integer getSolvedTapPosition() {
-        return solvedTapPosition.get(network.get().getVariantIndex());
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_SOLVED_TAP_POSITION, variantStoreRow);
+        return raw == TAP_NULL ? null : raw;
     }
 
     public OptionalInt findSolvedTapPosition() {
-        Integer solvedPosition = solvedTapPosition.get(network.get().getVariantIndex());
-        return solvedPosition == null ? OptionalInt.empty() : OptionalInt.of(solvedPosition);
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_SOLVED_TAP_POSITION, variantStoreRow);
+        return raw == TAP_NULL ? OptionalInt.empty() : OptionalInt.of(raw);
     }
 
     public OptionalInt getNeutralPosition() {
@@ -139,7 +147,8 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
             throwIncorrectTapPosition(tapPosition, getHighTapPosition());
         }
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.tapPosition.set(variantIndex, tapPosition);
+        int oldRaw = variantStore.setInt(variantIndex, COL_TAP_POSITION, variantStoreRow, tapPosition);
+        Integer oldValue = oldRaw == TAP_NULL ? null : oldRaw;
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         parent.getNetwork().getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".tapPosition", variantId, oldValue, tapPosition);
@@ -150,7 +159,8 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
         NetworkImpl n = getNetwork();
         ValidationUtil.throwExceptionOrIgnore(parent, "tap position has been unset", n.getMinValidationLevel());
         int variantIndex = network.get().getVariantIndex();
-        Integer oldValue = this.tapPosition.set(variantIndex, null);
+        int oldRaw = variantStore.setInt(variantIndex, COL_TAP_POSITION, variantStoreRow, TAP_NULL);
+        Integer oldValue = oldRaw == TAP_NULL ? null : oldRaw;
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         n.getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".tapPosition", variantId, oldValue, null);
@@ -164,7 +174,8 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
             throwIncorrectSolvedTapPosition(solvedTapPosition, getHighTapPosition());
         }
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.solvedTapPosition.set(variantIndex, solvedTapPosition);
+        int oldRaw = variantStore.setInt(variantIndex, COL_SOLVED_TAP_POSITION, variantStoreRow, solvedTapPosition);
+        Integer oldValue = oldRaw == TAP_NULL ? null : oldRaw;
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         parent.getNetwork().getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".solvedTapPosition", variantId, oldValue, solvedTapPosition);
         return (C) this;
@@ -173,7 +184,8 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
     public C unsetSolvedTapPosition() {
         NetworkImpl n = getNetwork();
         int variantIndex = network.get().getVariantIndex();
-        Integer oldValue = this.solvedTapPosition.set(variantIndex, null);
+        int oldRaw = variantStore.setInt(variantIndex, COL_SOLVED_TAP_POSITION, variantStoreRow, TAP_NULL);
+        Integer oldValue = oldRaw == TAP_NULL ? null : oldRaw;
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".solvedTapPosition", variantId, oldValue, null);
         return (C) this;
@@ -209,19 +221,19 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
     }
 
     public S getCurrentStep() {
-        Integer position = tapPosition.get(network.get().getVariantIndex());
-        if (position == null) {
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_TAP_POSITION, variantStoreRow);
+        if (raw == TAP_NULL) {
             return null;
         }
-        return getStep(position);
+        return getStep(raw);
     }
 
     public S getSolvedCurrentStep() {
-        Integer solvedPosition = solvedTapPosition.get(network.get().getVariantIndex());
-        if (solvedPosition == null) {
+        int raw = variantStore.getInt(network.get().getVariantIndex(), COL_SOLVED_TAP_POSITION, variantStoreRow);
+        if (raw == TAP_NULL) {
             return null;
         }
-        return getStep(solvedPosition);
+        return getStep(raw);
     }
 
     public boolean isRegulating() {
@@ -231,7 +243,9 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
     public C setRegulating(boolean regulating) {
         NetworkImpl n = getNetwork();
         int variantIndex = network.get().getVariantIndex();
-        ValidationUtil.checkTargetDeadband(parent, type, regulating, targetDeadband.get(variantIndex), n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
+        ValidationUtil.checkTargetDeadband(parent, type, regulating,
+                variantStore.getDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow),
+                n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         boolean oldValue = regulatingPoint.setRegulating(variantIndex, regulating);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
@@ -254,7 +268,7 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
     }
 
     public double getTargetDeadband() {
-        return targetDeadband.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_TARGET_DEADBAND, variantStoreRow);
     }
 
     public C setTargetDeadband(double targetDeadband) {
@@ -262,51 +276,48 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
         NetworkImpl n = getNetwork();
         ValidationUtil.checkTargetDeadband(parent, type, regulatingPoint.isRegulating(variantIndex),
                 targetDeadband, n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.targetDeadband.set(variantIndex, targetDeadband);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow, targetDeadband);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         n.getListeners().notifyUpdate(parent.getTransformer(), () -> getTapChangerAttribute() + ".targetDeadband", variantId, oldValue, targetDeadband);
         return (C) this;
     }
 
+    // targetDeadband / regulationValue / tapPosition / solvedTapPosition are maintained columnarly by the
+    // network-level NumericVariantStore, driven once per variant op by NetworkImpl; regulating is likewise
+    // held columnarly by the RegulatingPoint's store. These per-object hooks therefore have nothing to do.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        targetDeadband.ensureCapacity(targetDeadband.size() + number);
-        tapPosition.ensureCapacity(tapPosition.size() + number);
-        solvedTapPosition.ensureCapacity(solvedTapPosition.size() + number);
-        for (int i = 0; i < number; i++) {
-            tapPosition.add(tapPosition.get(sourceIndex));
-            targetDeadband.add(targetDeadband.get(sourceIndex));
-            solvedTapPosition.add(solvedTapPosition.get(sourceIndex));
-        }
-        regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        List<Integer> tmpInt = new ArrayList<>(tapPosition.subList(0, tapPosition.size() - number));
-        tapPosition.clear();
-        tapPosition.addAll(tmpInt);
-        List<Integer> tmpSolvedTapPosition = new ArrayList<>(solvedTapPosition.subList(0, solvedTapPosition.size() - number));
-        solvedTapPosition.clear();
-        solvedTapPosition.addAll(tmpSolvedTapPosition);
-        targetDeadband.remove(targetDeadband.size() - number, number);
-        regulatingPoint.reduceVariantArraySize(number);
+        // handled by NumericVariantStore
     }
 
     @Override
     public void deleteVariantArrayElement(int index) {
-        regulatingPoint.deleteVariantArrayElement(index);
+        // nothing to do
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
-        for (int index : indexes) {
-            tapPosition.set(index, tapPosition.get(sourceIndex));
-            solvedTapPosition.set(index, solvedTapPosition.get(sourceIndex));
-            targetDeadband.set(index, targetDeadband.get(sourceIndex));
-        }
-        regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
+        double regulationValue0 = variantStore.getDouble(0, COL_REGULATION_VALUE, variantStoreRow);
+        int tapPosition0 = variantStore.getInt(0, COL_TAP_POSITION, variantStoreRow);
+        int solvedTapPosition0 = variantStore.getInt(0, COL_SOLVED_TAP_POSITION, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {targetDeadband0, regulationValue0},
+                new int[] {tapPosition0, solvedTapPosition0},
+                BOOLEAN_DEFAULTS);
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     private void throwIncorrectTapPosition(int tapPosition, int highTapPosition) {

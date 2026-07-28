@@ -9,7 +9,6 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,9 +43,16 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
 
     // attributes depending on the variant
 
-    private final TDoubleArrayList targetP;
+    // targetP, targetVdc held columnarly
+    private static final String STORE_KEY = "AcDcConverter";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_TARGET_P = 0;
+    private static final int COL_TARGET_VDC = 1;
 
-    private final TDoubleArrayList targetVdc;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     AbstractAcDcConverter(Ref<NetworkImpl> ref, String id, String name, boolean fictitious,
                           double minP, double maxP,
@@ -59,14 +65,11 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
         this.switchingLoss = switchingLoss;
         this.resistiveLoss = resistiveLoss;
         int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
-        this.targetP = new TDoubleArrayList(variantArraySize);
-        this.targetVdc = new TDoubleArrayList(variantArraySize);
-        pccRegulatingPoint = new RegulatingPoint(id, () -> (TerminalExt) getTerminal1(), variantArraySize, controlMode.ordinal(), ControlMode.V_DC.ordinal(), false);
+        this.variantStore = getNetwork().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetP, targetVdc}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        pccRegulatingPoint = new RegulatingPoint(id, () -> (TerminalExt) getTerminal1(), ref, controlMode.ordinal(), ControlMode.V_DC.ordinal(), false);
         pccRegulatingPoint.setRegulatingTerminal(pccTerminal);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.targetP.add(targetP);
-            this.targetVdc.add(targetVdc);
-        }
+
     }
 
     @Override
@@ -306,7 +309,7 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
         ValidationUtil.checkAcDcConverterControl(this, getControlMode(), targetP, getTargetVdc(),
             n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = n.getVariantIndex();
-        double oldValue = this.targetP.set(variantIndex, targetP);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_P, variantStoreRow, targetP);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate(TARGET_P, variantId, oldValue, targetP);
@@ -316,7 +319,7 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
     @Override
     public double getTargetP() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, TARGET_P);
-        return targetP.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_TARGET_P, variantStoreRow);
     }
 
     @Override
@@ -326,7 +329,7 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
         ValidationUtil.checkAcDcConverterControl(this, getControlMode(), getTargetP(), targetVdc,
             n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = n.getVariantIndex();
-        double oldValue = this.targetVdc.set(variantIndex, targetVdc);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_VDC, variantStoreRow, targetVdc);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate(TARGET_VDC, variantId, oldValue, targetVdc);
@@ -336,19 +339,13 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
     @Override
     public double getTargetVdc() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, TARGET_VDC);
-        return targetVdc.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_TARGET_VDC, variantStoreRow);
     }
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        targetP.ensureCapacity(targetP.size() + number);
-        targetVdc.ensureCapacity(targetVdc.size() + number);
-        for (int i = 0; i < number; i++) {
-            targetP.add(targetP.get(sourceIndex));
-            targetVdc.add(targetVdc.get(sourceIndex));
-        }
-
+        // targetP/targetVdc handled by NumericVariantStore
         for (DcTerminalImpl t : dcTerminals) {
             t.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         }
@@ -358,9 +355,6 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        targetP.remove(targetP.size() - number, number);
-        targetVdc.remove(targetVdc.size() - number, number);
-
         for (DcTerminalImpl t : dcTerminals) {
             t.reduceVariantArraySize(number);
         }
@@ -380,15 +374,23 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            targetP.set(index, targetP.get(sourceIndex));
-            targetVdc.set(index, targetVdc.get(sourceIndex));
-        }
-
         for (DcTerminalImpl t : dcTerminals) {
             t.allocateVariantArrayElement(indexes, sourceIndex);
         }
         pccRegulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // AC terminals + extensions
+        double p0 = variantStore.getDouble(0, COL_TARGET_P, variantStoreRow);
+        double vdc0 = variantStore.getDouble(0, COL_TARGET_VDC, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {p0, vdc0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        for (DcTerminalImpl t : dcTerminals) {
+            t.reHomeVariantStores(targetNetwork);
+        }
+        pccRegulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override
