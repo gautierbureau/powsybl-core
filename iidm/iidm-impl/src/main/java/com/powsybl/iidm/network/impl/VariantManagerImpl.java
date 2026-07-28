@@ -297,7 +297,7 @@ public class VariantManagerImpl implements VariantManager {
         }
         Set<Identifiable<?>> orphans = existence.collectOrphans(id2index.values());
         for (Identifiable<?> orphan : orphans) {
-            networkIndex.remove(orphan);
+            networkIndex.removeVariantOrphan(orphan);
         }
     }
 
