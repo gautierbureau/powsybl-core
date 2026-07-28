@@ -16,6 +16,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * <p><b>Variant-scoped terminal membership.</b></p>
@@ -44,14 +45,18 @@ final class VariantScopedMembership implements MultiVariantObject {
     private final VariantManagerHolder holder;
     // Per variant, the terminals it diverges per voltage level: attached (shown) / detached (hidden). A
     // terminal with no entry in a variant inherits its membership through the clone parentage.
-    private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> attachedByVariant = new HashMap<>();
-    private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> detachedByVariant = new HashMap<>();
-    // Voltage levels that carry any membership divergence anywhere — for eager materialisation enumeration.
-    private final Set<VoltageLevelExt> scopedVoltageLevels = new LinkedHashSet<>();
+    //
+    // Thread-safety: as in VariantScopedExistence, a variant is edited by at most one thread, so the
+    // per-variant maps are thread-confined; only the maps keyed by variant are shared and concurrent.
+    private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> attachedByVariant = new ConcurrentHashMap<>();
+    private final Map<Integer, Map<VoltageLevelExt, Set<TerminalExt>>> detachedByVariant = new ConcurrentHashMap<>();
+    // Voltage levels that carry any membership divergence anywhere.
+    private final Set<VoltageLevelExt> scopedVoltageLevels = ConcurrentHashMap.newKeySet();
     private int variantArraySize;
-    // Transient (not variant-scoped) branch-attach window: the shared VLs onto which a connectable-add in
-    // progress should record a branch-attach into the current variant instead of mutating the graph.
-    private final Set<VoltageLevelExt> attachTargets = new HashSet<>();
+    // Transient branch-attach window: the shared VLs onto which a connectable-add in progress should record a
+    // branch-attach into the current variant instead of mutating the graph. This is scratch state for one
+    // in-flight add, not variant state, so it is per-thread rather than shared.
+    private final ThreadLocal<Set<VoltageLevelExt>> attachTargets = ThreadLocal.withInitial(HashSet::new);
 
     VariantScopedMembership(VariantManagerHolder holder, int variantArraySize) {
         this.holder = holder;
@@ -212,15 +217,15 @@ final class VariantScopedMembership implements MultiVariantObject {
 
     /** Open a branch-attach window over {@code sharedVoltageLevels} for a connectable-add (see the topology-model intercept). */
     void beginAttach(Collection<VoltageLevelExt> sharedVoltageLevels) {
-        attachTargets.addAll(sharedVoltageLevels);
+        attachTargets.get().addAll(sharedVoltageLevels);
     }
 
     void endAttach() {
-        attachTargets.clear();
+        attachTargets.remove();
     }
 
     boolean isAttachTarget(VoltageLevelExt voltageLevel) {
-        return attachTargets.contains(voltageLevel);
+        return attachTargets.get().contains(voltageLevel);
     }
 
     // Bus-view filters (current variant): the connected attached/detached terminals of a voltage level

@@ -112,12 +112,13 @@ class VariantLifecycleCleanupTest {
     }
 
     /**
-     * Variant-dependent attributes may be written concurrently; structure may not — it is shared by every
-     * variant. Attempting it used to corrupt the network index or surface as an unrelated
-     * {@code ConcurrentModificationException}; it now fails fast and says what to do.
+     * Removing equipment inside a variant is supported concurrently (see
+     * {@code VariantConcurrentStructuralDivergenceTest}); <em>creating</em> it is not yet, because that grows
+     * the network index and the row storage shared by every variant. The unsupported case fails fast rather
+     * than corrupting the index or surfacing as an unrelated {@code ConcurrentModificationException}.
      */
     @Test
-    void aStructuralEditWhileMultiThreadAccessIsEnabledFailsFast() {
+    void creatingAnObjectWhileMultiThreadAccessIsEnabledFailsFast() {
         Network n = grid();
         VariantManager vm = n.getVariantManager();
         vm.cloneVariant(INITIAL, "s");
