@@ -168,25 +168,23 @@ public class VariantManagerImpl implements VariantManager {
                 checkExistingVariantIds(targetVariantIds);
             }
             int sourceIndex = getVariantIndex(sourceVariantId);
-            boolean structural = strategy == VariantCloneStrategy.STRUCTURAL;
 
-            // clone-from-unwritten-base guard (checked before any state is mutated): a STRUCTURAL clone
-            // created while multi-thread access is enabled must fork from a NON-structural (base) variant --
-            // typically the initial variant left unwritten during the parallel region. Forking from another
-            // structural variant would build a fork chain whose middle variant is both written by its own
-            // worker and a freeze source for its children; writing it then races the workers reading those
-            // children (the freeze-on-write race). The safe, supported topology is one structural variant per
-            // worker, all forked from the shared base.
-            if (structural && isVariantMultiThreadAccessAllowed()) {
+            // clone-from-unwritten-base guard (checked before any state is mutated): a variant cloned while
+            // multi-thread access is enabled must fork from the shared base -- the dense initial variant,
+            // left unwritten during the parallel region. Forking from another clone would build a chain whose
+            // middle variant is both written by its own worker and a freeze source for its children; writing
+            // it then races the workers reading those children (the freeze-on-write race). The safe,
+            // supported topology is one variant per worker, all forked from the shared base.
+            if (isVariantMultiThreadAccessAllowed()) {
                 if (cowState.isCow(sourceIndex)) {
-                    throw new PowsyblException("A STRUCTURAL variant cloned while multi-thread access is "
-                            + "enabled must fork from a non-structural (base) variant, not from another "
-                            + "structural variant '" + getVariantId(sourceIndex) + "'. Fork every concurrent "
-                            + "structural variant from the shared base variant instead.");
+                    throw new PowsyblException("A variant cloned while multi-thread access is enabled must "
+                            + "fork from the base variant, not from another cloned variant '"
+                            + getVariantId(sourceIndex) + "'. Fork every concurrent variant from the shared "
+                            + "base variant instead.");
                 }
-                // write side: the source is now the shared read-only ancestor for the parallel region.
-                // Freeze it so any write to it fails fast (it would freeze state into every worker variant
-                // that inherits from it, racing their writes). Cleared when multi-thread access is turned off.
+                // write side: the source is now the shared read-only ancestor for the parallel region. Freeze
+                // it so any write to it fails fast (it would freeze state into every worker variant that
+                // inherits from it, racing their writes). Cleared when multi-thread access is turned off.
                 cowState.freezeBase(sourceIndex);
             }
 

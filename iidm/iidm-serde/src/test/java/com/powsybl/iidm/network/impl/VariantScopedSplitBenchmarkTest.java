@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Substation;
 import com.powsybl.iidm.network.TopologyKind;
 import com.powsybl.iidm.network.VariantManager;
-import com.powsybl.iidm.network.VariantManager.VariantCloneStrategy;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import com.powsybl.iidm.serde.NetworkSerDe;
 import org.junit.jupiter.api.Test;
@@ -156,7 +155,7 @@ class VariantScopedSplitBenchmarkTest {
     private static Network contingenciesAsStructuralVariants(Network base, int k) {
         VariantManager vm = base.getVariantManager();
         for (int i = 0; i < k; i++) {
-            vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "c" + i, VariantCloneStrategy.STRUCTURAL);
+            vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "c" + i);
             vm.setWorkingVariant("c" + i);
             base.getLine("L" + i).remove();
         }
@@ -178,7 +177,7 @@ class VariantScopedSplitBenchmarkTest {
     // --- variant-scoped split: a STRUCTURAL clone, then the same split sequence, all public API ---
     private static void applyVariantSplit(Network base) {
         VariantManager vm = base.getVariantManager();
-        vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "faulted", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(VariantManagerConstants.INITIAL_VARIANT_ID, "faulted");
         vm.setWorkingVariant("faulted");
         applyCopySplit(base); // remove L0 + add fictitious VL + half-lines, now scoped to "faulted"
     }

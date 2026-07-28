@@ -81,19 +81,19 @@ class VariantPreAllocationStructuralCloneTest {
         vm.preAllocateVariants(4);
 
         // single-thread nested structural forks are allowed (chains are fine off the parallel region)
-        vm.cloneVariant(INITIAL, "s1", VariantCloneStrategy.STRUCTURAL);
-        vm.cloneVariant("s1", "s2", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s1");
+        vm.cloneVariant("s1", "s2");
 
         // once multi-thread access is enabled, forking from a structural variant is rejected fail-fast...
         vm.allowVariantMultiThreadAccess(true);
         PowsyblException e = assertThrows(PowsyblException.class,
-            () -> vm.cloneVariant("s1", "s3", VariantCloneStrategy.STRUCTURAL));
+            () -> vm.cloneVariant("s1", "s3"));
         assertTrue(e.getMessage().contains("must fork from a non-structural"));
 
         // ...the rejected clone left no partial state, and forking from the base is still fine
         assertTrue(vm.getVariantIds().contains("s1"));
         assertTrue(!vm.getVariantIds().contains("s3"));
-        vm.cloneVariant(INITIAL, "s4", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "s4");
         assertTrue(vm.getVariantIds().contains("s4"));
     }
 
@@ -111,7 +111,7 @@ class VariantPreAllocationStructuralCloneTest {
         gen.setTargetP(baseTargetP + 1);
 
         // forking a structural variant off the base freezes the base for the parallel region
-        vm.cloneVariant(INITIAL, "w", VariantCloneStrategy.STRUCTURAL);
+        vm.cloneVariant(INITIAL, "w");
 
         // writing the worker's own leaf is fine
         vm.setWorkingVariant("w");
