@@ -15,7 +15,6 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -30,8 +29,6 @@ final class BufferedChannelReader implements AutoCloseable {
     private final ReadableByteChannel channel;
     private final ByteBuffer buffer;
     private boolean channelExhausted;
-    // Reusable scratch array for decoding strings, grown on demand, to avoid a throwaway byte[] per string
-    private byte[] stringScratch = new byte[64];
 
     BufferedChannelReader(InputStream inputStream) {
         this(inputStream, DEFAULT_BUFFER_SIZE);
@@ -112,20 +109,6 @@ final class BufferedChannelReader implements AutoCloseable {
 
     byte[] readNBytes(int n) {
         byte[] out = new byte[n];
-        readInto(out, n);
-        return out;
-    }
-
-    /** Reads {@code n} bytes into a reusable scratch buffer and decodes them as UTF-8, without a per-call byte[]. */
-    String readString(int n) {
-        if (stringScratch.length < n) {
-            stringScratch = new byte[Math.max(n, stringScratch.length * 2)];
-        }
-        readInto(stringScratch, n);
-        return new String(stringScratch, 0, n, StandardCharsets.UTF_8);
-    }
-
-    private void readInto(byte[] out, int n) {
         int filled = 0;
         while (filled < n) {
             if (!buffer.hasRemaining()) {
@@ -135,6 +118,7 @@ final class BufferedChannelReader implements AutoCloseable {
             buffer.get(out, filled, take);
             filled += take;
         }
+        return out;
     }
 
     void skipNBytes(long n) {

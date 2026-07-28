@@ -204,11 +204,11 @@ public final class SteadyStateHypothesisExport {
 
     private static void writeEquivalentInjections(Network network, String cimNamespace, XMLStreamWriter writer, CgmesExportContext context) throws XMLStreamException {
         // One equivalent injection for every boundary line
-        Set<String> exported = new HashSet<>();
+        List<String> exported = new ArrayList<>();
 
         for (BoundaryLine bl : network.getBoundaryLines(BoundaryLineFilter.ALL)) {
             String equivalentInjectionId = context.getNamingStrategy().getCgmesIdFromProperty(bl, PROPERTY_EQUIVALENT_INJECTION);
-            if (exported.add(equivalentInjectionId)) {
+            if (!exported.contains(equivalentInjectionId)) {
                 // regulationStatus and regulationTarget are optional,
                 // but test cases contain the attributes with disabled and 0
                 boolean regulationStatus = false;

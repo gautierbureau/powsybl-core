@@ -69,11 +69,11 @@ abstract class AbstractBus extends AbstractIdentifiable<Bus> implements Bus {
 
     @Override
     public double getP() {
-        // single traversal of the connected terminals, instead of one for the count and one for the sum
-        boolean hasConnectedTerminal = false;
+        if (getConnectedTerminalCount() == 0) {
+            return Double.NaN;
+        }
         double p = 0;
         for (TerminalExt terminal : getConnectedTerminals()) {
-            hasConnectedTerminal = true;
             AbstractConnectable connectable = terminal.getConnectable();
             switch (connectable.getType()) {
                 case BUSBAR_SECTION, SHUNT_COMPENSATOR, STATIC_VAR_COMPENSATOR, LINE, TWO_WINDINGS_TRANSFORMER,
@@ -88,16 +88,16 @@ abstract class AbstractBus extends AbstractIdentifiable<Bus> implements Bus {
                 default -> throw new IllegalStateException();
             }
         }
-        return hasConnectedTerminal ? p : Double.NaN;
+        return p;
     }
 
     @Override
     public double getQ() {
-        // single traversal of the connected terminals, instead of one for the count and one for the sum
-        boolean hasConnectedTerminal = false;
+        if (getConnectedTerminalCount() == 0) {
+            return Double.NaN;
+        }
         double q = 0;
         for (TerminalExt terminal : getConnectedTerminals()) {
-            hasConnectedTerminal = true;
             AbstractConnectable connectable = terminal.getConnectable();
             switch (connectable.getType()) {
                 case BUSBAR_SECTION, LINE, TWO_WINDINGS_TRANSFORMER, THREE_WINDINGS_TRANSFORMER, BOUNDARY_LINE, GROUND -> {
@@ -111,7 +111,7 @@ abstract class AbstractBus extends AbstractIdentifiable<Bus> implements Bus {
                 default -> throw new IllegalStateException();
             }
         }
-        return hasConnectedTerminal ? q : Double.NaN;
+        return q;
     }
 
     private <C extends Connectable> Iterable<C> getConnectables(Class<C> clazz) {

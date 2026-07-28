@@ -27,9 +27,7 @@ public class PropertyBag extends HashMap<String, String> {
     }
 
     public PropertyBag(List<String> propertyNames, boolean removeInitialUnderscoreForIdentifiers, boolean decodeEscapedIdentifiers) {
-        // Size for the load factor so that inserting propertyNames.size() entries (the common case,
-        // one per column of a query result row) does not trigger a rehash
-        super((int) (propertyNames.size() / 0.75f) + 1);
+        super(propertyNames.size());
         this.propertyNames = propertyNames;
         this.removeInitialUnderscoreForIdentifiers = removeInitialUnderscoreForIdentifiers;
         this.decodeEscapedIdentifiers = decodeEscapedIdentifiers;
@@ -195,10 +193,7 @@ public class PropertyBag extends HashMap<String, String> {
             if (removeInitialUnderscoreForIdentifiers && !s1.isEmpty() && s1.charAt(0) == '_') {
                 s1 = s1.substring(1);
             }
-            // URLDecoder.decode allocates a StringBuilder and walks every char; the vast majority of
-            // identifiers contain no escape, so only decode when there is actually something to decode
-            // ('%' escapes, or '+' which URLDecoder maps to a space)
-            if (decodeEscapedIdentifiers && (s1.indexOf('%') >= 0 || s1.indexOf('+') >= 0)) {
+            if (decodeEscapedIdentifiers) {
                 s1 = URLDecoder.decode(s1, StandardCharsets.UTF_8);
             }
         }
@@ -233,12 +228,12 @@ public class PropertyBag extends HashMap<String, String> {
         return NAMESPACE_PREFIX;
     }
 
-    public void setResourceNames(Collection<String> resourceNames) {
+    public void setResourceNames(List<String> resourceNames) {
         this.resourceNames.clear();
         this.resourceNames.addAll(Objects.requireNonNull(resourceNames));
     }
 
-    public void setClassPropertyNames(Collection<String> classPropertyNames) {
+    public void setClassPropertyNames(List<String> classPropertyNames) {
         this.classPropertyNames.clear();
         this.classPropertyNames.addAll(Objects.requireNonNull(classPropertyNames));
     }
@@ -247,7 +242,7 @@ public class PropertyBag extends HashMap<String, String> {
         return classPropertyNames.contains(name);
     }
 
-    public void setMultivaluedProperty(Collection<String> multiValuedPropertyNames) {
+    public void setMultivaluedProperty(List<String> multiValuedPropertyNames) {
         this.multiValuedPropertyNames.clear();
         this.multiValuedPropertyNames.addAll(Objects.requireNonNull(multiValuedPropertyNames));
     }
@@ -269,15 +264,13 @@ public class PropertyBag extends HashMap<String, String> {
     private final List<String> propertyNames;
     private final boolean removeInitialUnderscoreForIdentifiers;
     private final boolean decodeEscapedIdentifiers;
-    // Sets (not lists) so that the per-property membership tests in isResource/isClassProperty/
-    // isMultivaluedProperty are O(1) instead of a linear scan on the write path
-    private final Set<String> resourceNames = new LinkedHashSet<>();
-    private final Set<String> classPropertyNames = new LinkedHashSet<>();
-    private final Set<String> multiValuedPropertyNames = new LinkedHashSet<>();
+    private final List<String> resourceNames = new ArrayList<>();
+    private final List<String> classPropertyNames = new ArrayList<>();
+    private final List<String> multiValuedPropertyNames = new ArrayList<>();
 
     private static final String NAMESPACE_PREFIX = "data";
     private static final String INDENTATION = "    ";
-    private static final Set<String> RESOURCE_NAMES = Set.of("TopologicalNode", "Terminal", "ShuntCompensator",
+    private static final List<String> RESOURCE_NAMES = Arrays.asList("TopologicalNode", "Terminal", "ShuntCompensator",
         "TapChanger", "ConductingEquipment", "Model.DependentOn", "TopologicalNodes",
         "AngleRefTopologicalNode");
 

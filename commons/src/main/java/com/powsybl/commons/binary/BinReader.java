@@ -15,6 +15,7 @@ import com.powsybl.commons.io.TreeDataHeader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import static com.powsybl.commons.binary.BinUtil.*;
@@ -27,10 +28,6 @@ public class BinReader extends AbstractTreeDataReader {
 
     private final BufferedChannelReader in;
     private final byte[] binaryMagicNumber;
-
-    // Class.getEnumConstants() clones its internal array on every call; cache the shared array per
-    // enum class so that reading enum attributes does not allocate a fresh array each time
-    private final Map<Class<?>, Object> enumConstantsCache = new HashMap<>();
 
     private String[] names;
     private byte[] types;
@@ -180,7 +177,7 @@ public class BinReader extends AbstractTreeDataReader {
         if (len == NULL_STRING_SENTINEL) {
             return null;
         }
-        return in.readString(len);
+        return new String(in.readNBytes(len), StandardCharsets.UTF_8);
     }
 
     @Override
@@ -300,8 +297,7 @@ public class BinReader extends AbstractTreeDataReader {
         }
         int ordinal = in.readUnsignedShort();
         peekNextEntry();
-        @SuppressWarnings("unchecked")
-        T[] constants = (T[]) enumConstantsCache.computeIfAbsent(clazz, Class::getEnumConstants);
+        T[] constants = clazz.getEnumConstants();
         if (ordinal >= constants.length) {
             throw new PowsyblException("Invalid enum ordinal for " + clazz.getSimpleName() + ": "
                     + ordinal + " (max " + (constants.length - 1) + ")");

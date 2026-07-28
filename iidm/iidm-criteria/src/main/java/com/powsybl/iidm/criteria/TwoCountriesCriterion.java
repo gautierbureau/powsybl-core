@@ -13,10 +13,8 @@ import com.powsybl.iidm.network.*;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * @author Etienne Lesot {@literal <etienne.lesot@rte-france.com>}
@@ -25,9 +23,6 @@ public class TwoCountriesCriterion implements Criterion {
 
     private final List<Country> countries1;
     private final List<Country> countries2;
-    // O(1) membership on the per-element filter path (the list getters are kept for the API)
-    private final Set<Country> countrySet1;
-    private final Set<Country> countrySet2;
 
     public TwoCountriesCriterion(List<Country> countries) {
         this(countries, Collections.emptyList());
@@ -38,8 +33,6 @@ public class TwoCountriesCriterion implements Criterion {
         Objects.requireNonNull(countries2);
         this.countries1 = ImmutableList.copyOf(countries1);
         this.countries2 = ImmutableList.copyOf(countries2);
-        this.countrySet1 = this.countries1.isEmpty() ? EnumSet.noneOf(Country.class) : EnumSet.copyOf(this.countries1);
-        this.countrySet2 = this.countries2.isEmpty() ? EnumSet.noneOf(Country.class) : EnumSet.copyOf(this.countries2);
     }
 
     @Override
@@ -70,14 +63,14 @@ public class TwoCountriesCriterion implements Criterion {
     }
 
     private boolean filterWithCountries(Country countrySide1, Country countrySide2) {
-        if (countrySide1 == null && !countrySet1.isEmpty() || countrySide2 == null && !countrySet2.isEmpty()) {
+        if (countrySide1 == null && !countries1.isEmpty() || countrySide2 == null && !countries2.isEmpty()) {
             return false;
         }
-        return countrySet1.isEmpty() && countrySet2.isEmpty()
-                || countrySet1.isEmpty() && (countrySet2.contains(countrySide2) || countrySet2.contains(countrySide1))
-                || countrySet2.isEmpty() && (countrySet1.contains(countrySide2) || countrySet1.contains(countrySide1))
-                || countrySet1.contains(countrySide1) && countrySet2.contains(countrySide2)
-                || countrySet1.contains(countrySide2) && countrySet2.contains(countrySide1);
+        return countries1.isEmpty() && countries2.isEmpty()
+                || countries1.isEmpty() && (countries2.contains(countrySide2) || countries2.contains(countrySide1))
+                || countries2.isEmpty() && (countries1.contains(countrySide2) || countries1.contains(countrySide1))
+                || countries1.contains(countrySide1) && countries2.contains(countrySide2)
+                || countries1.contains(countrySide2) && countries2.contains(countrySide1);
     }
 
     private static List<Country> getCountries(Terminal terminal1, Terminal terminal2) {

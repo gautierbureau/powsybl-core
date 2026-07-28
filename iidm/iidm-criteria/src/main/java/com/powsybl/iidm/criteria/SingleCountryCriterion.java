@@ -11,10 +11,8 @@ import com.google.common.collect.ImmutableList;
 import com.powsybl.iidm.criteria.translation.NetworkElement;
 import com.powsybl.iidm.network.*;
 
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * @author Etienne Lesot {@literal <etienne.lesot@rte-france.com>}
@@ -22,13 +20,10 @@ import java.util.Set;
 public class SingleCountryCriterion implements Criterion {
 
     private final List<Country> countries;
-    // O(1) membership on the per-element filter path (the list getter is kept for the API)
-    private final Set<Country> countrySet;
 
     public SingleCountryCriterion(List<Country> countries) {
         Objects.requireNonNull(countries);
         this.countries = ImmutableList.copyOf(countries);
-        this.countrySet = this.countries.isEmpty() ? EnumSet.noneOf(Country.class) : EnumSet.copyOf(this.countries);
     }
 
     @Override
@@ -78,9 +73,9 @@ public class SingleCountryCriterion implements Criterion {
     }
 
     private boolean filterWithCountry(Country country) {
-        if (country == null && !countrySet.isEmpty()) {
+        if (country == null && !countries.isEmpty()) {
             return false;
         }
-        return countrySet.isEmpty() || countrySet.contains(country);
+        return countries.isEmpty() || countries.contains(country);
     }
 }

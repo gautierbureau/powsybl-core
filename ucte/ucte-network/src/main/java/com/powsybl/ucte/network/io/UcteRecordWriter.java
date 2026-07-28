@@ -68,23 +68,9 @@ class UcteRecordWriter {
     }
 
     private String alignAndTruncate(String str, int strLen, Alignment alignment) {
-        // Equivalent to String.format("%-<strLen>s"/"%<strLen>s", str).substring(0, strLen) but without
-        // building and parsing a format string on every field written: pad with spaces to strLen, or take
-        // the first strLen characters when the value is already at least that long.
-        int length = str.length();
-        if (length >= strLen) {
-            return str.substring(0, strLen);
-        }
-        StringBuilder sb = new StringBuilder(strLen);
-        int padding = strLen - length;
-        if (alignment == Alignment.LEFT) {
-            sb.append(str);
-            sb.append(" ".repeat(padding));
-        } else {
-            sb.append(" ".repeat(padding));
-            sb.append(str);
-        }
-        return sb.toString();
+        String format = String.format(Locale.US, alignment.equals(Alignment.LEFT) ? "%%-%ds" : "%%%ds", strLen);
+        String formattedStr = String.format(Locale.US, format, str);
+        return formattedStr.substring(0, strLen);
     }
 
     private int maxLimitInt(int numberOfChars) {

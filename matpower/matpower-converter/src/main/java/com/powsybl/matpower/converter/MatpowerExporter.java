@@ -32,7 +32,6 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.util.*;
 import java.util.function.DoubleUnaryOperator;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -240,12 +239,10 @@ public class MatpowerExporter implements Exporter {
         return context.mBusesNumbersByIds.values().stream().max(Comparator.naturalOrder()).orElse(0);
     }
 
-    private static final Pattern BUS_NUMBER_PATTERN = Pattern.compile("[1-9]\\d*");
-
     // according to the busId of the import process
     private static OptionalInt extractBusNumber(String configuredBusId) {
         String busNumber = configuredBusId.replace("BUS-", "");
-        return BUS_NUMBER_PATTERN.matcher(busNumber).matches() ? OptionalInt.of(Integer.parseInt(busNumber)) : OptionalInt.empty();
+        return busNumber.matches("[1-9]\\d*") ? OptionalInt.of(Integer.parseInt(busNumber)) : OptionalInt.empty();
     }
 
     private static int findBusNumber(String busId, Context context) {

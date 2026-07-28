@@ -36,7 +36,7 @@ class UcteRecordParser {
     boolean nextLine() throws IOException {
         do {
             line = reader.readLine();
-        } while (line != null && line.isBlank()); // skip empty lines (isBlank avoids the trim() allocation)
+        } while (line != null && line.trim().isEmpty()); // skip empty lines
         return line != null;
     }
 
@@ -78,8 +78,8 @@ class UcteRecordParser {
     }
 
     Integer parseInt(int beginIndex, int endIndex) {
-        String str = parseString(beginIndex, endIndex); // already trimmed by parseString
-        return str == null || str.isEmpty() ? null : Integer.valueOf(str);
+        String str = parseString(beginIndex, endIndex);
+        return str == null || str.trim().isEmpty() ? null : Integer.valueOf(str);
     }
 
     Integer parseInt(int index) {
@@ -88,8 +88,8 @@ class UcteRecordParser {
     }
 
     double parseDouble(int beginIndex, int endIndex) {
-        String str = parseString(beginIndex, endIndex); // already trimmed by parseString
-        return str == null || str.isEmpty() ? Double.NaN : Double.parseDouble(str);
+        String str = parseString(beginIndex, endIndex);
+        return str == null || str.trim().isEmpty() ? Double.NaN : Double.valueOf(str);
     }
 
     <E extends Enum<E>> E parseEnumOrdinal(int index, Class<E> clazz) {

@@ -8,13 +8,11 @@
 package com.powsybl.iidm.criteria;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.*;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * @author Etienne Lesot {@literal <etienne.lesot@rte-france.com>}
@@ -22,8 +20,6 @@ import java.util.Set;
 public class PropertyCriterion implements Criterion {
     private final String propertyKey;
     private final List<String> propertyValues;
-    // O(1) membership on the per-element filter path (the list getter is kept for the API)
-    private final Set<String> propertyValueSet;
     private final EquipmentToCheck equipmentToCheck;
     private final SideToCheck sideToCheck;
 
@@ -48,7 +44,6 @@ public class PropertyCriterion implements Criterion {
                              EquipmentToCheck equipmentToCheck, SideToCheck sideToCheck) {
         this.propertyKey = Objects.requireNonNull(propertyKey);
         this.propertyValues = ImmutableList.copyOf(propertyValues);
-        this.propertyValueSet = ImmutableSet.copyOf(this.propertyValues);
         this.equipmentToCheck = Objects.requireNonNull(equipmentToCheck);
         this.sideToCheck = sideToCheck;
     }
@@ -62,13 +57,13 @@ public class PropertyCriterion implements Criterion {
     public boolean filter(Identifiable<?> identifiable, IdentifiableType type) {
         return switch (equipmentToCheck) {
             case SELF ->
-                identifiable.hasProperty(propertyKey) && propertyValueSet.contains(identifiable.getProperty(propertyKey));
+                identifiable.hasProperty(propertyKey) && propertyValues.contains(identifiable.getProperty(propertyKey));
             case VOLTAGE_LEVEL, SUBSTATION -> filterEquipment(identifiable, type);
         };
     }
 
     private boolean filterIdentifiable(Identifiable<?> identifiable) {
-        return identifiable.hasProperty(propertyKey) && propertyValueSet.contains(identifiable.getProperty(propertyKey));
+        return identifiable.hasProperty(propertyKey) && propertyValues.contains(identifiable.getProperty(propertyKey));
     }
 
     private boolean filterEquipment(Identifiable<?> identifiable, IdentifiableType type) {

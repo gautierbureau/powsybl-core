@@ -36,7 +36,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -185,18 +184,13 @@ public final class XmlUtil {
     }
 
     public static XMLStreamWriter initializeWriter(boolean indent, String indentString, OutputStream os) throws XMLStreamException {
-        return initializeWriter(indent, indentString, os, StandardCharsets.UTF_8);
+        XMLStreamWriter writer = XML_OUTPUT_FACTORY_SUPPLIER.get().createXMLStreamWriter(os, StandardCharsets.UTF_8.toString());
+        return initializeWriter(indent, indentString, writer);
     }
 
     public static XMLStreamWriter initializeWriter(boolean indent, String indentString, OutputStream os, Charset charset) throws XMLStreamException {
-        // Build the StAX writer on top of a non-synchronized buffered writer rather than directly on the
-        // OutputStream: the JDK StAX writer over an OutputStream wraps it in a java.io writer that takes an
-        // internal lock on every (small) write, which dominates XML export CPU. Encoding is delegated to an
-        // OutputStreamWriter so the produced bytes are unchanged. Callers must flush/close the writer before
-        // closing the underlying stream (XmlWriter.close() and the CGMES exporters do so).
-        Writer writer = new UnsynchronizedBufferedWriter(new OutputStreamWriter(os, charset));
-        XMLStreamWriter xmlStreamWriter = XML_OUTPUT_FACTORY_SUPPLIER.get().createXMLStreamWriter(writer);
-        return initializeWriter(indent, indentString, xmlStreamWriter, charset);
+        XMLStreamWriter writer = XML_OUTPUT_FACTORY_SUPPLIER.get().createXMLStreamWriter(os, charset.name());
+        return initializeWriter(indent, indentString, writer, charset);
     }
 
     public static XMLStreamWriter initializeWriter(boolean indent, String indentString, Writer writer) throws XMLStreamException {
@@ -246,9 +240,6 @@ public final class XmlUtil {
         } else {
             xmlWriter = initialXmlWriter;
         }
-        // Flush on writeEndDocument so that a buffering underlying writer (used on the OutputStream path)
-        // never loses its tail, even for callers that only call writeEndDocument without a final flush/close.
-        xmlWriter = new FlushOnEndDocumentStreamWriter(xmlWriter);
         xmlWriter.writeStartDocument(charset.name(), "1.0");
         return xmlWriter;
     }

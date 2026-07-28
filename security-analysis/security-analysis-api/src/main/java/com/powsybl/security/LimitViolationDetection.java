@@ -118,11 +118,8 @@ public final class LimitViolationDetection {
                                     Consumer<LimitViolation> consumer) {
         Objects.requireNonNull(side);
         Collection<LimitsContainer<LoadingLimits>> allLoadingLimits = limitsComputer.computeLimits(branch, type, side.toThreeSides(), false);
-        // This method is called for every branch side (and every 3wt side) for the pre-contingency
-        // state and every post-contingency state, so avoid allocating the set when TATL is not checked
-        final Set<String> temporaryOverloadIds;
+        final Set<String> temporaryOverloadIds = new HashSet<>();
         if (currentLimitTypes.contains(LoadingLimitType.TATL)) {
-            temporaryOverloadIds = new HashSet<>();
             //get all the temporary overloads ids, and also use the consumer on them as we go
             allLoadingLimits.stream()
                 .map(limits -> LimitViolationUtils.getOverload(limits, value))
@@ -146,8 +143,6 @@ public final class LimitViolationDetection {
                         temporaryOverloadIds.add(overload.getOperationalLimitsGroupId());
                     }
                 );
-        } else {
-            temporaryOverloadIds = Collections.emptySet();
         }
 
         if (currentLimitTypes.contains(LoadingLimitType.PATL)) {
@@ -218,10 +213,8 @@ public final class LimitViolationDetection {
                                     LimitType type, Set<LoadingLimitType> currentLimitTypes, LimitsComputer<Identifiable<?>, LoadingLimits> limitsComputer,
                                     Consumer<LimitViolation> consumer) {
         Collection<LimitsContainer<LoadingLimits>> allLoadingLimits = limitsComputer.computeLimits(transformer, type, side, false);
-        // Called for every 3wt side per contingency state: only allocate the set when TATL is checked
-        final Set<String> temporaryOverloadIds;
+        final Set<String> temporaryOverloadIds = new HashSet<>();
         if (currentLimitTypes.contains(LoadingLimitType.TATL)) {
-            temporaryOverloadIds = new HashSet<>();
             //get all the temporary overloads and send them through the consumer
             allLoadingLimits.stream()
                 .map(limits -> LimitViolationUtils.getOverload(limits, value))
@@ -243,8 +236,6 @@ public final class LimitViolationDetection {
                     );
                     temporaryOverloadIds.add(overload.getOperationalLimitsGroupId());
                 });
-        } else {
-            temporaryOverloadIds = Collections.emptySet();
         }
 
         if (currentLimitTypes.contains(LoadingLimitType.PATL)) {
@@ -370,11 +361,7 @@ public final class LimitViolationDetection {
     public static ViolationLocation createViolationLocation(Bus bus) {
         VoltageLevel vl = bus.getVoltageLevel();
         if (vl.getTopologyKind() == TopologyKind.NODE_BREAKER) {
-            // Resolve the nodes of this single bus instead of building the node->bus map of the whole
-            // voltage level (which also runs a topology traversal for every terminal-less node) just to
-            // keep one bus's entry; this runs once per bus voltage violation across all contingencies
-            List<Integer> nodes = Networks.getNodes(bus.getId(), vl, t -> t.getBusView().getBus())
-                    .boxed().toList();
+            List<Integer> nodes = Networks.getNodesByBus(vl).get(bus.getId()).stream().toList();
             return new NodeBreakerViolationLocation(vl.getId(), nodes);
         } else {
             try {

@@ -778,24 +778,22 @@ public final class EquipmentExport {
     private static void writeThreeWindingsTransformers(Network network, Set<String> regulatingControlsWritten, String cimNamespace,
                                                       String euNamespace, Set<String> exportedLimitTypes, XMLStreamWriter writer, CgmesExportContext context) throws XMLStreamException {
         for (ThreeWindingsTransformer twt : network.getThreeWindingsTransformers()) {
-            String twtId = context.getNamingStrategy().getCgmesId(twt);
-            String twtName = twt.getNameOrId();
-            PowerTransformerEq.write(twtId, twtName,
+            PowerTransformerEq.write(context.getNamingStrategy().getCgmesId(twt), twt.getNameOrId(),
                 twt.getSubstation().map(s -> context.getNamingStrategy().getCgmesId(s)).orElse(null), cimNamespace, writer, context);
             double ratedU0 = twt.getRatedU0();
 
             EndNumberAssignerForThreeWindingsTransformer endNumberAssigner = new EndNumberAssignerForThreeWindingsTransformer(twt, context.exportTransformersWithHighestVoltageAtEnd1());
 
             String end1Id = context.getNamingStrategy().getCgmesIdFromAlias(twt, ALIAS_TRANSFORMER_END1);
-            writeThreeWindingsTransformerEnd(twt, twtId, twtName + "_1",
+            writeThreeWindingsTransformerEnd(twt, context.getNamingStrategy().getCgmesId(twt), twt.getNameOrId() + "_1",
                 end1Id, endNumberAssigner.getEndNumberForLeg1(), 1, twt.getLeg1(), ratedU0, getTerminalId(twt.getLeg1().getTerminal(), context),
                 regulatingControlsWritten, cimNamespace, euNamespace, exportedLimitTypes, writer, context);
             String end2Id = context.getNamingStrategy().getCgmesIdFromAlias(twt, ALIAS_TRANSFORMER_END2);
-            writeThreeWindingsTransformerEnd(twt, twtId, twtName + "_2",
+            writeThreeWindingsTransformerEnd(twt, context.getNamingStrategy().getCgmesId(twt), twt.getNameOrId() + "_2",
                 end2Id, endNumberAssigner.getEndNumberForLeg2(), 2, twt.getLeg2(), ratedU0, getTerminalId(twt.getLeg2().getTerminal(), context),
                 regulatingControlsWritten, cimNamespace, euNamespace, exportedLimitTypes, writer, context);
             String end3Id = context.getNamingStrategy().getCgmesIdFromAlias(twt, ALIAS_TRANSFORMER_END3);
-            writeThreeWindingsTransformerEnd(twt, twtId, twtName + "_3",
+            writeThreeWindingsTransformerEnd(twt, context.getNamingStrategy().getCgmesId(twt), twt.getNameOrId() + "_3",
                 end3Id, endNumberAssigner.getEndNumberForLeg3(), 3, twt.getLeg3(), ratedU0, getTerminalId(twt.getLeg3().getTerminal(), context),
                 regulatingControlsWritten, cimNamespace, euNamespace, exportedLimitTypes, writer, context);
         }
@@ -1816,7 +1814,6 @@ public final class EquipmentExport {
 
     private static Map<AcDcConverter<?>, DCConverterUnit> getAcDcConvertersUnit(Network network, CgmesExportContext context) {
         Map<AcDcConverter<?>, DCConverterUnit> acDcConvertersUnit = new HashMap<>();
-        Map<String, DCConverterUnit> unitsById = new HashMap<>();
 
         Stream.concat(network.getLineCommutatedConverterStream(), network.getVoltageSourceConverterStream())
                 .forEach(converter -> {
@@ -1825,11 +1822,14 @@ public final class EquipmentExport {
                             context.getNamingStrategy().getCgmesId(refTyped(converter), DC_CONVERTER_UNIT));
 
                     // Only create a new DCConverterUnit if it hasn't been created already for another AcDcConverter.
-                    DCConverterUnit dcConverterUnit = unitsById.computeIfAbsent(unitId, id -> new DCConverterUnit(
-                            id,
-                            converter.getNameOrId() + " Unit",
-                            context.getNamingStrategy().getCgmesId(converter.getTerminal1().getVoltageLevel().getNullableSubstation())
-                    ));
+                    DCConverterUnit dcConverterUnit = acDcConvertersUnit.values().stream()
+                            .filter(u -> u.id().equals(unitId))
+                            .findFirst()
+                            .orElseGet(() -> new DCConverterUnit(
+                                    unitId,
+                                    converter.getNameOrId() + " Unit",
+                                    context.getNamingStrategy().getCgmesId(converter.getTerminal1().getVoltageLevel().getNullableSubstation())
+                            ));
 
                     acDcConvertersUnit.put(converter, dcConverterUnit);
                 });

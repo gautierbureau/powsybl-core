@@ -74,13 +74,7 @@ public class AtLeastOneNominalVoltageCriterion implements Criterion {
     }
 
     private boolean filterNominalVoltages(List<Double> nominalVoltagesToCheck) {
-        // direct loop instead of a stream pipeline allocated on every filter call
-        for (Double nominalVoltage : nominalVoltagesToCheck) {
-            if (nominalVoltage != null && voltageInterval.checkIsBetweenBound(nominalVoltage)) {
-                return true;
-            }
-        }
-        return false;
+        return nominalVoltagesToCheck.stream().filter(Objects::nonNull).anyMatch(voltageInterval::checkIsBetweenBound);
     }
 
     public VoltageInterval getVoltageInterval() {

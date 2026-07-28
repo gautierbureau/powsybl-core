@@ -97,15 +97,10 @@ public final class CgmesExportUtil {
     }
 
     public static boolean isValidCimMasterRID(String id) {
-        // This method is called for every exported identifier: since each pattern only matches
-        // strings of a fixed length, dispatch on the length to run at most one regex
-        return switch (id.length()) {
-            case 36, 37 -> CIM_MRID_PATTERN.matcher(id).matches(); // uuid, with an optional leading '_'
-            case 45 -> URN_UUID_PATTERN.matcher(id).matches(); // uuid with a leading 'urn:uuid:'
-            case 31 -> ENTSOE_BD_EXCEPTIONS_PATTERN1.matcher(id).matches();
-            case 32 -> ENTSOE_BD_EXCEPTIONS_PATTERN2.matcher(id).matches();
-            default -> false;
-        };
+        return CIM_MRID_PATTERN.matcher(id).matches()
+                || URN_UUID_PATTERN.matcher(id).matches()
+                || ENTSOE_BD_EXCEPTIONS_PATTERN1.matcher(id).matches()
+                || ENTSOE_BD_EXCEPTIONS_PATTERN2.matcher(id).matches();
     }
 
     public static String getUniqueRandomId() {

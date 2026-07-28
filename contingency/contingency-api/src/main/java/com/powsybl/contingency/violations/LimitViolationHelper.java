@@ -21,7 +21,7 @@ public final class LimitViolationHelper {
     private LimitViolationHelper() {
     }
 
-    public static VoltageLevel getVoltageLevel(LimitViolation limitViolation, Network network) {
+    private static VoltageLevel getVoltageLevel(LimitViolation limitViolation, Network network) {
         Objects.requireNonNull(network);
         Objects.requireNonNull(limitViolation);
 

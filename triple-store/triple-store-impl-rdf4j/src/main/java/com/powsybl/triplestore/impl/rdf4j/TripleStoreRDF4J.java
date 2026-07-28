@@ -199,23 +199,17 @@ public class TripleStoreRDF4J extends AbstractPowsyblTripleStore {
                 // This means that we have to filter distinct results
                 try (TupleQueryResult r = QueryResults.distinctResults(q.evaluate())) {
                     List<String> names = r.getBindingNames();
-                    // Hoist the options and iterate by index with a single binding lookup per cell:
-                    // this loop runs once per result row and once per column per row, so it is one
-                    // of the hottest paths when materializing large CGMES query results.
-                    boolean removeInitialUnderscore = getOptions().isRemoveInitialUnderscoreForIdentifiers();
-                    boolean unescapeIdentifiers = getOptions().unescapeIdentifiers();
-                    int namesSize = names.size();
                     while (r.hasNext()) {
                         BindingSet s = r.next();
-                        PropertyBag result = new PropertyBag(names, removeInitialUnderscore, unescapeIdentifiers);
-                        for (int i = 0; i < namesSize; i++) {
-                            String name = names.get(i);
-                            Value value = s.getValue(name); // single lookup, null when the binding is absent
-                            if (value != null) {
-                                result.put(name, value.stringValue());
+                        PropertyBag result = new PropertyBag(names, getOptions().isRemoveInitialUnderscoreForIdentifiers(), getOptions().unescapeIdentifiers());
+
+                        names.forEach(name -> {
+                            if (s.hasBinding(name)) {
+                                String value = s.getBinding(name).getValue().stringValue();
+                                result.put(name, value);
                             }
-                        }
-                        if (!result.isEmpty()) {
+                        });
+                        if (result.size() > 0) {
                             results.add(result);
                         }
                     }
@@ -347,10 +341,9 @@ public class TripleStoreRDF4J extends AbstractPowsyblTripleStore {
 
     private static void addMultivaluedProperty(RepositoryConnection cnx, String value, IRI resource, IRI predicate, Resource context) {
         String[] objs = value.split(",");
-        String dataNamespace = cnx.getNamespace("data"); // invariant across the values, resolve once
         for (String o : objs) {
             if (!o.startsWith("urn:uuid:")) {
-                o = dataNamespace + o;
+                o = cnx.getNamespace("data") + o;
             }
             IRI object = cnx.getValueFactory().createIRI(o);
             Statement st = cnx.getValueFactory().createStatement(resource, predicate, object);
