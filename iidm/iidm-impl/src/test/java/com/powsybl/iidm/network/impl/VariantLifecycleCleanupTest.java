@@ -89,6 +89,29 @@ class VariantLifecycleCleanupTest {
     }
 
     /**
+     * The guard on structural edits must not catch the variant lifecycle's own tidy-up: removing a variant
+     * drops the objects that only existed in it, and that is bookkeeping under the variant lock rather than
+     * a caller editing the network, so it stays legal while multi-thread access is enabled.
+     */
+    @Test
+    void removingAVariantStillCleansUpWhileMultiThreadAccessIsEnabled() {
+        Network n = grid();
+        VariantManager vm = n.getVariantManager();
+
+        vm.cloneVariant(INITIAL, "s");
+        vm.setWorkingVariant("s");
+        addLoad(n, "LD", 1);
+
+        vm.setWorkingVariant(INITIAL);
+        vm.allowVariantMultiThreadAccess(true);
+        assertDoesNotThrow(() -> vm.removeVariant("s"));
+
+        vm.allowVariantMultiThreadAccess(false);
+        assertNull(n.getLoad("LD"));
+        assertDoesNotThrow(() -> addLoad(n, "LD", 2)); // the id was freed
+    }
+
+    /**
      * Variant-dependent attributes may be written concurrently; structure may not — it is shared by every
      * variant. Attempting it used to corrupt the network index or surface as an unrelated
      * {@code ConcurrentModificationException}; it now fails fast and says what to do.

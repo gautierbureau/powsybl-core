@@ -291,11 +291,25 @@ class NetworkIndex {
     }
 
     void remove(Identifiable obj) {
+        if (existence != null) {
+            existence.checkStructuralEditAllowed(obj.getId());
+        }
+        doRemove(obj);
+    }
+
+    /**
+     * Remove an object that the variant lifecycle itself is dropping — an object whose only variant has just
+     * been removed. This is internal bookkeeping driven by {@code removeVariant} under the variant lock, not
+     * a caller editing the network, so it is not subject to the multi-thread structural-edit guard: the
+     * caller may legitimately be tidying up while multi-thread variant access is still enabled.
+     */
+    void removeVariantOrphan(Identifiable<?> obj) {
+        doRemove(obj);
+    }
+
+    private void doRemove(Identifiable obj) {
         checkId(obj.getId());
         String id = obj.getId();
-        if (existence != null) {
-            existence.checkStructuralEditAllowed(id);
-        }
         Identifiable<?> primary = objectsById.get(id);
         if (primary == obj) {
             // remove the primary; promote an extra (a same-id variant-scoped object) to primary if any
