@@ -122,7 +122,7 @@ class SwitchVariantStore implements VariantColumnStore {
      * Allocate a row for a new switch, initialised with the given open/retained state in every live variant
      * band (a new switch has the same state in all variants, as the previous per-switch constructor did).
      */
-    int allocateRow(boolean openValue, boolean retainedValue) {
+    synchronized int allocateRow(boolean openValue, boolean retainedValue) {
         int row = rowCount++;
         ensureRow(row);
         boolean[][][] od = open;

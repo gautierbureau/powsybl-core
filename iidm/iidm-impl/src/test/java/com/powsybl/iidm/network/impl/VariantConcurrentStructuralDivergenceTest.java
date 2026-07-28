@@ -31,9 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The workload this whole feature exists for: one variant per worker, each applying its own contingency in
- * parallel on a single shared network. Each worker removes a different line in its own variant, and must see
- * exactly its own removal — no other worker's, and never a corrupted index or a
- * {@code ConcurrentModificationException} from an unrelated read.
+ * parallel on a single shared network. Each worker removes a different line in its own variant — and adds
+ * its own equipment there — and must see exactly its own changes, no other worker's, and never a corrupted
+ * index or a {@code ConcurrentModificationException} from an unrelated read.
  *
  * <p>Structure is shared between variants, so the per-variant divergence bookkeeping is what has to be
  * thread-safe here: the maps keyed by variant are concurrent, while the per-variant entries below them stay
@@ -73,14 +73,22 @@ class VariantConcurrentStructuralDivergenceTest {
         vm.cloneVariant(INITIAL, variant);
         vm.setWorkingVariant(variant);
 
-        n.getLine("L" + k).remove();            // structural, scoped to this worker's variant
-        n.getLoad("LD" + k).setP0(100.0 + k);   // and a state write alongside it
+        n.getLine("L" + k).remove();            // structural removal, scoped to this worker's variant
+        n.getLoad("LD" + k).setP0(100.0 + k);   // a state write alongside it
 
-        // its own contingency is applied, and no other worker's is visible here
+        // ...and a creation: a new load allocates a row in the columnar stores and an entry in the index,
+        // both shared by every variant, which is what needed the chunked row storage
+        n.getVoltageLevel("VL" + k).newLoad().setId("NEW" + k)
+                .setBus("B" + k).setConnectableBus("B" + k).setP0(7.0 + k).setQ0(0).add();
+
+        // its own changes are applied, and no other worker's is visible here
         assertNull(n.getLine("L" + k));
+        assertNotNull(n.getLoad("NEW" + k));
+        assertEquals(7.0 + k, n.getLoad("NEW" + k).getP0(), 0.0);
         for (int j = 0; j < WORKERS; j++) {
             if (j != k) {
                 assertNotNull(n.getLine("L" + j), "worker " + k + " saw worker " + j + "'s removal");
+                assertNull(n.getLoad("NEW" + j), "worker " + k + " saw worker " + j + "'s new load");
             }
         }
         assertEquals(100.0 + k, n.getLoad("LD" + k).getP0(), 0.0);
@@ -123,6 +131,8 @@ class VariantConcurrentStructuralDivergenceTest {
             assertNull(n.getLine("L" + k));
             assertEquals(WORKERS - 1, n.getLineCount());
             assertEquals(100.0 + k, n.getLoad("LD" + k).getP0(), 0.0);
+            assertNotNull(n.getLoad("NEW" + k));
+            assertEquals(7.0 + k, n.getLoad("NEW" + k).getP0(), 0.0);
         }
 
         // ...and the shared base was never touched
@@ -131,6 +141,7 @@ class VariantConcurrentStructuralDivergenceTest {
         for (int k = 0; k < WORKERS; k++) {
             assertNotNull(n.getLine("L" + k));
             assertEquals(1.0, n.getLoad("LD" + k).getP0(), 0.0);
+            assertNull(n.getLoad("NEW" + k), "a worker's new load leaked into the base variant");
         }
     }
 }

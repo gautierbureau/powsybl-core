@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Identifiable;
 
 import java.util.Collection;
@@ -89,26 +88,6 @@ final class VariantScopedExistence implements MultiVariantObject {
     /** Whether structure is variant-scoped (so a newly-added object should exist only in the working variant). */
     boolean isVariantScopedStructure() {
         return holder.getVariantManager().isVariantScopedStructure();
-    }
-
-    /**
-     * Creating an object, or deleting one network-wide, mutates state shared by every variant — the network
-     * index and the columnar row storage, which has to grow — so it cannot yet be done from several threads
-     * at once. Diverging a variant structurally (removing equipment in it, or reconnecting it) is recorded
-     * in this per-variant delta and <em>is</em> supported concurrently, one thread per variant, as is every
-     * read and write of a variant-dependent attribute.
-     *
-     * <p>Doing the unsupported thing anyway used to corrupt the index or throw
-     * {@link java.util.ConcurrentModificationException} from an unrelated read; fail fast with an actionable
-     * message instead.</p>
-     */
-    void checkStructuralEditAllowed(String id) {
-        if (holder.getVariantManager().isVariantMultiThreadAccessAllowed()) {
-            throw new PowsyblException("Creating or deleting '" + id + "' is not allowed while multi-thread "
-                    + "variant access is enabled: it changes the network index and the row storage shared by "
-                    + "every variant. Removing equipment inside a variant is supported concurrently; creating "
-                    + "it is not. Disable multi-thread access first.");
-        }
     }
 
     /**
