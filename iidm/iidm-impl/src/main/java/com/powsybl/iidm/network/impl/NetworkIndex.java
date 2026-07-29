@@ -326,7 +326,11 @@ class NetworkIndex {
      * after any structural change (add/remove/clean); callers must only iterate over it, not mutate it.
      */
     List<MultiVariantObject> getStatefulObjects() {
-        if (statefulObjectsCache == null) {
+        // Read the cache once. Re-reading the field to return it would hand back null whenever another thread
+        // invalidates it in between (a concurrent creation does exactly that, under the index write lock while
+        // this runs under the variant lock), which is how a clone got a null stateful-objects list.
+        List<MultiVariantObject> cached = statefulObjectsCache;
+        if (cached == null) {
             List<MultiVariantObject> stateful = new ArrayList<>(objectsById.size());
             for (Identifiable<?> obj : objectsById.values()) {
                 if (obj instanceof MultiVariantObject multiVariantObject) {
@@ -349,8 +353,9 @@ class NetworkIndex {
                 stateful.add(membership);
             }
             statefulObjectsCache = stateful;
+            return stateful;
         }
-        return statefulObjectsCache;
+        return cached;
     }
 
     <T extends Identifiable> Set<T> getAll(Class<T> clazz) {
