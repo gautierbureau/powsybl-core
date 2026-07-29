@@ -43,10 +43,16 @@ worker thread.
       per-variant bands are published copy-on-write through a volatile and so grow safely.
       Converting these four to the same volatile copy-on-write publication removes the last
       reason for the reservation, after which overflow can grow instead of throwing.
-- [ ] **Multi-core soak on real hardware.** `VariantConcurrentStructuralDivergenceTest`
-      (32 workers, repeated) passes here, but the sandbox is effectively single-core, so it
-      exercises interleaving rather than true parallelism. Run it under real parallelism in
-      CI before treating the concurrency claims as proven.
+- [x] **Multi-core soak.** Done, and it earned its keep. The development sandbox is genuinely
+      4-core (measured: 2.04× speedup at 2 threads, 4.02× at 4, flat at 8) — an earlier note
+      here claiming it was effectively single-core was simply wrong, and it had been used to
+      defer this item. Soaking the variant concurrency tests surfaced a null
+      stateful-objects list at a rate of about 1 run in 30, which no single run of the suite
+      had ever shown (fixed: `NetworkIndex.getStatefulObjects` read its volatile cache twice).
+- [ ] **Keep soaking in CI.** A rate of 1-in-30 needs hundreds of runs to confirm dead, not
+      one green suite: zero failures in N runs only bounds the rate at roughly 3/N. Wire a
+      periodic soak of the variant concurrency tests into CI rather than relying on the
+      per-commit suite, which runs each test once and would not have caught this.
 
 ## Newer code to scrutinise / harden
 
