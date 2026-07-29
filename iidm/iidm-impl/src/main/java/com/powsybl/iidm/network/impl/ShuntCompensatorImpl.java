@@ -10,8 +10,6 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 
@@ -29,21 +27,21 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     /* the regulating terminal */
     private final RegulatingPoint regulatingPoint;
 
-    // attributes depending on the variant
-
-    /* the current number of section switched on */
-    private final ArrayList<Integer> sectionCount;
-
-    /* the solved number of section switched on */
-    private final ArrayList<Integer> solvedSectionCount;
-
-    // variant-dependent targetV / targetDeadband held columnarly (see NumericVariantStore)
+    // Variant-dependent targetV / targetDeadband and the section counts, held columnarly (see
+    // NumericVariantStore). The counts used to be per-object ArrayList<Integer> grown eagerly on every clone,
+    // which is growth that cannot happen on a worker thread; the store's bands are published copy-on-write
+    // through a volatile and grow safely, so they moved here.
     private static final String STORE_KEY = "ShuntCompensator";
     private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
-    private static final int[] INT_DEFAULTS = {};
+    // Both counts are nullable (null = not set, see unsetSectionCount): a validated count is always in
+    // [0, maximumSectionCount], so a negative sentinel cannot collide with a real value.
+    private static final int NOT_SET = Integer.MIN_VALUE;
+    private static final int[] INT_DEFAULTS = {NOT_SET, NOT_SET};
     private static final boolean[] BOOLEAN_DEFAULTS = {};
     private static final int COL_TARGET_V = 0;
     private static final int COL_TARGET_DEADBAND = 1;
+    private static final int COL_SECTION_COUNT = 0;
+    private static final int COL_SOLVED_SECTION_COUNT = 1;
 
     private NumericVariantStore variantStore;
     private int variantStoreRow;
@@ -54,18 +52,13 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
                          Boolean voltageRegulatorOn, double targetV, double targetDeadband) {
         super(network, id, name, fictitious);
         this.network = network;
-        int variantArraySize = this.network.get().getVariantManager().getVariantArraySize();
         regulatingPoint = new RegulatingPoint(id, this::getTerminal, network, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
-        this.sectionCount = new ArrayList<>(variantArraySize);
-        this.solvedSectionCount = new ArrayList<>(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.sectionCount.add(sectionCount);
-            this.solvedSectionCount.add(checkSolvedSectionCount(solvedSectionCount, model.getMaximumSectionCount()));
-        }
         this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.variantStoreRow = variantStore.allocateRow(
-                new double[] {targetV, targetDeadband}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+                new double[] {targetV, targetDeadband},
+                new int[] {box(sectionCount), box(checkSolvedSectionCount(solvedSectionCount, model.getMaximumSectionCount()))},
+                BOOLEAN_DEFAULTS);
         this.model = Objects.requireNonNull(model).attach(this);
     }
 
@@ -74,9 +67,20 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         return terminals.get(0);
     }
 
+    /** {@code null} becomes the not-set sentinel on the way into the int column. */
+    private static int box(Integer value) {
+        return value == null ? NOT_SET : value;
+    }
+
+    /** The stored int for {@code col} in the working variant, or {@code null} when it is not set. */
+    private Integer readCount(int col) {
+        int value = variantStore.getInt(network.get().getVariantIndex(), col, variantStoreRow);
+        return value == NOT_SET ? null : value;
+    }
+
     @Override
     public int getSectionCount() {
-        Integer section = sectionCount.get(network.get().getVariantIndex());
+        Integer section = readCount(COL_SECTION_COUNT);
         if (section == null) {
             throw ValidationUtil.createUndefinedValueGetterException();
         }
@@ -85,12 +89,12 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public Integer getSolvedSectionCount() {
-        return solvedSectionCount.get(network.get().getVariantIndex());
+        return readCount(COL_SOLVED_SECTION_COUNT);
     }
 
     @Override
     public OptionalInt findSectionCount() {
-        Integer section = sectionCount.get(network.get().getVariantIndex());
+        Integer section = readCount(COL_SECTION_COUNT);
         return section == null ? OptionalInt.empty() : OptionalInt.of(section);
     }
 
@@ -108,7 +112,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
             throw new ValidationException(this, "unexpected section number (" + sectionCount + "): no existing associated section");
         }
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.sectionCount.set(variantIndex, sectionCount);
+        Integer oldValue = writeCount(variantIndex, COL_SECTION_COUNT, sectionCount);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("sectionCount", variantId, oldValue, sectionCount);
@@ -120,7 +124,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         NetworkImpl n = getNetwork();
         ValidationUtil.throwExceptionOrIgnore(this, "count of sections in service has been unset", n.getMinValidationLevel());
         int variantIndex = network.get().getVariantIndex();
-        Integer oldValue = this.sectionCount.set(variantIndex, null);
+        Integer oldValue = writeCount(variantIndex, COL_SECTION_COUNT, null);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("sectionCount", variantId, oldValue, null);
@@ -131,7 +135,8 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensatorImpl setSolvedSectionCount(int solvedSectionCount) {
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.solvedSectionCount.set(variantIndex, checkSolvedSectionCount(solvedSectionCount, this.model.getMaximumSectionCount()));
+        Integer oldValue = writeCount(variantIndex, COL_SOLVED_SECTION_COUNT,
+                checkSolvedSectionCount(solvedSectionCount, this.model.getMaximumSectionCount()));
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("solvedSectionCount", variantId, oldValue, solvedSectionCount);
         return this;
@@ -141,20 +146,26 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensator unsetSolvedSectionCount() {
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.solvedSectionCount.set(variantIndex, null);
+        Integer oldValue = writeCount(variantIndex, COL_SOLVED_SECTION_COUNT, null);
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("solvedSectionCount", variantId, oldValue, null);
         return this;
     }
 
+    /** Write {@code value} ({@code null} = unset) into the int column and return the previous value. */
+    private Integer writeCount(int variantIndex, int col, Integer value) {
+        int old = variantStore.setInt(variantIndex, col, variantStoreRow, box(value));
+        return old == NOT_SET ? null : old;
+    }
+
     @Override
     public double getB() {
-        return model.getB(sectionCount.get(network.get().getVariantIndex()));
+        return model.getB(readCount(COL_SECTION_COUNT));
     }
 
     @Override
     public double getG() {
-        return model.getG(sectionCount.get(network.get().getVariantIndex()));
+        return model.getG(readCount(COL_SECTION_COUNT));
     }
 
     @Override
@@ -267,25 +278,15 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
+        // the section counts are maintained columnarly by the network-level store
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        sectionCount.ensureCapacity(sectionCount.size() + number);
-        solvedSectionCount.ensureCapacity(solvedSectionCount.size() + number);
-        for (int i = 0; i < number; i++) {
-            sectionCount.add(sectionCount.get(sourceIndex));
-            solvedSectionCount.add(solvedSectionCount.get(sourceIndex));
-        }
         regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
+        // the section counts are maintained columnarly by the network-level store
         super.reduceVariantArraySize(number);
-        List<Integer> tmpInt = new ArrayList<>(sectionCount.subList(0, sectionCount.size() - number));
-        sectionCount.clear();
-        sectionCount.addAll(tmpInt);
-        List<Integer> solvedSectionCountTmp = new ArrayList<>(solvedSectionCount.subList(0, solvedSectionCount.size() - number));
-        solvedSectionCount.clear();
-        solvedSectionCount.addAll(solvedSectionCountTmp);
         regulatingPoint.reduceVariantArraySize(number);
     }
 
@@ -297,11 +298,8 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
+        // the section counts are maintained columnarly by the network-level store
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            sectionCount.set(index, sectionCount.get(sourceIndex));
-            solvedSectionCount.set(index, solvedSectionCount.get(sourceIndex));
-        }
         regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
     }
 
@@ -310,8 +308,11 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         super.reHomeVariantStores(targetNetwork);
         double targetV0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
         double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
+        int sectionCount0 = variantStore.getInt(0, COL_SECTION_COUNT, variantStoreRow);
+        int solvedSectionCount0 = variantStore.getInt(0, COL_SOLVED_SECTION_COUNT, variantStoreRow);
         this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0, targetDeadband0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0, targetDeadband0},
+                new int[] {sectionCount0, solvedSectionCount0}, BOOLEAN_DEFAULTS);
         regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
