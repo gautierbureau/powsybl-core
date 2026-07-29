@@ -31,18 +31,40 @@ capacity**. `preAllocateVariants(int)` is therefore a hard contract, not a perfo
 overflow while multi-thread access is enabled throws rather than growing the arrays on a
 worker thread.
 
-- [ ] **Make `preAllocateVariants` a pure hint.** Four classes still hold their own growable
-      per-variant lists, grown eagerly under `extendVariantArraySize`, and it is that growth
-      that cannot happen off the main thread:
-      - `BusTerminal.connectableBusId`
-      - `ConfiguredBusImpl.terminals`
-      - `ShuntCompensatorImpl.sectionCount` / `solvedSectionCount`
-      - `NodeBreakerTopologyModel.fictitiousP0ByNodeAndVariant` / `fictitiousQ0ByNodeAndVariant`
+- [x] **The four eager growers are gone.** `ShuntCompensatorImpl`'s two section counts moved
+      into int columns of the `NumericVariantStore` row it already owned;
+      `BusTerminal.connectableBusId`, `ConfiguredBusImpl.terminals` and the node-breaker
+      fictitious injection maps moved to `VariantRefArray`, which grows by appending chunks
+      so an in-flight write to an existing chunk cannot be lost. Every `MultiVariantObject`
+      now grows its per-variant state safely off the main thread.
+- [ ] **Flip the overflow path** so `preAllocateVariants` becomes a pure hint: today
+      `VariantManagerImpl` still throws rather than extending while multi-thread access is
+      enabled. One hazard has to be closed first, and it is *currently unreachable only
+      because* that throw is there — so it must be fixed in the same change, not after:
 
-      Every other `MultiVariantObject` is already backed by the columnar stores, whose
-      per-variant bands are published copy-on-write through a volatile and so grow safely.
-      Converting these four to the same volatile copy-on-write publication removes the last
-      reason for the reservation, after which overflow can grow instead of throwing.
+      An object's constructor reads `getVariantArraySize()` (under the variant lock) and
+      sizes its per-variant state, then publishes itself in the index (under the index write
+      lock) as a separate step. A clone that runs entirely between those two points grows
+      every object in its stateful-objects snapshot — which cannot contain the new object,
+      as it is not published yet — and leaves the new object one slot short. Reading the new
+      variant on it then goes out of bounds.
+
+      Two ways out, both viable; the lock order is not the obstacle, since `removeVariant`
+      already establishes variant-lock-then-write-lock and either option follows it:
+      - hold the variant lock across construction *and* publication, so a clone cannot
+        interleave. Correct and simple to reason about, but object construction happens in
+        adders all over the codebase rather than at one choke point.
+      - top up short objects after the extend cascade, by re-reading the stateful list once
+        the growth is published. Contained, but `MultiVariantObject` has no way to report
+        how many variant slots it currently has, so it needs a small API addition.
+
+      Worth measuring the second one's cost before choosing: it adds work to every clone,
+      whereas the first only adds contention to concurrent creation.
+- [ ] **Size `VariantRefArray`'s chunks deliberately.** They are 8 slots, chosen so the spine
+      stays a single entry for typical variant counts. A single-variant network therefore
+      allocates 8 reference slots per object where an `ArrayList` held about one — a few MB
+      across the `BusTerminal`s of a large node-breaker network. The memory side of that
+      trade was not measured.
 - [x] **Multi-core soak.** Done, and it earned its keep. The development sandbox is genuinely
       4-core (measured: 2.04× speedup at 2 threads, 4.02× at 4, flat at 8) — an earlier note
       here claiming it was effectively single-core was simply wrong, and it had been used to
