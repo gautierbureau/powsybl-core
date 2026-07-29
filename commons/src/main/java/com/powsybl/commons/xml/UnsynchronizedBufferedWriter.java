@@ -8,39 +8,46 @@
 package com.powsybl.commons.xml;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.charset.Charset;
 
 /**
- * A buffering {@link Writer} that does not synchronize on each write.
+ * An {@link OutputStreamWriter} that buffers characters without synchronizing on each write.
  *
- * <p>Since JDK 17 the standard {@link java.io.Writer} implementations (OutputStreamWriter, BufferedWriter, and the
- * StAX writers built on them) acquire an internal lock on every {@code write} call. XML serialization is
- * single-threaded, so that lock is pure overhead - and StAX makes a very large number of small write calls (one per
- * element name, attribute, value, indentation...). This writer accumulates those small writes in a plain
- * {@code char[]} without locking and flushes them to the (locking) encoding delegate in large chunks, so the lock is
- * taken a handful of times instead of millions.</p>
+ * <p>Since JDK 17 the standard {@link Writer} implementations (OutputStreamWriter, BufferedWriter, and the StAX
+ * writers built on them) acquire an internal lock on every {@code write} call. XML serialization is single-threaded,
+ * so that lock is pure overhead - and StAX makes a very large number of small write calls (one per element name,
+ * attribute, value, indentation...). This writer accumulates those small writes in a plain {@code char[]} without
+ * locking and passes them to the (locking) superclass in large chunks, so the lock is taken a handful of times
+ * instead of millions.</p>
  *
- * <p>Encoding is delegated to the wrapped writer (typically an {@code OutputStreamWriter}), so the produced bytes are
- * identical to writing directly to that delegate. Callers must {@link #flush()} or {@link #close()} the resulting
- * writer (directly or through the StAX writer) before the underlying stream is closed, otherwise the buffered tail is
- * lost.</p>
+ * <p><b>Why it extends {@code OutputStreamWriter} instead of wrapping one:</b> the JDK StAX writer only installs the
+ * encoder that escapes characters unrepresentable in the target charset (as {@code &#xNNNN;} references) when the
+ * {@code Writer} it is given is itself an {@code OutputStreamWriter} - it discovers the encoding by calling
+ * {@link #getEncoding()} on it. Wrapping one in any decorator (including {@link java.io.BufferedWriter}) silently
+ * defeats that check, and such characters degrade to {@code '?'}. Extending it keeps the escaping intact while still
+ * removing the per-write lock.</p>
  *
- * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
+ * <p>Callers must {@link #flush()} or {@link #close()} this writer (directly or through the StAX writer) before the
+ * underlying stream is closed, otherwise the buffered tail is lost - see {@link FlushOnEndDocumentStreamWriter}.</p>
+ *
+ * @author Gautier Bureau {@literal <gautier.bureau at rte-france.com>}
  */
-class UnsynchronizedBufferedWriter extends Writer {
+class UnsynchronizedBufferedWriter extends OutputStreamWriter {
 
     private static final int DEFAULT_BUFFER_SIZE = 8192;
 
-    private final Writer delegate;
     private final char[] buffer;
     private int position;
 
-    UnsynchronizedBufferedWriter(Writer delegate) {
-        this(delegate, DEFAULT_BUFFER_SIZE);
+    UnsynchronizedBufferedWriter(OutputStream os, Charset charset) {
+        this(os, charset, DEFAULT_BUFFER_SIZE);
     }
 
-    UnsynchronizedBufferedWriter(Writer delegate, int size) {
-        this.delegate = delegate;
+    UnsynchronizedBufferedWriter(OutputStream os, Charset charset, int size) {
+        super(os, charset);
         this.buffer = new char[size];
     }
 
@@ -55,9 +62,9 @@ class UnsynchronizedBufferedWriter extends Writer {
     @Override
     public void write(char[] cbuf, int off, int len) throws IOException {
         if (len >= buffer.length) {
-            // too big to buffer: flush what we have and write it through directly
+            // too big to be worth buffering: flush what we have and encode it in one go
             flushBuffer();
-            delegate.write(cbuf, off, len);
+            super.write(cbuf, off, len);
             return;
         }
         if (position + len > buffer.length) {
@@ -71,7 +78,7 @@ class UnsynchronizedBufferedWriter extends Writer {
     public void write(String str, int off, int len) throws IOException {
         if (len >= buffer.length) {
             flushBuffer();
-            delegate.write(str, off, len);
+            super.write(str, off, len);
             return;
         }
         if (position + len > buffer.length) {
@@ -83,7 +90,7 @@ class UnsynchronizedBufferedWriter extends Writer {
 
     private void flushBuffer() throws IOException {
         if (position > 0) {
-            delegate.write(buffer, 0, position);
+            super.write(buffer, 0, position);
             position = 0;
         }
     }
@@ -91,13 +98,13 @@ class UnsynchronizedBufferedWriter extends Writer {
     @Override
     public void flush() throws IOException {
         flushBuffer();
-        delegate.flush();
+        super.flush();
     }
 
     @Override
     public void close() throws IOException {
-        // Flush but do not close the delegate: a StAX writer must not close the underlying output stream
-        // (JSR-173), and the caller that created the stream is responsible for closing it.
+        // Flush but do not close the underlying stream: a StAX writer must not close it (JSR-173), and the caller
+        // that created the stream is responsible for closing it.
         flush();
     }
 }

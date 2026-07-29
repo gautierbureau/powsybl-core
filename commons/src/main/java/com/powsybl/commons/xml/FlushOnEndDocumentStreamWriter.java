@@ -21,7 +21,7 @@ import javax.xml.stream.XMLStreamWriter;
  * {@link UnsynchronizedBufferedWriter}), whose buffered tail would be lost. Flushing on {@code writeEndDocument} makes
  * the buffering safe for every caller without requiring each of them to flush explicitly.</p>
  *
- * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
+ * @author Gautier Bureau {@literal <gautier.bureau at rte-france.com>}
  */
 class FlushOnEndDocumentStreamWriter extends StreamWriterDelegate {
 

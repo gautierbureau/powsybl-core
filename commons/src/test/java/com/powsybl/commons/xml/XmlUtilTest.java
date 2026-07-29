@@ -17,6 +17,7 @@ import javax.xml.transform.stream.StreamSource;
 import javax.xml.validation.SchemaFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.StringReader;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -189,6 +190,67 @@ class XmlUtilTest {
         XMLStreamWriter writer = XmlUtil.initializeWriter(false, " ", baos, StandardCharsets.ISO_8859_1);
         writer.close();
         assertEquals("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>", baos.toString());
+    }
+
+    @Test
+    void writerBufferedTailIsNotLostWithoutExplicitFlush() throws XMLStreamException {
+        // The OutputStream path buffers, and several powsybl exporters finalize with writeEndDocument() only,
+        // relying on closing the stream. Nothing may be dropped in that case.
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        XMLStreamWriter writer = XmlUtil.initializeWriter(false, " ", baos);
+        writer.writeStartElement("a");
+        writer.writeAttribute("attr", "value");
+        writer.writeCharacters("some text content");
+        writer.writeEndElement();
+        writer.writeEndDocument();
+        // deliberately no flush() and no close()
+        assertEquals("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a attr=\"value\">some text content</a>",
+                baos.toString(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void writerEscapesCharactersNotRepresentableInTheTargetCharset() throws XMLStreamException {
+        // Building the StAX writer over a Writer rather than over the OutputStream must not lose the numeric
+        // character references the JDK emits for characters the declared encoding cannot represent, otherwise
+        // they would silently degrade to '?'.
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        XMLStreamWriter writer = XmlUtil.initializeWriter(false, " ", baos, StandardCharsets.ISO_8859_1);
+        writer.writeStartElement("a");
+        writer.writeAttribute("attr", "café 中文");
+        writer.writeCharacters("café €");
+        writer.writeEndElement();
+        writer.writeEndDocument();
+        writer.close();
+
+        assertEquals("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>"
+                        + "<a attr=\"café &#x4e2d;&#x6587;\">café &#x20ac;</a>",
+                baos.toString(StandardCharsets.ISO_8859_1));
+    }
+
+    @Test
+    void writerOverOutputStreamAndOverWriterProduceTheSameDocument() throws XMLStreamException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        XMLStreamWriter streamWriter = XmlUtil.initializeWriter(true, "  ", baos);
+        writeSampleDocument(streamWriter);
+        streamWriter.close();
+
+        StringWriter stringWriter = new StringWriter();
+        XMLStreamWriter writerOnWriter = XmlUtil.initializeWriter(true, "  ", stringWriter);
+        writeSampleDocument(writerOnWriter);
+        writerOnWriter.close();
+
+        assertEquals(stringWriter.toString(), baos.toString(StandardCharsets.UTF_8));
+    }
+
+    private static void writeSampleDocument(XMLStreamWriter writer) throws XMLStreamException {
+        writer.writeStartElement("network");
+        for (int i = 0; i < 100; i++) {
+            writer.writeEmptyElement("line");
+            writer.writeAttribute("id", "LINE_" + i);
+            writer.writeAttribute("r", "0.0512345");
+        }
+        writer.writeEndElement();
+        writer.writeEndDocument();
     }
 
     @Test

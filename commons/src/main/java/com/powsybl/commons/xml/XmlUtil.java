@@ -36,7 +36,6 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -191,10 +190,11 @@ public final class XmlUtil {
     public static XMLStreamWriter initializeWriter(boolean indent, String indentString, OutputStream os, Charset charset) throws XMLStreamException {
         // Build the StAX writer on top of a non-synchronized buffered writer rather than directly on the
         // OutputStream: the JDK StAX writer over an OutputStream wraps it in a java.io writer that takes an
-        // internal lock on every (small) write, which dominates XML export CPU. Encoding is delegated to an
-        // OutputStreamWriter so the produced bytes are unchanged. Callers must flush/close the writer before
+        // internal lock on every (small) write, which dominates XML export CPU. The buffered writer *is* an
+        // OutputStreamWriter, which the JDK StAX writer requires in order to keep escaping characters that the
+        // charset cannot represent - see UnsynchronizedBufferedWriter. Callers must flush/close the writer before
         // closing the underlying stream (XmlWriter.close() and the CGMES exporters do so).
-        Writer writer = new UnsynchronizedBufferedWriter(new OutputStreamWriter(os, charset));
+        Writer writer = new UnsynchronizedBufferedWriter(os, charset);
         XMLStreamWriter xmlStreamWriter = XML_OUTPUT_FACTORY_SUPPLIER.get().createXMLStreamWriter(writer);
         return initializeWriter(indent, indentString, xmlStreamWriter, charset);
     }
