@@ -63,9 +63,9 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
 
     private final VariantManagerImpl variantManager;
 
-    private final TerminalVariantStore terminalVariantStore;
+    private final NumericVariantStore terminalVariantStore;
 
-    private final SwitchVariantStore switchVariantStore;
+    private final NumericVariantStore switchVariantStore;
 
     // generic per-object-type numeric variant stores, created lazily and keyed by a type token so that adding
     // a new columnar object type needs no change here (see getOrCreateNumericVariantStore)
@@ -141,10 +141,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
-        terminalVariantStore = new TerminalVariantStore(variantManager);
-        switchVariantStore = new SwitchVariantStore(variantManager);
-        variantColumnStores.add(terminalVariantStore);
-        variantColumnStores.add(switchVariantStore);
+        // registered like any other keyed store; kept in a field only so the hot terminal/switch accessors
+        // skip the map lookup
+        terminalVariantStore = getOrCreateNumericVariantStore(AbstractTerminal.STORE_KEY,
+                AbstractTerminal.DOUBLE_DEFAULTS, AbstractTerminal.INT_DEFAULTS, AbstractTerminal.BOOLEAN_DEFAULTS);
+        switchVariantStore = getOrCreateNumericVariantStore(SwitchImpl.STORE_KEY,
+                SwitchImpl.DOUBLE_DEFAULTS, SwitchImpl.INT_DEFAULTS, SwitchImpl.BOOLEAN_DEFAULTS);
         variants = new VariantArray<>(ref, VariantImpl::new);
         // add the network the object list as it is a multi variant object
         // and it needs to be notified when and extension or a reduction of
@@ -249,12 +251,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
     }
 
     @Override
-    public TerminalVariantStore getTerminalVariantStore() {
+    public NumericVariantStore getTerminalVariantStore() {
         return terminalVariantStore;
     }
 
     @Override
-    public SwitchVariantStore getSwitchVariantStore() {
+    public NumericVariantStore getSwitchVariantStore() {
         return switchVariantStore;
     }
 

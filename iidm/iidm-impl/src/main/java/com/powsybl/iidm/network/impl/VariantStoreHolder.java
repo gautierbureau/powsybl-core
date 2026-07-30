@@ -8,14 +8,13 @@
 package com.powsybl.iidm.network.impl;
 
 /**
- * Access to the network-level columnar variant stores whose types are package-private, and which are
- * therefore only usable from within this package.
+ * Direct access to the two columnar variant stores that are hot enough to be worth reaching without a lookup
+ * by key: terminal {@code p}/{@code q} and switch {@code open}/{@code retained}. They are ordinary
+ * {@link NumericVariantStore}s, held in a field by the root network so that a getter or setter never pays for
+ * the keyed map lookup {@link VariantManagerHolder#getOrCreateNumericVariantStore} does.
  *
- * <p>This is deliberately kept separate from the public {@link VariantManagerHolder}: declaring these
- * accessors there would make that interface impossible to implement from outside this package, since an
- * implementor could not name the {@link TerminalVariantStore} / {@link SwitchVariantStore} return types.
- * The generic {@link NumericVariantStore} accessor stays on {@link VariantManagerHolder} because the
- * extensions in {@code com.powsybl.iidm.network.impl.extensions} need it.</p>
+ * <p>Kept off the public {@link VariantManagerHolder} on purpose: which stores the implementation happens to
+ * keep a direct handle on is an internal detail, and nothing outside this package needs it.</p>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -25,11 +24,11 @@ interface VariantStoreHolder extends VariantManagerHolder {
      * Network-level columnar store for the variant-dependent terminal {@code p}/{@code q}. Shared by every
      * terminal (including those in subnetworks), it is owned and structurally maintained by the root network.
      */
-    TerminalVariantStore getTerminalVariantStore();
+    NumericVariantStore getTerminalVariantStore();
 
     /**
      * Network-level columnar store for the variant-dependent switch topology ({@code open}/{@code retained}).
      * Shared by every switch, it is owned and structurally maintained by the root network.
      */
-    SwitchVariantStore getSwitchVariantStore();
+    NumericVariantStore getSwitchVariantStore();
 }

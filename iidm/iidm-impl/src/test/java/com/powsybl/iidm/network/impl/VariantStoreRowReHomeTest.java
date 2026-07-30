@@ -38,7 +38,7 @@ class VariantStoreRowReHomeTest {
     @Test
     void detachReleasesTheTerminalRowsItLeavesBehind() {
         NetworkImpl merged = (NetworkImpl) mergedWithOther(EurostagTutorialExample1Factory.create());
-        TerminalVariantStore sourceStore = merged.getTerminalVariantStore();
+        NumericVariantStore sourceStore = merged.getTerminalVariantStore();
         int rowsBefore = sourceStore.getRowCount();
         int freeBefore = sourceStore.getFreeRowCount();
 
@@ -54,7 +54,7 @@ class VariantStoreRowReHomeTest {
     @Test
     void detachReleasesTheSwitchRowsItLeavesBehind() {
         NetworkImpl merged = (NetworkImpl) mergedWithOther(FictitiousSwitchFactory.create());
-        SwitchVariantStore sourceStore = merged.getSwitchVariantStore();
+        NumericVariantStore sourceStore = merged.getSwitchVariantStore();
         int freeBefore = sourceStore.getFreeRowCount();
 
         Network detached = merged.getSubnetwork("fictitious").detach();
@@ -67,7 +67,7 @@ class VariantStoreRowReHomeTest {
     @Test
     void freedRowsAreReusedByLaterEquipment() {
         NetworkImpl merged = (NetworkImpl) mergedWithOther(EurostagTutorialExample1Factory.create());
-        TerminalVariantStore sourceStore = merged.getTerminalVariantStore();
+        NumericVariantStore sourceStore = merged.getTerminalVariantStore();
         merged.getSubnetwork("sim1").detach();
 
         int rowsBefore = sourceStore.getRowCount();

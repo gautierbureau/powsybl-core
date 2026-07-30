@@ -37,9 +37,16 @@ abstract class AbstractTerminal implements TerminalExt {
 
     // attributes depending on the variant
 
-    // p/q are held columnarly in the network-level TerminalVariantStore (structure-of-arrays), so a
-    // variant clone extends all terminals at once with a bulk array copy instead of once per terminal.
-    // This terminal owns a single row in that store (re-homed if the terminal moves network on merge/detach).
+    // p/q are held columnarly in a network-level NumericVariantStore (structure-of-arrays) shared by every
+    // terminal, so a variant clone extends all terminals at once with a bulk array copy instead of once per
+    // terminal. This terminal owns a single row (re-homed if it moves network on merge/detach).
+    static final String STORE_KEY = "Terminal";
+    static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    static final int[] INT_DEFAULTS = {};
+    static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_P = 0;
+    private static final int COL_Q = 1;
+
     protected int variantStoreRow;
 
     protected boolean removed = false;
@@ -104,7 +111,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new PowsyblException("Cannot access p of removed equipment " + connectable.id);
         }
         VariantStoreHolder holder = network.get();
-        return holder.getTerminalVariantStore().getP(holder.getVariantIndex(), variantStoreRow);
+        return holder.getTerminalVariantStore().getDouble(holder.getVariantIndex(), COL_P, variantStoreRow);
     }
 
     @Override
@@ -116,7 +123,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new ValidationException(connectable, "cannot set active power on a busbar section");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = network.get().getTerminalVariantStore().setP(variantIndex, variantStoreRow, p);
+        double oldValue = network.get().getTerminalVariantStore().setDouble(variantIndex, COL_P, variantStoreRow, p);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         getConnectable().notifyUpdate(() -> "p" + getAttributeSideOrNumberSuffix(), variantId, oldValue, p);
         return this;
@@ -128,7 +135,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new PowsyblException("Cannot access q of removed equipment " + connectable.id);
         }
         VariantStoreHolder holder = network.get();
-        return holder.getTerminalVariantStore().getQ(holder.getVariantIndex(), variantStoreRow);
+        return holder.getTerminalVariantStore().getDouble(holder.getVariantIndex(), COL_Q, variantStoreRow);
     }
 
     @Override
@@ -140,7 +147,7 @@ abstract class AbstractTerminal implements TerminalExt {
             throw new ValidationException(connectable, "cannot set reactive power on a busbar section");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = network.get().getTerminalVariantStore().setQ(variantIndex, variantStoreRow, q);
+        double oldValue = network.get().getTerminalVariantStore().setDouble(variantIndex, COL_Q, variantStoreRow, q);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         getConnectable().notifyUpdate(() -> "q" + getAttributeSideOrNumberSuffix(), variantId, oldValue, q);
         return this;
@@ -158,8 +165,9 @@ abstract class AbstractTerminal implements TerminalExt {
         }
         VariantStoreHolder holder = network.get();
         int variantIndex = holder.getVariantIndex();
-        TerminalVariantStore store = holder.getTerminalVariantStore();
-        return Math.hypot(store.getP(variantIndex, variantStoreRow), store.getQ(variantIndex, variantStoreRow))
+        NumericVariantStore store = holder.getTerminalVariantStore();
+        return Math.hypot(store.getDouble(variantIndex, COL_P, variantStoreRow),
+                        store.getDouble(variantIndex, COL_Q, variantStoreRow))
                 / (Math.sqrt(3.) * getV() / 1000);
     }
 
@@ -238,7 +246,7 @@ abstract class AbstractTerminal implements TerminalExt {
      */
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        TerminalVariantStore oldStore = network.get().getTerminalVariantStore();
+        NumericVariantStore oldStore = network.get().getTerminalVariantStore();
         this.variantStoreRow = targetNetwork.getTerminalVariantStore().importRow(oldStore, variantStoreRow);
     }
 

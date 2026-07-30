@@ -300,27 +300,9 @@ public class NumericVariantStore implements VariantColumnStore {
     public void extend(int number, int sourceIndex) {
         checkStructuralModification("extend");
         ensureVariantCapacity(variantSize + number);
-        int dBlock = nDouble * rowStride;
-        int iBlock = nInt * rowStride;
-        int bBlock = nBoolean * rowStride;
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
         for (int i = 0; i < number; i++) {
-            int dst = variantSize + i;
-            if (dBlock > 0) {
-                System.arraycopy(dd, sourceIndex * dBlock, dd, dst * dBlock, dBlock);
-            }
-            if (iBlock > 0) {
-                System.arraycopy(id, sourceIndex * iBlock, id, dst * iBlock, iBlock);
-            }
-            if (bBlock > 0) {
-                System.arraycopy(bd, sourceIndex * bBlock, bd, dst * bBlock, bBlock);
-            }
+            copyBand(sourceIndex, variantSize + i);
         }
-        doubles = dd;
-        ints = id;
-        booleans = bd;
         variantSize += number;
     }
 
@@ -337,22 +319,26 @@ public class NumericVariantStore implements VariantColumnStore {
     @Override
     public void allocate(int[] indexes, int sourceIndex) {
         checkStructuralModification("allocate");
-        int dBlock = nDouble * rowStride;
-        int iBlock = nInt * rowStride;
-        int bBlock = nBoolean * rowStride;
+        for (int index : indexes) {
+            copyBand(sourceIndex, index);
+        }
+    }
+
+    // Copy one variant band onto another, column by column and only over the rows actually handed out. Copying
+    // the band in one shot instead would also copy the slack between rowCount and rowStride - up to as much
+    // again - on every clone, which is the operation this layout exists to make cheap.
+    private void copyBand(int sourceIndex, int destIndex) {
         double[] dd = doubles;
         int[] id = ints;
         boolean[] bd = booleans;
-        for (int index : indexes) {
-            if (dBlock > 0) {
-                System.arraycopy(dd, sourceIndex * dBlock, dd, index * dBlock, dBlock);
-            }
-            if (iBlock > 0) {
-                System.arraycopy(id, sourceIndex * iBlock, id, index * iBlock, iBlock);
-            }
-            if (bBlock > 0) {
-                System.arraycopy(bd, sourceIndex * bBlock, bd, index * bBlock, bBlock);
-            }
+        for (int c = 0; c < nDouble; c++) {
+            System.arraycopy(dd, (sourceIndex * nDouble + c) * rowStride, dd, (destIndex * nDouble + c) * rowStride, rowCount);
+        }
+        for (int c = 0; c < nInt; c++) {
+            System.arraycopy(id, (sourceIndex * nInt + c) * rowStride, id, (destIndex * nInt + c) * rowStride, rowCount);
+        }
+        for (int c = 0; c < nBoolean; c++) {
+            System.arraycopy(bd, (sourceIndex * nBoolean + c) * rowStride, bd, (destIndex * nBoolean + c) * rowStride, rowCount);
         }
         doubles = dd;
         ints = id;

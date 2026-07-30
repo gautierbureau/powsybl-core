@@ -19,9 +19,16 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
 
     private final SwitchKind kind;
 
-    // open/retained are held columnarly in the network-level SwitchVariantStore (structure-of-arrays), so a
-    // variant clone extends all switches at once with a bulk array copy instead of once per switch. This
-    // switch owns a single row in that store (re-homed if the switch moves network on merge/detach).
+    // open/retained are held columnarly in a network-level NumericVariantStore (structure-of-arrays) shared by
+    // every switch, so a variant clone extends all switches at once with a bulk array copy instead of once per
+    // switch. This switch owns a single row (re-homed if it moves network on merge/detach).
+    static final String STORE_KEY = "Switch";
+    static final double[] DOUBLE_DEFAULTS = {};
+    static final int[] INT_DEFAULTS = {};
+    static final boolean[] BOOLEAN_DEFAULTS = {false, false};
+    private static final int COL_OPEN = 0;
+    private static final int COL_RETAINED = 1;
+
     private int variantStoreRow;
 
     SwitchImpl(VoltageLevelExt voltageLevel,
@@ -29,7 +36,8 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
         super(id, name, fictitious);
         this.voltageLevel = voltageLevel;
         this.kind = kind;
-        this.variantStoreRow = voltageLevel.getNetwork().getSwitchVariantStore().allocateRow(open, retained);
+        this.variantStoreRow = voltageLevel.getNetwork().getSwitchVariantStore()
+                .allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {open, retained});
     }
 
     @Override
@@ -55,17 +63,17 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
     @Override
     public boolean isOpen() {
         NetworkImpl network = getNetwork();
-        return network.getSwitchVariantStore().getOpen(network.getVariantIndex(), variantStoreRow);
+        return network.getSwitchVariantStore().getBoolean(network.getVariantIndex(), COL_OPEN, variantStoreRow);
     }
 
     @Override
     public void setOpen(boolean open) {
         NetworkImpl network = getNetwork();
         int index = network.getVariantIndex();
-        SwitchVariantStore store = network.getSwitchVariantStore();
-        boolean oldValue = store.getOpen(index, variantStoreRow);
+        NumericVariantStore store = network.getSwitchVariantStore();
+        boolean oldValue = store.getBoolean(index, COL_OPEN, variantStoreRow);
         if (oldValue != open) {
-            store.setOpen(index, variantStoreRow, open);
+            store.setBoolean(index, COL_OPEN, variantStoreRow, open);
             voltageLevel.getTopologyModel().invalidateCache(isRetained());
             String variantId = network.getVariantManager().getVariantId(index);
             network.getListeners().notifyUpdate(this, "open", variantId, oldValue, open);
@@ -75,7 +83,7 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
     @Override
     public boolean isRetained() {
         NetworkImpl network = getNetwork();
-        return network.getSwitchVariantStore().getRetained(network.getVariantIndex(), variantStoreRow);
+        return network.getSwitchVariantStore().getBoolean(network.getVariantIndex(), COL_RETAINED, variantStoreRow);
     }
 
     @Override
@@ -85,10 +93,10 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
         }
         NetworkImpl network = getNetwork();
         int index = network.getVariantIndex();
-        SwitchVariantStore store = network.getSwitchVariantStore();
-        boolean oldValue = store.getRetained(index, variantStoreRow);
+        NumericVariantStore store = network.getSwitchVariantStore();
+        boolean oldValue = store.getBoolean(index, COL_RETAINED, variantStoreRow);
         if (oldValue != retained) {
-            store.setRetained(index, variantStoreRow, retained);
+            store.setBoolean(index, COL_RETAINED, variantStoreRow, retained);
             voltageLevel.getTopologyModel().invalidateCache();
             String variantId = network.getVariantManager().getVariantId(index);
             network.getListeners().notifyUpdate(this, "retained", variantId, oldValue, retained);
@@ -141,7 +149,7 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // extensions
-        SwitchVariantStore oldStore = getNetwork().getSwitchVariantStore();
+        NumericVariantStore oldStore = getNetwork().getSwitchVariantStore();
         this.variantStoreRow = targetNetwork.getSwitchVariantStore().importRow(oldStore, variantStoreRow);
     }
 
