@@ -54,7 +54,7 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
 
     public TapChangerBlockingsSerDe() {
         super(TapChangerBlockings.NAME, "network", TapChangerBlockings.class,
-                "tcbs_V1_0.xsd", "http://www.powsybl.org/schema/iidm/ext/tcbs/1_0", "tcb");
+                "tapChangerBlockings_V1_0.xsd", "http://www.powsybl.org/schema/iidm/ext/tapchangerblockings/1_0", "tcb");
     }
 
     @Override
