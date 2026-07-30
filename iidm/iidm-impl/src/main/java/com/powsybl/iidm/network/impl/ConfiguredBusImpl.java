@@ -23,8 +23,10 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     private final Ref<NetworkImpl> network;
 
-    // per-variant list of connected terminals: not numeric, kept per-object
-    private final ArrayList<List<BusTerminal>> terminals;
+    // Per-variant list of connected terminals: not numeric, so kept per-object rather than in a columnar
+    // store. The per-variant dimension is a VariantRefArray so it can grow while workers read and write the
+    // inner lists; growing an ArrayList here would copy the value array and could lose a concurrent write.
+    private final VariantRefArray<List<BusTerminal>> terminals;
 
     // v, angle, fictitiousP0, fictitiousQ0 (double) and connected/synchronous component number (int) are held
     // columnarly in the network-level configured-bus store (see NumericVariantStore)
@@ -46,10 +48,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         super(id, name, fictitious, voltageLevel);
         network = voltageLevel.getNetworkRef();
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        terminals = new ArrayList<>(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            terminals.add(new ArrayList<>());
-        }
+        terminals = new VariantRefArray<>(variantArraySize, ArrayList::new);
         this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.busVariantStoreRow = variantStore.allocateRow();
     }
@@ -60,7 +59,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public int getConnectedTerminalCount() {
-        return (int) getTerminals().stream().filter(BusTerminal::isConnected).count();
+        return (int) getConnectedTerminalStream().count();
     }
 
     @Override
@@ -70,7 +69,49 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
-        return getTerminals().stream().filter(Terminal::isConnected).map(Function.identity());
+        Stream<TerminalExt> own = getTerminals().stream().filter(Terminal::isConnected).map(Function.identity());
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        if (membership == null) {
+            return own; // all normal use: no structural variant machinery, unchanged
+        }
+        return foldMembership(own, true);
+    }
+
+    // Structural variants: this bus also carries the terminals attached onto it in the active variant, and
+    // hides the ones detached from it, so every read derived from the connected terminals (typed accessors,
+    // equipment visitors, bus-view merging, component traversal) sees the variant's own topology.
+    private Stream<TerminalExt> foldMembership(Stream<TerminalExt> own, boolean connectedOnly) {
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        VoltageLevelExt vl = (VoltageLevelExt) getVoltageLevel();
+        List<TerminalExt> detached = membershipTerminalsOnThisBus(membership.detachedTerminals(vl), connectedOnly);
+        Stream<TerminalExt> visible = detached.isEmpty() ? own : own.filter(t -> !detached.contains(t));
+        List<TerminalExt> attached = membershipTerminalsOnThisBus(membership.attachedTerminals(vl), connectedOnly);
+        return attached.isEmpty() ? visible : Stream.concat(visible, attached.stream());
+    }
+
+    private List<TerminalExt> membershipTerminalsOnThisBus(java.util.Set<TerminalExt> terminalSet, boolean connectedOnly) {
+        if (terminalSet.isEmpty()) {
+            return List.of();
+        }
+        List<TerminalExt> result = new ArrayList<>();
+        for (TerminalExt terminal : terminalSet) {
+            if (terminal instanceof BusTerminal busTerminal && getId().equals(busTerminal.getConnectableBusId())
+                    && (!connectedOnly || busTerminal.isConnected())) {
+                result.add(terminal);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void visitConnectedOrConnectableEquipments(TopologyVisitor visitor) {
+        VariantScopedMembership membership = network.get().getVariantScopedMembership();
+        if (membership == null) {
+            super.visitConnectedOrConnectableEquipments(visitor);
+            return;
+        }
+        Stream<TerminalExt> own = getTerminals().stream().map(Function.identity());
+        AbstractBus.visitEquipments(foldMembership(own, false).toList(), visitor);
     }
 
     @Override
@@ -200,26 +241,21 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
 
-        terminals.ensureCapacity(terminals.size() + number);
-        for (int i = 0; i < number; i++) {
-            terminals.add(new ArrayList<>(terminals.get(sourceIndex)));
-        }
+        terminals.grow(number, () -> new ArrayList<>(terminals.get(sourceIndex)));
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
 
-        for (int i = 0; i < number; i++) {
-            terminals.remove(terminals.size() - 1);
-        }
+        terminals.shrink(number);
     }
 
     @Override
     public void deleteVariantArrayElement(int index) {
         super.deleteVariantArrayElement(index);
 
-        terminals.set(index, null);
+        terminals.clear(index);
     }
 
     @Override

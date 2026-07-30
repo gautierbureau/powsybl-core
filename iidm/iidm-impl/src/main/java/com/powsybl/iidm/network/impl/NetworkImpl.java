@@ -28,6 +28,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -57,7 +59,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     private ValidationLevel validationLevel = ValidationLevel.STEADY_STATE_HYPOTHESIS;
     private ValidationLevel minValidationLevel = ValidationLevel.STEADY_STATE_HYPOTHESIS;
 
-    private final NetworkIndex index = new NetworkIndex();
+    private final NetworkIndex index;
 
     private final Map<String, VoltageAngleLimit> voltageAngleLimitsIndex = new LinkedHashMap<>();
 
@@ -69,10 +71,13 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
 
     // generic per-object-type numeric variant stores, created lazily and keyed by a type token so that adding
     // a new columnar object type needs no change here (see getOrCreateNumericVariantStore)
-    private final Map<String, NumericVariantStore> numericVariantStores = new HashMap<>();
+    // Concurrent, and the registry below is mutated under a lock: a new columnar type can first be used by
+    // a worker thread creating equipment in its own variant, while other threads are reading.
+    private final Map<String, NumericVariantStore> numericVariantStores = new ConcurrentHashMap<>();
 
-    // all columnar variant stores, driven once per variant operation instead of once per object
-    private final List<VariantColumnStore> variantColumnStores = new ArrayList<>();
+    // all columnar variant stores, driven once per variant operation instead of once per object; copy-on-write
+    // so a variant operation can iterate it while a worker registers a newly-used type
+    private final List<VariantColumnStore> variantColumnStores = new CopyOnWriteArrayList<>();
 
     private AbstractReportNodeContext reportNodeContext;
 
@@ -137,12 +142,20 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     private final BusViewImpl busView = new BusViewImpl();
 
     NetworkImpl(String id, String name, String sourceFormat) {
+        this(id, name, sourceFormat, new NetworkIndex());
+    }
+
+    NetworkImpl(String id, String name, String sourceFormat, NetworkIndex index) {
         super(id, name, sourceFormat);
+        this.index = index;
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
-        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
-        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize());
+        // identifiables may be created/removed from worker threads only while multi-thread variant access is
+        // on; the index keeps its per-class sets copy-on-write for exactly that window
+        index.setConcurrentWritesProbe(variantManager::isVariantMultiThreadAccessAllowed);
+        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
+        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize(), variantManager.getCowState());
         variantColumnStores.add(terminalVariantStore);
         variantColumnStores.add(switchVariantStore);
         variants = new VariantArray<>(ref, VariantImpl::new);
@@ -214,6 +227,111 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         return index;
     }
 
+    /**
+     * Enable — and return — the layer that makes an object's existence depend on the active variant, so a
+     * cloned variant is a branch of this same network. Called on the first clone; idempotent.
+     */
+    VariantScopedExistence enableVariantScopedExistence() {
+        VariantScopedExistence current = index.getVariantScopedExistence();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedExistence created = new VariantScopedExistence(this, variantManager.getVariantArraySize());
+        index.setVariantScopedExistence(created);
+        return created;
+    }
+
+    /**
+     * Enable — and return — variant-scoped terminal membership (the {@code attached} / {@code detached}
+     * delta resolved against the active variant). Called on the first clone; idempotent.
+     */
+    VariantScopedMembership enableVariantScopedMembership() {
+        VariantScopedMembership current = index.getVariantScopedMembership();
+        if (current != null) {
+            return current;
+        }
+        VariantScopedMembership created = new VariantScopedMembership(this, variantManager.getVariantArraySize());
+        index.setVariantScopedMembership(created);
+        return created;
+    }
+
+    VariantScopedMembership getVariantScopedMembership() {
+        return index.getVariantScopedMembership();
+    }
+
+    VariantScopedExistence getVariantScopedExistence() {
+        return index.getVariantScopedExistence();
+    }
+
+    /**
+     * Whether structural mutations (add/remove) made now are scoped to the working variant. True as soon as
+     * the network has more than one variant, whichever variant is the working one.
+     */
+    boolean isVariantScopedStructure() {
+        return variantManager.isVariantScopedStructure();
+    }
+
+    /** Whether {@code id} is an object created in a variant (so extending/removing it is variant-scoped). */
+    boolean isVariantAddedObject(String id) {
+        VariantScopedExistence existence = getVariantScopedExistence();
+        if (existence == null) {
+            return false;
+        }
+        Identifiable<?> obj = index.get(id);
+        return obj != null && existence.isAddedObject(obj);
+    }
+
+    /**
+     * Adding and removing identifiables is variant-scoped (existence tombstones plus the membership
+     * intercept). A voltage level's internal topology — its switches, buses and internal connections — still
+     * lives in a single graph shared by every variant, so editing it once the network has more than one
+     * variant would silently change the topology (calculated buses, connected components) of all of them.
+     * Such an edit is rejected rather than allowed to corrupt the other variants. This is the remaining gap
+     * versus network-store, where those objects are variant-scoped rows like any other.
+     */
+    void rejectSharedStructuralEdit(String operation) {
+        if (isVariantScopedStructure()) {
+            throw new PowsyblException(operation + " is not supported once the network has several variants "
+                    + "(it would modify topology shared by all variants).");
+        }
+    }
+
+    /**
+     * Reject removing {@code voltageLevel} while another variant still has equipment attached to it.
+     * <p>
+     * A removability check ({@code VoltageLevels.checkRemovability}) enumerates the voltage level's
+     * connectables, which resolve against the working variant. Equipment added onto this voltage level in
+     * another variant is recorded in the variant-scoped membership instead of the voltage level's graph, so
+     * that check cannot see it and the removal would strand it — the equipment stays visible in its own
+     * variant with a terminal pointing at a voltage level that no longer exists.
+     */
+    void rejectRemovalOfVoltageLevelUsedByAnotherVariant(VoltageLevelExt voltageLevel) {
+        VariantScopedMembership membership = getVariantScopedMembership();
+        if (membership == null) {
+            return;
+        }
+        VariantScopedMembership.ForeignAttachment attachment =
+                membership.findAttachmentInAnotherVariant(voltageLevel, getVariantIndex());
+        if (attachment != null) {
+            throw new PowsyblException("The voltage level '" + voltageLevel.getId() + "' cannot be removed: "
+                    + "variant '" + variantManager.getVariantId(attachment.variantIndex()) + "' has equipment "
+                    + "attached to it ('" + attachment.terminal().getConnectable().getId() + "'). Remove that "
+                    + "equipment, or that variant, first.");
+        }
+    }
+
+    /**
+     * Reject {@code operation} that would extend a shared container. Extending a container created in the
+     * working variant is fine (it exists only there); extending a shared one would leak into every variant.
+     */
+    void rejectStructuralEditOnSharedContainer(String containerId, String operation) {
+        if (isVariantScopedStructure() && !isVariantAddedObject(containerId)) {
+            throw new PowsyblException(operation + " onto shared container '" + containerId
+                    + "' is not supported once the network has several variants "
+                    + "(only a container created in the working variant can be extended).");
+        }
+    }
+
     public Map<String, VoltageAngleLimit> getVoltageAngleLimitsIndex() {
         return voltageAngleLimitsIndex;
     }
@@ -263,12 +381,16 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
                                                               boolean[] booleanDefaults) {
         NumericVariantStore store = numericVariantStores.get(key);
         if (store == null) {
-            // created at the current variant array size (its bands hold the column defaults); registered so
-            // that subsequent variant operations drive it. Creation happens on the main thread during build.
-            store = new NumericVariantStore(variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
-                    booleanDefaults);
-            numericVariantStores.put(key, store);
-            variantColumnStores.add(store);
+            // A type may first be used by a worker creating equipment in its own variant, so the
+            // create-and-register is done once, atomically: computeIfAbsent both publishes the store and
+            // registers it for subsequent variant operations. The store is sized to the current variant array
+            // so its bands already cover every live variant.
+            store = numericVariantStores.computeIfAbsent(key, k -> {
+                NumericVariantStore created = new NumericVariantStore(variantManager.getVariantArraySize(),
+                        doubleDefaults, intDefaults, booleanDefaults, variantManager.getCowState());
+                variantColumnStores.add(created);
+                return created;
+            });
         }
         return store;
     }
@@ -1243,7 +1365,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
         // columnar variant stores (terminal p/q, switch open/retained, node terminal, bus...):
-        // extended once for the whole network instead of once per object
+        // extended once for the whole network instead of once per object, copy-on-write (O(1)); everything
+        // else above stays eager (caches and delta-sized maps, all cheap).
         for (VariantColumnStore store : variantColumnStores) {
             store.extend(number, sourceIndex);
         }
@@ -1288,6 +1411,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         }
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
+    }
+
+    /**
+     * Freeze the state a copy-on-write variant still inherits from {@code variantIndex} into it, in every
+     * columnar store, before {@code variantIndex} is removed or overwritten. Called by the variant manager;
+     * see {@link VariantColumnStore#materializeInheritors(int)}.
+     */
+    void materializeCowInheritorsOf(int variantIndex) {
+        for (VariantColumnStore store : variantColumnStores) {
+            store.materializeInheritors(variantIndex);
+        }
     }
 
     private static void checkIndependentNetwork(Network network) {

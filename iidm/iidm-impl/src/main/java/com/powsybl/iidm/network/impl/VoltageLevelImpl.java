@@ -611,9 +611,12 @@ class VoltageLevelImpl extends AbstractIdentifiable<VoltageLevel> implements Vol
 
     @Override
     public void remove() {
+        NetworkImpl network = getNetwork();
+        network.rejectSharedStructuralEdit("Removing a voltage level");
+        network.rejectRemovalOfVoltageLevelUsedByAnotherVariant(this);
+
         VoltageLevels.checkRemovability(this);
 
-        NetworkImpl network = getNetwork();
         network.getListeners().notifyBeforeRemoval(this);
 
         // Remove all connectables

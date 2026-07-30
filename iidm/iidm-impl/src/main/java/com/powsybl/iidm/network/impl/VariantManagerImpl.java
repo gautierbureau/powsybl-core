@@ -11,6 +11,7 @@ import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.primitives.Ints;
 import com.powsybl.commons.PowsyblException;
+import com.powsybl.iidm.network.Identifiable;
 import com.powsybl.iidm.network.VariantManager;
 import com.powsybl.iidm.network.VariantManagerConstants;
 import org.slf4j.Logger;
@@ -36,7 +37,26 @@ public class VariantManagerImpl implements VariantManager {
 
     private int variantArraySize;
 
+    // Set once preAllocateVariants has been called: opts this manager into the managed-capacity contract
+    // (thread-safe on-demand creation into reserved slots, overflow throws, no array shrink while multi-thread
+    // access is on). When false, behaviour is unchanged from the legacy variant manager.
+    private boolean preAllocated;
+
     private final Deque<Integer> unusedIndexes = new ArrayDeque<>();
+
+    // Clone parentage, copy-on-write variant marks and the copy-on-write master gate, shared with every
+    // columnar variant store. Drives copy-on-write existence AND state resolution. Every clone is a
+    // copy-on-write (partial) variant; only the initial variant is dense, and it is where a resolution walk
+    // stops -- the same shape as network-store's full variant / partial variant storage.
+    private final VariantCowState cowState = new VariantCowState();
+
+    // Guards every read and write of the variant bookkeeping (id2index, unusedIndexes, variantArraySize,
+    // preAllocated) and serialises the clone/remove mutators (including cowState.recordClone/forgetVariant,
+    // whose copy-on-write snapshot swap relies on writers being serialised). Worker threads read/write the
+    // per-variant data concurrently, each on its own variant band; that hot path resolves a thread-local
+    // index and does not take this lock. On-demand creation into pre-allocated capacity is done under it, so
+    // it cannot race a concurrent setWorkingVariant / creation on another thread.
+    private final Object variantLock = new Object();
 
     private final NetworkImpl network;
 
@@ -44,6 +64,9 @@ public class VariantManagerImpl implements VariantManager {
         this.network = network;
         this.variantContext = new MultiVariantContext(INITIAL_VARIANT_INDEX);
         this.networkIndex = network.getIndex();
+        // read through the field, not a captured value: the context is replaced when multi-thread access is
+        // toggled, and the write guard must follow the current one
+        cowState.setSharedAcrossThreadsProbe(() -> variantContext.isSharedAcrossThreads());
         // the network has always a zero index initial variant
         id2index.put(VariantManagerConstants.INITIAL_VARIANT_ID, INITIAL_VARIANT_INDEX);
         variantArraySize = INITIAL_VARIANT_INDEX + 1;
@@ -55,7 +78,10 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public Collection<String> getVariantIds() {
-        return Collections.unmodifiableSet(id2index.keySet());
+        synchronized (variantLock) {
+            // snapshot: the backing key set is a live view that could be mutated by a concurrent creation
+            return Collections.unmodifiableSet(new LinkedHashSet<>(id2index.keySet()));
+        }
     }
 
     /**
@@ -65,17 +91,25 @@ public class VariantManagerImpl implements VariantManager {
      * @return the size of the variant array
      */
     public int getVariantArraySize() {
-        return variantArraySize;
+        synchronized (variantLock) {
+            return variantArraySize;
+        }
     }
 
     int getVariantCount() {
-        return id2index.size();
+        synchronized (variantLock) {
+            return id2index.size();
+        }
     }
 
     Collection<Integer> getVariantIndexes() {
-        return id2index.values();
+        synchronized (variantLock) {
+            // id2index.values() is a Set (indexes are unique); snapshot it to avoid exposing the live view
+            return new LinkedHashSet<>(id2index.values());
+        }
     }
 
+    // callers must hold variantLock
     private int getVariantIndex(String variantId) {
         Integer index = id2index.get(variantId);
         if (index == null) {
@@ -85,7 +119,9 @@ public class VariantManagerImpl implements VariantManager {
     }
 
     public String getVariantId(int variantIndex) {
-        return id2index.inverse().get(variantIndex);
+        synchronized (variantLock) {
+            return id2index.inverse().get(variantIndex);
+        }
     }
 
     @Override
@@ -96,7 +132,10 @@ public class VariantManagerImpl implements VariantManager {
 
     @Override
     public void setWorkingVariant(String variantId) {
-        int index = getVariantIndex(variantId);
+        int index;
+        synchronized (variantLock) {
+            index = getVariantIndex(variantId);
+        }
         variantContext.setVariantIndex(index);
     }
 
@@ -127,47 +166,148 @@ public class VariantManagerImpl implements VariantManager {
             throw new IllegalArgumentException("Empty target variant id list");
         }
         LOGGER.debug("Creating variants {}", targetVariantIds);
-        if (!mayOverwrite) {
-            checkExistingVariantIds(targetVariantIds);
-        }
-        int sourceIndex = getVariantIndex(sourceVariantId);
-        int initVariantArraySize = variantArraySize;
-        int extendedCount = 0;
-        List<Integer> recycled = new ArrayList<>();
-        List<Integer> overwritten = new ArrayList<>();
-        for (String targetVariantId : targetVariantIds) {
-            if (id2index.containsKey(targetVariantId)) {
-                overwritten.add(id2index.get(targetVariantId));
-
-                network.getListeners().notifyVariantOverwritten(sourceVariantId, targetVariantId);
-            } else if (unusedIndexes.isEmpty()) {
-                // extend variant array size
-                id2index.put(targetVariantId, variantArraySize);
-                variantArraySize++;
-                extendedCount++;
-
-                network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
-            } else {
-                // recycle an index
-                int index = unusedIndexes.pollLast();
-                id2index.put(targetVariantId, index);
-                recycled.add(index);
-
-                network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+        synchronized (variantLock) {
+            if (!mayOverwrite) {
+                checkExistingVariantIds(targetVariantIds);
             }
+            int sourceIndex = getVariantIndex(sourceVariantId);
+
+            // clone-from-unwritten-base guard (checked before any state is mutated): a variant cloned while
+            // multi-thread access is enabled must fork from the shared base -- the dense initial variant,
+            // left unwritten during the parallel region. Forking from another clone would build a chain whose
+            // middle variant is both written by its own worker and a freeze source for its children; writing
+            // it then races the workers reading those children (the freeze-on-write race). The safe,
+            // supported topology is one variant per worker, all forked from the shared base.
+            if (isVariantMultiThreadAccessAllowed()) {
+                if (cowState.isCow(sourceIndex)) {
+                    throw new PowsyblException("A variant cloned while multi-thread access is enabled must "
+                            + "fork from the base variant, not from another cloned variant '"
+                            + getVariantId(sourceIndex) + "'. Fork every concurrent variant from the shared "
+                            + "base variant instead.");
+                }
+                // write side: the source is now the shared read-only ancestor for the parallel region. Freeze
+                // it so any write to it fails fast (it would freeze state into every worker variant that
+                // inherits from it, racing their writes). Cleared when multi-thread access is turned off.
+                cowState.freezeBase(sourceIndex);
+            }
+
+            int initVariantArraySize = variantArraySize;
+            int extendedCount = 0;
+            List<Integer> recycled = new ArrayList<>();
+            List<Integer> overwritten = new ArrayList<>();
+            for (String targetVariantId : targetVariantIds) {
+                if (id2index.containsKey(targetVariantId)) {
+                    overwritten.add(id2index.get(targetVariantId));
+
+                    network.getListeners().notifyVariantOverwritten(sourceVariantId, targetVariantId);
+                } else if (!unusedIndexes.isEmpty()) {
+                    // reuse a free slot (recycled from a removed variant, or reserved by preAllocateVariants):
+                    // this only overwrites an existing band, it never resizes the per-variant arrays, so it is
+                    // safe to run while multi-thread access is enabled
+                    int index = unusedIndexes.pollLast();
+                    id2index.put(targetVariantId, index);
+                    recycled.add(index);
+
+                    network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+                } else {
+                    // Extend the variant arrays. This is safe on a worker thread while others read and write
+                    // variants: every per-variant array grows by publishing a longer spine while leaving the
+                    // storage it points at in place, and an object that this growth misses -- because it was
+                    // not yet published in the index -- sizes the missing slot on demand when it is first
+                    // read (see VariantRefArray). Reserving capacity up front with preAllocateVariants is
+                    // therefore only a way to avoid the growth, never a correctness requirement.
+                    id2index.put(targetVariantId, variantArraySize);
+                    variantArraySize++;
+                    extendedCount++;
+
+                    network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
+                }
+            }
+
+            // compute the stateful objects list only once for the whole clone operation
+            List<MultiVariantObject> statefulObjects = getStafulObjects();
+
+            // an overwritten variant may have copy-on-write children still inheriting state from it: freeze
+            // that state into them before its bands are overwritten, so they keep their snapshot
+            for (int index : overwritten) {
+                network.materializeCowInheritorsOf(index);
+            }
+
+            // Record the clone parentage before driving the owners, so the stores resolve through a consistent
+            // parentage while cloning. An object added in a variant resolves its visibility through this same
+            // tree instead of being hidden in every other variant eagerly.
+            for (String targetVariantId : targetVariantIds) {
+                cowState.recordClone(id2index.get(targetVariantId), sourceIndex);
+            }
+
+            allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
+
+            if (extendedCount > 0) {
+                for (MultiVariantObject obj : statefulObjects) {
+                    obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
+                }
+                LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
+            }
+
+            // from the first clone on, object existence and terminal membership are resolved against the
+            // active variant, in every variant including the initial one
+            network.enableVariantScopedExistence();
+            network.enableVariantScopedMembership();
         }
+    }
 
-        // compute the stateful objects list only once for the whole clone operation
-        List<MultiVariantObject> statefulObjects = getStafulObjects();
-
-        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
-
-        if (extendedCount > 0) {
+    @Override
+    public void preAllocateVariants(int number) {
+        if (number < 0) {
+            throw new IllegalArgumentException("Number of variants to pre-allocate must be >= 0, got " + number);
+        }
+        synchronized (variantLock) {
+            if (number == 0) {
+                return;
+            }
+            int initVariantArraySize = variantArraySize;
+            // Reserve capacity by driving the same cascade a clone uses (copy-on-write: O(1) for the columnar
+            // stores -- grows variantSize AND the cowBands band table, but no rows). This is the key point: it
+            // pre-sizes cowBands so a later on-demand clone into a reserved slot, and any divergent write on
+            // it, never grow cowBands on a worker thread. The eager per-variant trove / cache state is grown
+            // here from the initial variant and re-initialised from the real source when the slot is claimed.
+            // It does NOT flip the network into copy-on-write mode (no variant is marked yet); that happens on
+            // the first real clone.
+            List<MultiVariantObject> statefulObjects = getStafulObjects();
             for (MultiVariantObject obj : statefulObjects) {
-                obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
+                obj.extendVariantArraySize(initVariantArraySize, number, INITIAL_VARIANT_INDEX);
             }
-            LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
+            // park the freshly grown indexes as reusable capacity (not yet live variants); a later clone will
+            // claim them through the recycle path, which does not resize anything
+            for (int i = 0; i < number; i++) {
+                unusedIndexes.add(initVariantArraySize + i);
+            }
+            variantArraySize += number;
+            preAllocated = true;
+            LOGGER.debug("Pre-allocated {} variant slot(s) (variant array size is now {})", number, variantArraySize);
         }
+    }
+
+    // Remove from the network index every object whose only variant has just been removed. Done after the
+    // variant bookkeeping is updated, so visibility is resolved against the variants that remain.
+    private void dropOrphanedObjects(VariantScopedExistence existence) {
+        if (existence == null) {
+            return;
+        }
+        Set<Identifiable<?>> orphans = existence.collectOrphans(id2index.values());
+        for (Identifiable<?> orphan : orphans) {
+            networkIndex.removeVariantOrphan(orphan);
+        }
+    }
+
+    /** The shared copy-on-write bookkeeping (parentage, partial-variant marks, master gate). */
+    VariantCowState getCowState() {
+        return cowState;
+    }
+
+    /** The variant a variant was cloned from, or {@code -1} for a root (the initial variant). */
+    int parentVariant(int index) {
+        return cowState.getParent(index);
     }
 
     private void checkExistingVariantIds(List<String> targetVariantIds) {
@@ -202,50 +342,87 @@ public class VariantManagerImpl implements VariantManager {
         }
     }
 
+    /**
+     * Whether structural mutations (add/remove/reconnect) made now are scoped to the working variant.
+     * <p>
+     * True while the working variant is a cloned (partial) one. The initial variant is the shared base -- the
+     * counterpart of network-store's full variant -- so a structural edit made there is seen by every variant
+     * that has not overridden that object, exactly as it is today and as a partial variant resolves against
+     * its full variant in network-store.
+     */
+    boolean isVariantScopedStructure() {
+        return variantContext.isIndexSet() && cowState.isCow(variantContext.getVariantIndex());
+    }
+
     @Override
     public void removeVariant(String variantId) {
         if (VariantManagerConstants.INITIAL_VARIANT_ID.equals(variantId)) {
             throw new PowsyblException("Removing initial variant is forbidden");
         }
-        int index = getVariantIndex(variantId);
-        id2index.remove(variantId);
-        LOGGER.debug("Removing variant '{}'", variantId);
-        if (index == variantArraySize - 1) {
-            // remove consecutive unsused index starting from the end
-            int number = 0; // number of elements to remove
-            Set<Integer> removed = new HashSet<>();
-            for (int j = index; j >= 0; j--) {
-                if (id2index.containsValue(j)) {
-                    break;
-                } else {
-                    number++;
-                    removed.add(j);
+        synchronized (variantLock) {
+            int index = getVariantIndex(variantId);
+            // Freeze the state its copy-on-write children still inherit from it into them (they keep their
+            // snapshot), then re-parent them onto its parent and forget its existence deltas (objects that
+            // existed only in it become invisible; its index may be recycled).
+            network.materializeCowInheritorsOf(index);
+            cowState.forgetVariant(index);
+            VariantScopedExistence existence = networkIndex.getVariantScopedExistence();
+            if (existence != null) {
+                existence.forgetVariant(index);
+            }
+            id2index.remove(variantId);
+            LOGGER.debug("Removing variant '{}'", variantId);
+            // In managed-capacity mode while multi-thread access is enabled the per-variant arrays must not be
+            // shrunk (that would resize them while other threads read/write variants); the freed slot is only
+            // parked for reuse, preserving the reserved capacity. Shrinking resumes once single-thread access
+            // is restored. Outside that mode, behaviour is unchanged.
+            if (index == variantArraySize - 1 && !(preAllocated && isVariantMultiThreadAccessAllowed())) {
+                // remove consecutive unsused index starting from the end
+                int number = 0; // number of elements to remove
+                Set<Integer> removed = new HashSet<>();
+                for (int j = index; j >= 0; j--) {
+                    if (id2index.containsValue(j)) {
+                        break;
+                    } else {
+                        number++;
+                        removed.add(j);
+                    }
                 }
+                unusedIndexes.removeAll(removed);
+                // reduce variant array size
+                for (MultiVariantObject obj : getStafulObjects()) {
+                    obj.reduceVariantArraySize(number);
+                }
+                variantArraySize -= number;
+                LOGGER.trace("Reducing variant array size to {}", variantArraySize);
+            } else {
+                unusedIndexes.add(index);
+                // delete variant array element at the unused index to avoid memory leak
+                // (so that variant data can be garbage collected)
+                for (MultiVariantObject obj : getStafulObjects()) {
+                    obj.deleteVariantArrayElement(index);
+                }
+                LOGGER.trace("Deleting variant array element at index {}", index);
             }
-            unusedIndexes.removeAll(removed);
-            // reduce variant array size
-            for (MultiVariantObject obj : getStafulObjects()) {
-                obj.reduceVariantArraySize(number);
-            }
-            variantArraySize -= number;
-            LOGGER.trace("Reducing variant array size to {}", variantArraySize);
-        } else {
-            unusedIndexes.add(index);
-            // delete variant array element at the unused index to avoid memory leak
-            // (so that variant data can be garbage collected)
-            for (MultiVariantObject obj : getStafulObjects()) {
-                obj.deleteVariantArrayElement(index);
-            }
-            LOGGER.trace("Deleting variant array element at index {}", index);
-        }
-        // if the removed variant is the working variant, unset the working variant
-        variantContext.resetIfVariantIndexIs(index);
+            // if the removed variant is the working variant, unset the working variant
+            variantContext.resetIfVariantIndexIs(index);
 
-        network.getListeners().notifyVariantRemoved(variantId);
+            // objects that existed only in the removed variant are now visible nowhere: drop them from the
+            // network index, so they stop holding an id that could never be reused
+            dropOrphanedObjects(existence);
+
+            network.getListeners().notifyVariantRemoved(variantId);
+        }
     }
 
     @Override
     public void allowVariantMultiThreadAccess(boolean allow) {
+        if (!allow) {
+            // the parallel region is ending: the frozen concurrent-clone bases become writable again
+            synchronized (variantLock) {
+                cowState.clearFrozenBases();
+            }
+        }
         if (allow && !(variantContext instanceof ThreadLocalMultiVariantContext)) {
             VariantContext newVariantContext = new ThreadLocalMultiVariantContext();
             // For multithreaded VariantContext, don't set the variantIndex to a default
@@ -272,8 +449,12 @@ public class VariantManagerImpl implements VariantManager {
 
     void forEachVariant(Runnable r) {
         int currentVariantIndex = variantContext.getVariantIndex();
+        List<Integer> indexes;
+        synchronized (variantLock) {
+            indexes = new ArrayList<>(id2index.values());
+        }
         try {
-            for (int index : id2index.values()) {
+            for (int index : indexes) {
                 variantContext.setVariantIndex(index);
                 r.run();
             }

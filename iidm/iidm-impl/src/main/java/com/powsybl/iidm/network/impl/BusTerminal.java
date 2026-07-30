@@ -15,7 +15,6 @@ import com.powsybl.iidm.network.ThreeSides;
 import com.powsybl.iidm.network.TopologyPoint;
 import com.powsybl.math.graph.TraversalType;
 
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.Set;
 
@@ -27,7 +26,7 @@ import java.util.Set;
 class BusTerminal extends AbstractTerminal {
 
     private BusBreakerTopologyModel getTopologyModel() {
-        return (BusBreakerTopologyModel) voltageLevel.getTopologyModel();
+        return (BusBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final NodeBreakerView nodeBreakerView = new NodeBreakerView() {
@@ -76,7 +75,7 @@ class BusTerminal extends AbstractTerminal {
 
             topologyModel.detachInCurrentVariant(BusTerminal.this);
             int variantIndex = getVariantManagerHolder().getVariantIndex();
-            String oldValue = BusTerminal.this.connectableBusId.set(variantIndex, busId);
+            String oldValue = BusTerminal.this.connectableBusId.getAndSet(variantIndex, busId);
             topologyModel.attachInCurrentVariant(BusTerminal.this, false);
             String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
             getConnectable().notifyUpdate("connectableBusId", variantId, oldValue, busId);
@@ -120,7 +119,7 @@ class BusTerminal extends AbstractTerminal {
 
     // attributes depending on the variant
 
-    // connected is held columnarly (boolean column); connectableBusId is an object (String) list, kept per-object
+    // connected is held columnarly (boolean column); connectableBusId is a reference, kept per-object
     private static final String STORE_KEY = "BusTerminal";
     private static final double[] DOUBLE_DEFAULTS = {};
     private static final int[] INT_DEFAULTS = {};
@@ -130,7 +129,9 @@ class BusTerminal extends AbstractTerminal {
     private NumericVariantStore connectedStore;
     private int connectedStoreRow;
 
-    private final ArrayList<String> connectableBusId;
+    // Per-variant, and grown while workers may be reading and writing it, so not an ArrayList: see
+    // VariantRefArray for why growing one of those would lose a concurrent write.
+    private final VariantRefArray<String> connectableBusId;
 
     BusTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, String connectableBusId, boolean connected) {
         super(network, side, terminalNumber);
@@ -138,10 +139,7 @@ class BusTerminal extends AbstractTerminal {
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
         this.connectedStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.connectedStoreRow = connectedStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {connected});
-        this.connectableBusId = new ArrayList<>(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.connectableBusId.add(connectableBusId);
-        }
+        this.connectableBusId = new VariantRefArray<>(variantArraySize, () -> connectableBusId);
     }
 
     void unsetConnectableBusId() {
@@ -239,24 +237,19 @@ class BusTerminal extends AbstractTerminal {
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        connectableBusId.ensureCapacity(connectableBusId.size() + number);
-        for (int i = 0; i < number; i++) {
-            connectableBusId.add(connectableBusId.get(sourceIndex));
-        }
+        connectableBusId.grow(number, () -> connectableBusId.get(sourceIndex));
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        for (int i = 0; i < number; i++) {
-            connectableBusId.remove(connectableBusId.size() - 1);
-        }
+        connectableBusId.shrink(number);
     }
 
     @Override
     public void deleteVariantArrayElement(int index) {
         super.deleteVariantArrayElement(index);
-        connectableBusId.set(index, null);
+        connectableBusId.clear(index);
     }
 
     @Override

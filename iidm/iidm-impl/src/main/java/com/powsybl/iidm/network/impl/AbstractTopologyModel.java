@@ -52,6 +52,22 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
         return voltageLevel.getNetwork();
     }
 
+    /**
+     * Reject adding a switch / internal connection onto this voltage level, once the network has several
+     * variants, unless the voltage level was itself created in the working variant. On a shared voltage level
+     * the edge would be added to the single shared graph and corrupt the topology (calculated buses,
+     * connected components) of every other variant, while the identifiable would be existence-hidden — an
+     * inconsistent, silently wrong state.
+     */
+    protected void rejectStructuralInternalStructureAdd(String operation) {
+        getNetwork().rejectStructuralEditOnSharedContainer(voltageLevel.getId(), operation);
+    }
+
+    /** Reject removing a switch / bus (shared graph structure) once the network has several variants. */
+    protected void rejectStructuralInternalStructureRemoval(String operation) {
+        getNetwork().rejectSharedStructuralEdit(operation);
+    }
+
     protected static void addNextTerminals(TerminalExt otherTerminal, List<TerminalExt> nextTerminals) {
         Objects.requireNonNull(otherTerminal);
         Objects.requireNonNull(nextTerminals);
@@ -88,16 +104,95 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
 
     public abstract Stream<Terminal> getTerminalStream();
 
+    // When true, this voltage level has a variant-scoped terminal membership delta,
+    // so enumeration folds in the active variant's attached/detached terminals. Default false -> the
+    // common path is exactly getTerminals(). Volatile: set by whichever thread diverges a variant, read by
+    // every terminal enumeration, and it only ever goes false -> true.
+    private volatile boolean branchAttachmentHint = false;
+
+    void setBranchAttachmentHint(boolean branchAttachmentHint) {
+        this.branchAttachmentHint = branchAttachmentHint;
+    }
+
+    private Iterable<Terminal> terminalsWithBranchAttached() {
+        Set<TerminalExt> attached = branchAttachedTerminals();
+        Set<TerminalExt> detached = branchDetachedTerminals();
+        if (attached.isEmpty() && detached.isEmpty()) {
+            return getTerminals();
+        }
+        FluentIterable<Terminal> result = FluentIterable.from(getTerminals());
+        if (!detached.isEmpty()) {
+            result = FluentIterable.from(result.filter(t -> !detached.contains(t)));
+        }
+        return attached.isEmpty() ? result
+                : result.append(FluentIterable.from(attached).transform(t -> (Terminal) t));
+    }
+
+    private Stream<Terminal> terminalStreamWithBranchAttached() {
+        Set<TerminalExt> attached = branchAttachedTerminals();
+        Set<TerminalExt> detached = branchDetachedTerminals();
+        if (attached.isEmpty() && detached.isEmpty()) {
+            return getTerminalStream();
+        }
+        Stream<Terminal> own = getTerminalStream();
+        if (!detached.isEmpty()) {
+            own = own.filter(t -> !detached.contains(t));
+        }
+        return attached.isEmpty() ? own : Stream.concat(own, attached.stream().map(t -> (Terminal) t));
+    }
+
+    private Set<TerminalExt> branchAttachedTerminals() {
+        if (!branchAttachmentHint) {
+            return Set.of();
+        }
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        return membership == null ? Set.of() : membership.attachedTerminals(voltageLevel);
+    }
+
+    private Set<TerminalExt> branchDetachedTerminals() {
+        if (!branchAttachmentHint) {
+            return Set.of();
+        }
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        return membership == null ? Set.of() : membership.detachedTerminals(voltageLevel);
+    }
+
+    /** This voltage level is a shared VL currently receiving a branch-attach add in the working variant. */
+    protected boolean isActiveBranchAttachTarget() {
+        VariantScopedMembership membership = getNetwork().getVariantScopedMembership();
+        return membership != null && (membership.isAttachTarget(voltageLevel) || getNetwork().isVariantScopedStructure());
+    }
+
+    /**
+     * Branch-attach add: a connectable's terminal added onto this (shared) voltage level, once the network
+     * has several variants, is recorded in the working variant's membership instead of entering this VL's
+     * shared graph. The object's existence-scoping is handled centrally in
+     * {@code NetworkIndex.checkAndAdd}. Also used by the internal split helper via an explicit attach
+     * window. Returns {@code true} if handled.
+     */
+    protected boolean branchAttachIntercept(TerminalExt terminal) {
+        NetworkImpl network = getNetwork();
+        VariantScopedMembership membership = network.getVariantScopedMembership();
+        if (membership == null) {
+            return false;
+        }
+        if (membership.isAttachTarget(voltageLevel) || network.isVariantScopedStructure()) {
+            terminal.setVoltageLevel(voltageLevel);
+            membership.attachInCurrentVariant(voltageLevel, terminal);
+            return true;
+        }
+        return false;
+    }
+
     public <T extends Connectable> Iterable<T> getConnectables(Class<T> clazz) {
-        Iterable<Terminal> terminals = getTerminals();
-        return FluentIterable.from(terminals)
+        return FluentIterable.from(terminalsWithBranchAttached())
                 .transform(Terminal::getConnectable)
                 .filter(clazz)
                 .toSet();
     }
 
     public <T extends Connectable> Stream<T> getConnectableStream(Class<T> clazz) {
-        return getTerminalStream()
+        return terminalStreamWithBranchAttached()
                 .map(Terminal::getConnectable)
                 .filter(clazz::isInstance)
                 .map(clazz::cast)
@@ -109,13 +204,13 @@ abstract class AbstractTopologyModel extends AbstractPropertiesHolder implements
     }
 
     public Iterable<Connectable> getConnectables() {
-        return FluentIterable.from(getTerminals())
+        return FluentIterable.from(terminalsWithBranchAttached())
                 .transform(Terminal::getConnectable)
                 .toSet();
     }
 
     public Stream<Connectable> getConnectableStream() {
-        return getTerminalStream()
+        return terminalStreamWithBranchAttached()
                 .map(Terminal::getConnectable)
                 .distinct();
     }

@@ -17,7 +17,11 @@ package com.powsybl.iidm.network.impl;
  */
 interface VariantColumnStore {
 
-    /** Append {@code number} variant bands, each a copy of the {@code sourceIndex} band. */
+    /**
+     * Append {@code number} variant bands inheriting from the {@code sourceIndex} band through the variant
+     * parentage ({@link VariantCowState}). This is O(1): the new bands own no rows and resolve reads through
+     * the parentage until they diverge.
+     */
     void extend(int number, int sourceIndex);
 
     /** Drop the last {@code number} variant bands. */
@@ -26,6 +30,16 @@ interface VariantColumnStore {
     /** Release the band at {@code index} (an unused variant slot). */
     void delete(int index);
 
-    /** Overwrite each band in {@code indexes} with a copy of the {@code sourceIndex} band. */
+    /**
+     * Re-purpose each (recycled or overwritten) band in {@code indexes} as a copy-on-write band inheriting
+     * from {@code sourceIndex}. O(1) per band.
+     */
     void allocate(int[] indexes, int sourceIndex);
+
+    /**
+     * Freeze the full resolved band of {@code variantIndex} into every copy-on-write variant that still
+     * inherits from it, before the band is removed or overwritten (so a child variant forked earlier keeps
+     * its snapshot).
+     */
+    void materializeInheritors(int variantIndex);
 }

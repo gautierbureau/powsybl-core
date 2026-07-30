@@ -11,6 +11,10 @@ package com.powsybl.iidm.network.impl;
  * An interface implemented by network objects that have attributes depending on
  * the variant.
  * <p>
+ * Implementations copy the source variant's values eagerly, which is always correct: a variant owns its own
+ * state. The columnar stores of {@link NetworkImpl} share that state copy-on-write instead, but that is a
+ * storage decision internal to them (see {@link VariantColumnStore}) and it changes nothing here.
+ * <p>
  * A class implementing this interface internally manages an array of variants and
  * is notified when the array need to be resized thanks to <code>extendVariantArraySize</code>
  * and <code>reduceVariantArraySize</code> callbacks.

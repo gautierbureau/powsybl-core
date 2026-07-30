@@ -9,6 +9,8 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.PowsyblException;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  *
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
@@ -16,6 +18,16 @@ import com.powsybl.commons.PowsyblException;
 public class ThreadLocalMultiVariantContext implements VariantContext {
 
     private final ThreadLocal<Integer> index = ThreadLocal.withInitial(() -> null);
+
+    // How many distinct threads have ever bound a working variant here. A thread must bind before it can
+    // touch any variant-dependent state (getVariantIndex throws otherwise), so this counts every thread that
+    // can be reading or writing a variant. It never decreases: a thread that has finished may still have
+    // left the network in a state another thread observes, and over-counting only makes the guards that read
+    // it more conservative. Reset happens by dropping the whole context when multi-thread access is disabled.
+    private final AtomicInteger boundThreads = new AtomicInteger();
+
+    // Never removed: it must survive reset()/resetIfVariantIndexIs so that re-binding does not count twice.
+    private final ThreadLocal<Boolean> counted = ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     @Override
     public int getVariantIndex() {
@@ -28,6 +40,10 @@ public class ThreadLocalMultiVariantContext implements VariantContext {
 
     @Override
     public void setVariantIndex(int index) {
+        if (Boolean.FALSE.equals(counted.get())) {
+            counted.set(Boolean.TRUE);
+            boundThreads.incrementAndGet();
+        }
         this.index.set(index);
     }
 
@@ -46,6 +62,11 @@ public class ThreadLocalMultiVariantContext implements VariantContext {
     @Override
     public boolean isIndexSet() {
         return this.index.get() != null;
+    }
+
+    @Override
+    public boolean isSharedAcrossThreads() {
+        return boundThreads.get() > 1;
     }
 
 }

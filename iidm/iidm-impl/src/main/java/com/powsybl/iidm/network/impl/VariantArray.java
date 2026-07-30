@@ -32,8 +32,12 @@ class VariantArray<S extends Variant> {
 
     private volatile List<S> variants;
 
+    // Retained so a slot can be materialised on demand; see get().
+    private final VariantFactory<S> variantFactory;
+
     VariantArray(Ref<? extends VariantManagerHolder> variantManagerHolder, VariantFactory<S> variantFactory) {
         this.variantManagerHolder = variantManagerHolder;
+        this.variantFactory = variantFactory;
         VariantManagerImpl variantManager = variantManagerHolder.get().getVariantManager();
         List<S> initialVariants = new ArrayList<>(variantManager.getVariantArraySize());
         for (int i = 0; i < variantManager.getVariantArraySize(); i++) {
@@ -49,8 +53,32 @@ class VariantArray<S extends Variant> {
         return variantManagerHolder.get().getVariantManager().getVariantContext().getVariantIndex();
     }
 
+    /**
+     * The variant state for the working variant, materialising it if this array was never extended to cover
+     * that variant.
+     *
+     * <p>That happens when the owner was published in the network index after a clone had already taken its
+     * stateful-objects snapshot, so the clone could not extend it. The owner did not exist as far as the
+     * network was concerned when that variant was forked, so a fresh variant state is exactly what it would
+     * have been given had the clone seen it — see {@code VariantRefArray} for the full argument.</p>
+     */
     S get() {
-        return variants.get(getVariantIndex());
+        List<S> current = variants;
+        int index = getVariantIndex();
+        return index < current.size() ? current.get(index) : materialize(index);
+    }
+
+    private synchronized S materialize(int index) {
+        List<S> current = variants;
+        if (index < current.size()) {
+            return current.get(index); // another thread got there first
+        }
+        List<S> newVariants = new ArrayList<>(current);
+        while (newVariants.size() <= index) {
+            newVariants.add(variantFactory.newVariant());
+        }
+        variants = newVariants;
+        return newVariants.get(index);
     }
 
     void push(int number, VariantFactory<S> variantFactory) {
