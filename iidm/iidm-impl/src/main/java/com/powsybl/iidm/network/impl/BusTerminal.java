@@ -139,7 +139,7 @@ class BusTerminal extends AbstractTerminal {
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
         this.connectedStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.connectedStoreRow = connectedStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {connected});
-        this.connectableBusId = new VariantRefArray<>(variantArraySize, i -> connectableBusId);
+        this.connectableBusId = new VariantRefArray<>(variantArraySize, () -> connectableBusId);
     }
 
     void unsetConnectableBusId() {
@@ -237,7 +237,7 @@ class BusTerminal extends AbstractTerminal {
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        connectableBusId.grow(number, i -> connectableBusId.get(sourceIndex));
+        connectableBusId.grow(number, () -> connectableBusId.get(sourceIndex));
     }
 
     @Override

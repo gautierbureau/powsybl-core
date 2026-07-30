@@ -667,7 +667,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
             Supplier<TIntDoubleMap> supplier = fictitiousValueByNodes.get(sourceIndex) == null ?
                 () -> null :
                 () -> new TIntDoubleHashMap(fictitiousValueByNodes.get(sourceIndex));
-            fictitiousValueByNodes.grow(number, i -> supplier.get());
+            fictitiousValueByNodes.grow(number, supplier);
         }
 
         private static void reduceVariantArraySizeForFictitiousValues(VariantRefArray<TIntDoubleMap> fictitiousValueByNodes,
@@ -953,7 +953,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         }
 
         private VariantRefArray<TIntDoubleMap> initiateFictitiousValueByNodes() {
-            return new VariantRefArray<>(getNetwork().getVariantManager().getVariantArraySize(), i -> null);
+            return new VariantRefArray<>(getNetwork().getVariantManager().getVariantArraySize(), () -> null);
         }
 
         private boolean hasFictitiousInjection(VariantRefArray<TIntDoubleMap> fictitiousValueByNodes) {

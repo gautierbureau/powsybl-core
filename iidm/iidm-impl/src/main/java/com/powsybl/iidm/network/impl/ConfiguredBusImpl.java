@@ -48,7 +48,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         super(id, name, fictitious, voltageLevel);
         network = voltageLevel.getNetworkRef();
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        terminals = new VariantRefArray<>(variantArraySize, i -> new ArrayList<>());
+        terminals = new VariantRefArray<>(variantArraySize, ArrayList::new);
         this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
         this.busVariantStoreRow = variantStore.allocateRow();
     }
@@ -241,7 +241,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
 
-        terminals.grow(number, i -> new ArrayList<>(terminals.get(sourceIndex)));
+        terminals.grow(number, () -> new ArrayList<>(terminals.get(sourceIndex)));
     }
 
     @Override
