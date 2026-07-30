@@ -42,6 +42,7 @@ public class NumericVariantStore implements VariantColumnStore {
     private static final int DEFAULT_ROW_CAPACITY = 16;
 
     private final String key;
+    private final VariantManagerImpl variantManager;
     private final int nDouble;
     private final int nInt;
     private final int nBoolean;
@@ -68,8 +69,11 @@ public class NumericVariantStore implements VariantColumnStore {
 
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    NumericVariantStore(String key, int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
+    NumericVariantStore(String key, VariantManagerImpl variantManager, double[] doubleDefaults, int[] intDefaults,
+                        boolean[] booleanDefaults) {
         this.key = Objects.requireNonNull(key);
+        this.variantManager = Objects.requireNonNull(variantManager);
+        int variantArraySize = variantManager.getVariantArraySize();
         this.nDouble = doubleDefaults.length;
         this.nInt = intDefaults.length;
         this.nBoolean = booleanDefaults.length;
@@ -117,6 +121,13 @@ public class NumericVariantStore implements VariantColumnStore {
                 + " boolean" + Arrays.toString(booleanDefaults);
     }
 
+    // Structural operations only: they add/remove rows or variant bands, and may reallocate the backing arrays
+    // and change the row stride together. Reads and per-variant writes are deliberately not checked - they are
+    // the concurrent path, and the check must stay off their hot path.
+    private void checkStructuralModification(String operation) {
+        variantManager.checkStructuralModification(key, operation);
+    }
+
     private int doubleIndex(int variant, int col, int row) {
         return (variant * nDouble + col) * rowStride + row;
     }
@@ -131,6 +142,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
     public int allocateRow() {
+        checkStructuralModification("allocateRow");
         int row;
         if (!freeRows.isEmpty()) {
             row = freeRows.pop();
@@ -183,6 +195,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     /** Release the row of a removed object for reuse. */
     public void freeRow(int row) {
+        checkStructuralModification("freeRow");
         freeRows.push(row);
     }
 
@@ -212,6 +225,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     /** Set an int column of a row to the same value in every live variant band. */
     public void fillInt(int col, int row, int value) {
+        checkStructuralModification("fillInt");
         int[] data = ints;
         for (int v = 0; v < variantSize; v++) {
             data[intIndex(v, col, row)] = value;
@@ -220,6 +234,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     /** Set a boolean column of a row to the same value in every live variant band. */
     public void fillBoolean(int col, int row, boolean value) {
+        checkStructuralModification("fillBoolean");
         boolean[] data = booleans;
         for (int v = 0; v < variantSize; v++) {
             data[booleanIndex(v, col, row)] = value;
@@ -242,6 +257,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     @Override
     public void extend(int number, int sourceIndex) {
+        checkStructuralModification("extend");
         ensureVariantCapacity(variantSize + number);
         int dBlock = nDouble * rowStride;
         int iBlock = nInt * rowStride;
@@ -279,6 +295,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     @Override
     public void allocate(int[] indexes, int sourceIndex) {
+        checkStructuralModification("allocate");
         int dBlock = nDouble * rowStride;
         int iBlock = nInt * rowStride;
         int bBlock = nBoolean * rowStride;

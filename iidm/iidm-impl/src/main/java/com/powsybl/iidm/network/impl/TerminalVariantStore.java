@@ -10,6 +10,7 @@ package com.powsybl.iidm.network.impl;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.Objects;
 
 /**
  * Columnar (structure-of-arrays) store for the variant-dependent {@code p} and {@code q} of every
@@ -53,7 +54,11 @@ class TerminalVariantStore implements VariantColumnStore {
     // rows freed by removed terminals, available for reuse (avoids leaking a row per removed terminal)
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    TerminalVariantStore(int variantArraySize) {
+    private final VariantManagerImpl variantManager;
+
+    TerminalVariantStore(VariantManagerImpl variantManager) {
+        this.variantManager = Objects.requireNonNull(variantManager);
+        int variantArraySize = variantManager.getVariantArraySize();
         this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
@@ -73,6 +78,7 @@ class TerminalVariantStore implements VariantColumnStore {
      * freed by a previously removed terminal is reused if available, otherwise a fresh one is allocated.
      */
     int allocateRow() {
+        checkStructuralModification("allocateRow");
         if (!freeRows.isEmpty()) {
             int row = freeRows.pop();
             resetRow(row);
@@ -88,6 +94,7 @@ class TerminalVariantStore implements VariantColumnStore {
      * Release the row of a removed terminal so it can be reused. The caller must never read/write the row again.
      */
     void freeRow(int row) {
+        checkStructuralModification("freeRow");
         freeRows.push(row);
     }
 
@@ -110,6 +117,11 @@ class TerminalVariantStore implements VariantColumnStore {
         p[row] = pValue; // variant 0 (the only variant in a merge/detach)
         q[row] = qValue;
         return row;
+    }
+
+    // Structural operations only; reads and per-variant writes are the concurrent path and stay unchecked.
+    private void checkStructuralModification(String operation) {
+        variantManager.checkStructuralModification("terminal p/q", operation);
     }
 
     private void growRowStride() {
@@ -175,6 +187,7 @@ class TerminalVariantStore implements VariantColumnStore {
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
     public void extend(int number, int sourceIndex) {
+        checkStructuralModification("extend");
         ensureVariantCapacity(variantSize + number);
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
@@ -200,6 +213,7 @@ class TerminalVariantStore implements VariantColumnStore {
     }
 
     public void allocate(int[] indexes, int sourceIndex) {
+        checkStructuralModification("allocate");
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
         double[] pd = p;

@@ -8,6 +8,7 @@
 package com.powsybl.iidm.network.impl;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * Columnar (structure-of-arrays) store for the variant-dependent <em>topology</em> of every switch in a
@@ -44,7 +45,11 @@ class SwitchVariantStore implements VariantColumnStore {
     private int variantSize;
     private int variantCapacity;
 
-    SwitchVariantStore(int variantArraySize) {
+    private final VariantManagerImpl variantManager;
+
+    SwitchVariantStore(VariantManagerImpl variantManager) {
+        this.variantManager = Objects.requireNonNull(variantManager);
+        int variantArraySize = variantManager.getVariantArraySize();
         this.rowStride = DEFAULT_ROW_CAPACITY;
         this.rowCount = 0;
         this.variantSize = variantArraySize;
@@ -58,6 +63,7 @@ class SwitchVariantStore implements VariantColumnStore {
      * band (a new switch has the same state in all variants, as the previous per-switch constructor did).
      */
     int allocateRow(boolean openValue, boolean retainedValue) {
+        checkStructuralModification("allocateRow");
         if (rowCount == rowStride) {
             growRowStride();
         }
@@ -69,6 +75,11 @@ class SwitchVariantStore implements VariantColumnStore {
             rd[v * rowStride + row] = retainedValue;
         }
         return row;
+    }
+
+    // Structural operations only; reads and per-variant writes are the concurrent path and stay unchecked.
+    private void checkStructuralModification(String operation) {
+        variantManager.checkStructuralModification("switch open/retained", operation);
     }
 
     private void growRowStride() {
@@ -130,6 +141,7 @@ class SwitchVariantStore implements VariantColumnStore {
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
     public void extend(int number, int sourceIndex) {
+        checkStructuralModification("extend");
         ensureVariantCapacity(variantSize + number);
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
@@ -154,6 +166,7 @@ class SwitchVariantStore implements VariantColumnStore {
     }
 
     public void allocate(int[] indexes, int sourceIndex) {
+        checkStructuralModification("allocate");
         int stride = rowStride;
         int srcOff = sourceIndex * stride;
         boolean[] od = open;

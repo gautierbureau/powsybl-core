@@ -141,8 +141,8 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
-        terminalVariantStore = new TerminalVariantStore(variantManager.getVariantArraySize());
-        switchVariantStore = new SwitchVariantStore(variantManager.getVariantArraySize());
+        terminalVariantStore = new TerminalVariantStore(variantManager);
+        switchVariantStore = new SwitchVariantStore(variantManager);
         variantColumnStores.add(terminalVariantStore);
         variantColumnStores.add(switchVariantStore);
         variants = new VariantArray<>(ref, VariantImpl::new);
@@ -265,7 +265,7 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
         if (store == null) {
             // created at the current variant array size (its bands hold the column defaults); registered so
             // that subsequent variant operations drive it. Creation happens on the main thread during build.
-            store = new NumericVariantStore(key, variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
+            store = new NumericVariantStore(key, variantManager, doubleDefaults, intDefaults,
                     booleanDefaults);
             numericVariantStores.put(key, store);
             variantColumnStores.add(store);
