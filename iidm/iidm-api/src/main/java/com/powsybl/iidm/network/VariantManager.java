@@ -102,24 +102,19 @@ public interface VariantManager {
     /**
      * Pre-allocate storage capacity for {@code number} additional variants, without creating them.
      * <p>
-     * This is the enabler for thread-safe, on-demand variant creation. Once capacity has been reserved (on
-     * the main thread), creating a variant with the {@code cloneVariant} methods becomes safe to call
-     * concurrently from several threads while {@link #allowVariantMultiThreadAccess(boolean)} is enabled,
-     * because such a creation only reuses an already-reserved slot and never resizes the underlying
-     * per-variant arrays. Reads and writes of variant-dependent attributes on the created variants stay
-     * concurrent as before (each thread on its own variant).
+     * This is a <b>performance hint, not a requirement</b>. Creating a variant with the {@code cloneVariant}
+     * methods is safe to call concurrently from several threads while
+     * {@link #allowVariantMultiThreadAccess(boolean)} is enabled, whether or not capacity was reserved first.
+     * Reserving it simply lets those creations reuse an already-sized slot instead of growing the underlying
+     * per-variant storage, so it trades memory for avoiding that work inside the parallel region. Reads and
+     * writes of variant-dependent attributes stay concurrent either way, each thread on its own variant.
      * <p>
-     * The reservation grows the per-variant arrays once, on the calling (main) thread. Creating more
-     * variants than were reserved while multi-thread access is enabled would require resizing those arrays
-     * from a worker thread, which is not thread safe; such an overflow throws a
-     * {@link com.powsybl.commons.PowsyblException} instead. While multi-thread access is enabled the
-     * per-variant arrays are never shrunk either, so removing a variant frees its slot for reuse but keeps
-     * the reserved capacity.
+     * While multi-thread access is enabled the per-variant storage is never shrunk, so removing a variant
+     * frees its slot for reuse but keeps the capacity.
      * <p>
      * Call this on the main thread, once the network structure is complete and before enabling multi-thread
-     * access. Reserved slots that are never used cost only memory. The default implementation does nothing:
-     * implementations that do not support thread-safe on-demand creation simply grow their storage lazily on
-     * clone, as before.
+     * access. Reserved slots that are never used cost only memory. The default implementation does nothing,
+     * which is a valid implementation of a hint.
      *
      * @param number the number of additional variant slots to reserve (must be {@code >= 0})
      */

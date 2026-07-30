@@ -209,15 +209,13 @@ public class VariantManagerImpl implements VariantManager {
                     recycled.add(index);
 
                     network.getListeners().notifyVariantCreated(sourceVariantId, targetVariantId);
-                } else if (preAllocated && isVariantMultiThreadAccessAllowed()) {
-                    // managed-capacity mode with no reserved slot left: extending the arrays now would resize
-                    // them from a (possibly worker) thread while other threads read/write variants, which is
-                    // not thread safe. Fail fast instead - callers must reserve enough capacity up front.
-                    throw new PowsyblException("No pre-allocated variant capacity left to create variant '"
-                            + targetVariantId + "' while multi-thread access is enabled; reserve capacity with "
-                            + "preAllocateVariants(int) before calling allowVariantMultiThreadAccess(true)");
                 } else {
-                    // extend variant array size (main thread, single-thread access)
+                    // Extend the variant arrays. This is safe on a worker thread while others read and write
+                    // variants: every per-variant array grows by publishing a longer spine while leaving the
+                    // storage it points at in place, and an object that this growth misses -- because it was
+                    // not yet published in the index -- sizes the missing slot on demand when it is first
+                    // read (see VariantRefArray). Reserving capacity up front with preAllocateVariants is
+                    // therefore only a way to avoid the growth, never a correctness requirement.
                     id2index.put(targetVariantId, variantArraySize);
                     variantArraySize++;
                     extendedCount++;

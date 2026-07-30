@@ -326,7 +326,9 @@ class SwitchVariantStore implements VariantColumnStore {
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---
 
     @Override
-    public void extend(int number, int sourceIndex) {
+    // synchronized on the store, like allocateRow: growing the variant dimension replaces each band's
+    // chunk spine, so it must not interleave with a row allocation appending chunks to one of them
+    public synchronized void extend(int number, int sourceIndex) {
         // O(1): the new copy-on-write variants own no rows and inherit through the parentage
         variantSize += number;
         CowBand[] bands = cowBands;

@@ -60,18 +60,35 @@ class VariantPreAllocationStructuralCloneTest {
         assertEquals(4, vm.getVariantIds().size());
     }
 
+    /**
+     * Reserving capacity is a hint, so running past it is not an error: the clone grows the per-variant
+     * storage instead of failing. It used to throw, back when growing on a worker thread could leave an
+     * object that the growth had missed with a short per-variant array — that object now sizes the missing
+     * slot on demand, so there is nothing left to protect against.
+     */
     @Test
-    void overflowBeyondReservedCapacityThrowsUnderMultiThreadAccess() {
+    void cloningBeyondReservedCapacityGrowsInsteadOfThrowing() {
         Network network = EurostagTutorialExample1Factory.create();
+        Generator gen = network.getGenerator("GEN");
         VariantManager vm = network.getVariantManager();
 
         vm.preAllocateVariants(1);
         vm.allowVariantMultiThreadAccess(true);
 
-        vm.cloneVariant(INITIAL, "v1");
-        PowsyblException e = assertThrows(PowsyblException.class,
-            () -> vm.cloneVariant(INITIAL, "v2"));
-        assertTrue(e.getMessage().contains("No pre-allocated variant capacity left"));
+        vm.cloneVariant(INITIAL, "v1");   // uses the reserved slot
+        vm.cloneVariant(INITIAL, "v2");   // past the reservation: grows
+
+        assertTrue(vm.getVariantIds().contains("v2"));
+        vm.setWorkingVariant("v2");
+        gen.setTargetP(321.0);
+        assertEquals(321.0, gen.getTargetP(), 0.0);
+
+        vm.setWorkingVariant("v1");
+        assertEquals(baseTargetP(network), gen.getTargetP(), 0.0); // the grown variant stayed isolated
+    }
+
+    private static double baseTargetP(Network network) {
+        return EurostagTutorialExample1Factory.create().getGenerator("GEN").getTargetP();
     }
 
     @Test
