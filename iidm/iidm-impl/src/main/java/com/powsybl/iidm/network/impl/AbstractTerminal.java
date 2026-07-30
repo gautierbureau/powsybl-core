@@ -23,7 +23,7 @@ abstract class AbstractTerminal implements TerminalExt {
     protected static final String UNMODIFIABLE_REMOVED_EQUIPMENT = "Cannot modify removed equipment ";
     protected static final String CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT = "Cannot access bus of removed equipment ";
 
-    private Ref<? extends VariantManagerHolder> network;
+    private Ref<? extends VariantStoreHolder> network;
 
     protected final ThreeSides side;
 
@@ -44,7 +44,7 @@ abstract class AbstractTerminal implements TerminalExt {
 
     protected boolean removed = false;
 
-    AbstractTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber) {
+    AbstractTerminal(Ref<? extends VariantStoreHolder> network, ThreeSides side, TerminalNumber terminalNumber) {
         if (side != null && terminalNumber != null) {
             throw new IllegalStateException("cannot have both side and number");
         }
@@ -103,7 +103,7 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access p of removed equipment " + connectable.id);
         }
-        VariantManagerHolder holder = network.get();
+        VariantStoreHolder holder = network.get();
         return holder.getTerminalVariantStore().getP(holder.getVariantIndex(), variantStoreRow);
     }
 
@@ -127,7 +127,7 @@ abstract class AbstractTerminal implements TerminalExt {
         if (removed) {
             throw new PowsyblException("Cannot access q of removed equipment " + connectable.id);
         }
-        VariantManagerHolder holder = network.get();
+        VariantStoreHolder holder = network.get();
         return holder.getTerminalVariantStore().getQ(holder.getVariantIndex(), variantStoreRow);
     }
 
@@ -156,7 +156,7 @@ abstract class AbstractTerminal implements TerminalExt {
         if (connectable.getType() == IdentifiableType.BUSBAR_SECTION) {
             return 0;
         }
-        VariantManagerHolder holder = network.get();
+        VariantStoreHolder holder = network.get();
         int variantIndex = holder.getVariantIndex();
         TerminalVariantStore store = holder.getTerminalVariantStore();
         return Math.hypot(store.getP(variantIndex, variantStoreRow), store.getQ(variantIndex, variantStoreRow))

@@ -11,13 +11,11 @@ import com.google.common.collect.ImmutableList;
 import com.powsybl.contingency.Contingency;
 import com.powsybl.contingency.ContingencyElement;
 import com.powsybl.contingency.ContingencyElementFactory;
-import com.powsybl.iidm.network.Identifiable;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.identifiers.NetworkElementIdentifier;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * @author Etienne Lesot {@literal <etienne.lesot@rte-france.com>}
@@ -56,31 +54,25 @@ public class IdentifierContingencyList implements ContingencyList {
     @Override
     public List<Contingency> getContingencies(Network network) {
         return networkElementIdentifiers.stream()
-            .flatMap(identifier -> toContingencies(identifier, network))
+            .filter(identifier -> !identifier.filterIdentifiable(network).isEmpty())
+            .flatMap(identifier -> {
+                List<ContingencyElement> contingencyElements = identifier.filterIdentifiable(network)
+                    .stream()
+                    .map(ContingencyElementFactory::create)
+                    .toList();
+                List<Contingency> contingencyList = new ArrayList<>();
+                if (identifier.isMonoElementContingencies()) {
+                    contingencyElements.forEach(contingencyElement ->
+                        contingencyList.add(new Contingency(contingencyElement.getId(), contingencyElement)));
+                } else {
+                    String contingencyId = identifier.getContingencyId().orElse(getGeneratedContingencyId(contingencyElements));
+                    contingencyList.add(new Contingency(contingencyId, contingencyElements));
+                }
+                return contingencyList.stream();
+
+            })
             .filter(contingency -> contingency.isValid(network))
             .collect(Collectors.toList());
-    }
-
-    private Stream<Contingency> toContingencies(NetworkElementIdentifier identifier, Network network) {
-        // filterIdentifiable scans the whole network (and recompiles a regex per element for
-        // wildcard identifiers), so resolve it once per identifier instead of twice
-        Set<Identifiable> identifiables = identifier.filterIdentifiable(network);
-        if (identifiables.isEmpty()) {
-            return Stream.empty();
-        }
-        List<ContingencyElement> contingencyElements = identifiables
-            .stream()
-            .map(ContingencyElementFactory::create)
-            .toList();
-        List<Contingency> contingencyList = new ArrayList<>();
-        if (identifier.isMonoElementContingencies()) {
-            contingencyElements.forEach(contingencyElement ->
-                contingencyList.add(new Contingency(contingencyElement.getId(), contingencyElement)));
-        } else {
-            String contingencyId = identifier.getContingencyId().orElse(getGeneratedContingencyId(contingencyElements));
-            contingencyList.add(new Contingency(contingencyId, contingencyElements));
-        }
-        return contingencyList.stream();
     }
 
     public Map<String, Set<String>> getNotFoundElements(Network network) {

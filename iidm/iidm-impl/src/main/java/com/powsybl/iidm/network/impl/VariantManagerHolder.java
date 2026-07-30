@@ -18,21 +18,15 @@ public interface VariantManagerHolder {
     int getVariantIndex();
 
     /**
-     * Network-level columnar store for the variant-dependent terminal {@code p}/{@code q}. Shared by every
-     * terminal (including those in subnetworks), it is owned and structurally maintained by the root network.
-     */
-    TerminalVariantStore getTerminalVariantStore();
-
-    /**
-     * Network-level columnar store for the variant-dependent switch topology ({@code open}/{@code retained}).
-     * Shared by every switch, it is owned and structurally maintained by the root network.
-     */
-    SwitchVariantStore getSwitchVariantStore();
-
-    /**
      * Return the shared numeric columnar variant store for a given object type, creating and registering it on
      * first use. {@code key} identifies the type; {@code doubleDefaults}/{@code intDefaults} give the initial
      * value of each column for a fresh row (and must be identical for every call with the same key).
+     *
+     * <p>Internal API: {@link NumericVariantStore} is an implementation detail of the columnar variant storage,
+     * public only so that the extensions in {@code com.powsybl.iidm.network.impl.extensions} can hold a store
+     * reference. It is not part of the supported iidm API and may change without notice. The stores whose types
+     * do not need to cross a package boundary are declared on the package-private {@link VariantStoreHolder}
+     * instead, so that this interface stays implementable from outside this package.</p>
      */
     NumericVariantStore getOrCreateNumericVariantStore(String key, double[] doubleDefaults, int[] intDefaults,
                                                        boolean[] booleanDefaults);

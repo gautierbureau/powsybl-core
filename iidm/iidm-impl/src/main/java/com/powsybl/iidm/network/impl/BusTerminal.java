@@ -132,7 +132,7 @@ class BusTerminal extends AbstractTerminal {
 
     private final ArrayList<String> connectableBusId;
 
-    BusTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, String connectableBusId, boolean connected) {
+    BusTerminal(Ref<? extends VariantStoreHolder> network, ThreeSides side, TerminalNumber terminalNumber, String connectableBusId, boolean connected) {
         super(network, side, terminalNumber);
         Objects.requireNonNull(connectableBusId);
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();

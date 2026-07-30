@@ -118,7 +118,7 @@ class NodeTerminal extends AbstractTerminal {
 
     };
 
-    NodeTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, int node) {
+    NodeTerminal(Ref<? extends VariantStoreHolder> network, ThreeSides side, TerminalNumber terminalNumber, int node) {
         super(network, side, terminalNumber);
         this.node = node;
         this.nodeVariantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
