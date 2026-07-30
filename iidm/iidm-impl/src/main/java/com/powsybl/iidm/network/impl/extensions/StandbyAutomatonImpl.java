@@ -214,13 +214,8 @@ public class StandbyAutomatonImpl extends AbstractMultiVariantIdentifiableExtens
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double lowSetpoint0 = variantStore.getDouble(0, COL_LOW_VOLTAGE_SETPOINT, variantStoreRow);
-        double highSetpoint0 = variantStore.getDouble(0, COL_HIGH_VOLTAGE_SETPOINT, variantStoreRow);
-        double lowThreshold0 = variantStore.getDouble(0, COL_LOW_VOLTAGE_THRESHOLD, variantStoreRow);
-        double highThreshold0 = variantStore.getDouble(0, COL_HIGH_VOLTAGE_THRESHOLD, variantStoreRow);
-        boolean standby0 = variantStore.getBoolean(0, COL_STANDBY, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(
-                new double[] {lowSetpoint0, highSetpoint0, lowThreshold0, highThreshold0}, INT_DEFAULTS, new boolean[] {standby0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

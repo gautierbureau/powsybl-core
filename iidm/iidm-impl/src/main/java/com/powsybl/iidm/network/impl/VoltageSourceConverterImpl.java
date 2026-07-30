@@ -179,10 +179,9 @@ public class VoltageSourceConverterImpl extends AbstractAcDcConverter<VoltageSou
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // AcDcConverter (own doubles + dc terminals) + AC terminals + extensions
-        double rps0 = variantStore.getDouble(0, COL_REACTIVE_POWER_SETPOINT, variantStoreRow);
-        double vs0 = variantStore.getDouble(0, COL_VOLTAGE_SETPOINT, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {rps0, vs0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 

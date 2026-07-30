@@ -32,9 +32,9 @@ import java.util.Objects;
  * (its own band). The backing arrays are published through {@code volatile} references so worker threads
  * observe fully constructed state.</p>
  *
- * <p>Row lifecycle is monotonic: {@link #allocateRow} hands out an ever-increasing row
- * index and rows are not recycled when a terminal is removed (a full implementation would keep a free list).
- * This is correct — dead rows are simply never read.</p>
+ * <p>Row lifecycle: rows are recycled through a free list. A terminal releases its row when it is removed
+ * (safe because every getter is gated on the {@code removed} flag) and when it is re-homed into another
+ * network's store on merge/detach (safe because it switches to the new row in the same call).</p>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -109,14 +109,27 @@ class TerminalVariantStore implements VariantColumnStore {
     }
 
     /**
-     * Allocate a fresh row and initialise it with the given single-variant {@code p}/{@code q}. Used when a
-     * terminal is moved between networks (merge/detach), which the API only allows on single-variant networks.
+     * Move {@code row} out of {@code source} and into this store, returning its new row index. Used when a
+     * terminal changes network (merge/detach), which the API only allows on single-variant networks, so only
+     * variant 0 is carried over. The source row is released: the terminal switches to the returned row in the
+     * same call and never reads the source again, so a detach leaves no dead row behind in the source store.
      */
-    int importRow(double pValue, double qValue) {
-        int row = allocateRow();
-        p[row] = pValue; // variant 0 (the only variant in a merge/detach)
-        q[row] = qValue;
-        return row;
+    int importRow(TerminalVariantStore source, int row) {
+        int newRow = allocateRow();
+        p[newRow] = source.getP(0, row); // variant 0 (the only variant in a merge/detach)
+        q[newRow] = source.getQ(0, row);
+        source.freeRow(row);
+        return newRow;
+    }
+
+    /** Number of rows handed out, including those currently on the free list. For tests and diagnostics. */
+    int getRowCount() {
+        return rowCount;
+    }
+
+    /** Number of rows available for reuse. For tests and diagnostics. */
+    int getFreeRowCount() {
+        return freeRows.size();
     }
 
     // Structural operations only; reads and per-variant writes are the concurrent path and stay unchecked.

@@ -308,10 +308,9 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        double targetV0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
-        double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0, targetDeadband0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 

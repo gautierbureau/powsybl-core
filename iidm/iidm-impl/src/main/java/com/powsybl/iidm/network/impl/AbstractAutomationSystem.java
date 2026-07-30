@@ -72,8 +72,8 @@ abstract class AbstractAutomationSystem<I extends AutomationSystem<I>> extends A
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        boolean enabled0 = variantStore.getBoolean(0, COL_ENABLED, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {enabled0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

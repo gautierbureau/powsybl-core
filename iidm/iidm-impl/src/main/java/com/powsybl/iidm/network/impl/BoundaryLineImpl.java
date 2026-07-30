@@ -220,12 +220,9 @@ class BoundaryLineImpl extends AbstractConnectable<BoundaryLine> implements Boun
         }
 
         void reHomeVariantStores(NetworkImpl targetNetwork) {
-            double targetP0 = variantStore.getDouble(0, COL_TARGET_P, variantStoreRow);
-            double targetQ0 = variantStore.getDouble(0, COL_TARGET_Q, variantStoreRow);
-            double targetV0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
-            boolean voltageRegulationOn0 = variantStore.getBoolean(0, COL_VOLTAGE_REGULATION_ON, variantStoreRow);
-            this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-            this.variantStoreRow = variantStore.allocateRow(new double[] {targetP0, targetQ0, targetV0}, INT_DEFAULTS, new boolean[] {voltageRegulationOn0});
+            NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+            this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+            this.variantStore = newStore;
         }
     }
 
@@ -556,10 +553,9 @@ class BoundaryLineImpl extends AbstractConnectable<BoundaryLine> implements Boun
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        double p00 = variantStore.getDouble(0, COL_P0, variantStoreRow);
-        double q00 = variantStore.getDouble(0, COL_Q0, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {p00, q00}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         if (generation != null) {
             generation.reHomeVariantStores(targetNetwork);
         }

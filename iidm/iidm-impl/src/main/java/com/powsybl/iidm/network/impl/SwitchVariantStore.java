@@ -7,7 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.Objects;
 
 /**
@@ -26,9 +28,10 @@ import java.util.Objects;
  *
  * <p>Thread-safety follows the {@link com.powsybl.iidm.network.VariantManager} contract as before: structural
  * changes happen on the main thread only; pre-allocated variants are read/written concurrently, each thread
- * on its own band. Rows are monotonic (no free list): a removed switch leaves a dead row,
- * which is correct (never read) but grows with switch churn. Recycling would need a {@code removed} guard on
- * {@link SwitchImpl} to be safe, unlike terminals whose reads are already guarded.</p>
+ * on its own band. Rows are recycled only on re-home
+ * (merge/detach), where the switch swaps to its new row in the same call. A <em>removed</em> switch still
+ * leaks its row: recycling there would need a {@code removed} guard on {@link SwitchImpl}, unlike terminals
+ * whose reads are already guarded.</p>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -44,6 +47,9 @@ class SwitchVariantStore implements VariantColumnStore {
     private int rowCount;
     private int variantSize;
     private int variantCapacity;
+
+    // rows released by switches re-homed into another network's store (merge/detach), available for reuse
+    private final Deque<Integer> freeRows = new ArrayDeque<>();
 
     private final VariantManagerImpl variantManager;
 
@@ -64,10 +70,15 @@ class SwitchVariantStore implements VariantColumnStore {
      */
     int allocateRow(boolean openValue, boolean retainedValue) {
         checkStructuralModification("allocateRow");
-        if (rowCount == rowStride) {
-            growRowStride();
+        int row;
+        if (!freeRows.isEmpty()) {
+            row = freeRows.pop();
+        } else {
+            if (rowCount == rowStride) {
+                growRowStride();
+            }
+            row = rowCount++;
         }
-        int row = rowCount++;
         boolean[] od = open;
         boolean[] rd = retained;
         for (int v = 0; v < variantSize; v++) {
@@ -132,10 +143,35 @@ class SwitchVariantStore implements VariantColumnStore {
     }
 
     /**
-     * Allocate a row initialised from single-variant state, for a switch moved between networks (merge/detach).
+     * Move {@code row} out of {@code source} and into this store, for a switch changing network
+     * (merge/detach), which the API only allows on single-variant networks. The source row is released: the
+     * switch switches to the returned row in the same call and never reads the source again, so a detach
+     * leaves no dead row behind in the source store.
      */
-    int importRow(boolean openValue, boolean retainedValue) {
-        return allocateRow(openValue, retainedValue);
+    int importRow(SwitchVariantStore source, int row) {
+        int newRow = allocateRow(source.getOpen(0, row), source.getRetained(0, row));
+        source.freeRow(row);
+        return newRow;
+    }
+
+    /**
+     * Release a row for reuse. Only safe when no read of the row can follow. Re-homing satisfies that (the
+     * switch swaps to its new row in the same call); removal does not, because {@link SwitchImpl} has no
+     * {@code removed} guard on its getters, so a removed switch still leaks its row.
+     */
+    private void freeRow(int row) {
+        checkStructuralModification("freeRow");
+        freeRows.push(row);
+    }
+
+    /** Number of rows handed out, including those currently on the free list. For tests and diagnostics. */
+    int getRowCount() {
+        return rowCount;
+    }
+
+    /** Number of rows available for reuse. For tests and diagnostics. */
+    int getFreeRowCount() {
+        return freeRows.size();
     }
 
     // --- structural changes, driven once per operation by NetworkImpl (main thread only) ---

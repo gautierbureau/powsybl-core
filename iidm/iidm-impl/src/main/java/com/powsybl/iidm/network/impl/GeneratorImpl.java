@@ -299,12 +299,9 @@ class GeneratorImpl extends AbstractConnectable<Generator> implements Generator,
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // terminals + extensions
-        double p0 = variantStore.getDouble(0, COL_TARGET_P, variantStoreRow);
-        double q0 = variantStore.getDouble(0, COL_TARGET_Q, variantStoreRow);
-        double v0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
-        double eq0 = variantStore.getDouble(0, COL_EQ_TARGET_V, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {p0, q0, v0, eq0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 

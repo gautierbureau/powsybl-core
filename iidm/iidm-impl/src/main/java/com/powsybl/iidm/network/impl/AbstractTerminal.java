@@ -239,10 +239,7 @@ abstract class AbstractTerminal implements TerminalExt {
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         TerminalVariantStore oldStore = network.get().getTerminalVariantStore();
-        TerminalVariantStore newStore = targetNetwork.getTerminalVariantStore();
-        double p0 = oldStore.getP(0, variantStoreRow);
-        double q0 = oldStore.getQ(0, variantStoreRow);
-        this.variantStoreRow = newStore.importRow(p0, q0);
+        this.variantStoreRow = targetNetwork.getTerminalVariantStore().importRow(oldStore, variantStoreRow);
     }
 
     @Override

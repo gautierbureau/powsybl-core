@@ -165,11 +165,9 @@ public class DcTerminalImpl implements DcTerminal, MultiVariantObject {
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double p0 = variantStore.getDouble(0, COL_P, variantStoreRow);
-        double i0 = variantStore.getDouble(0, COL_I, variantStoreRow);
-        boolean connected0 = variantStore.getBoolean(0, COL_CONNECTED, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {p0, i0}, INT_DEFAULTS, new boolean[] {connected0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 
     <I extends DcConnectable<I>> void setDcConnectable(DcConnectable<I> dcConnectable) {

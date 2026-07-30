@@ -28,12 +28,20 @@ import java.util.Objects;
  * the main thread only; pre-allocated variants read/written concurrently, each thread on its own band.</p>
  *
  * <p>Row lifecycle: {@link #freeRow(int)} returns a row to a free list for reuse by a future object. Freeing is
- * only safe when the owner guarantees no read of the freed row can follow (otherwise a reused row would surface
- * another object's value). Today only terminals/buses, whose reads are gated by a {@code removed} flag, free
- * their row on removal; other owners (injections, tap changers, converters, areas, DC nodes, extensions, ...)
- * keep their row for their lifetime, so {@code rowCount} grows monotonically under add/remove churn and is only
- * reclaimed when the whole store is discarded. Wiring {@code freeRow} for those owners requires first gating
- * their columnar getters on removal, as terminals do.</p>
+ * only safe when no read of the freed row can follow, otherwise a reused row would surface another object's
+ * value. Two situations satisfy that, and they are not the same:</p>
+ * <ul>
+ *   <li><b>Re-homing</b> ({@link #importRow(NumericVariantStore, int)}, on merge/detach) always does: the owner
+ *       swaps to its new row in the target store in the same call and never looks at the source row again.
+ *       Every owner therefore releases its source row, so a detach does not leave the previous network holding
+ *       a dead row per moved object — which every later variant clone would go on copying.</li>
+ *   <li><b>Removal</b> only does when the owner refuses reads afterwards. Terminals do, gating every columnar
+ *       getter on a {@code removed} flag, and are the only owners that free their row on removal
+ *       ({@code AbstractTerminal}, {@code NodeTerminal}, {@code BusTerminal}, {@code DcTerminalImpl}). Every
+ *       other owner — configured buses, injections, tap changers, converters, areas, DC nodes, extensions, ...
+ *       — keeps its row for its lifetime, so {@code rowCount} still grows monotonically under add/remove churn.
+ *       Wiring {@code freeRow} for them requires gating their getters on removal first, as terminals do.</li>
+ * </ul>
  *
  * @author Olivier Perrin {@literal <olivier.perrin at rte-france.com>}
  */
@@ -197,6 +205,42 @@ public class NumericVariantStore implements VariantColumnStore {
     public void freeRow(int row) {
         checkStructuralModification("freeRow");
         freeRows.push(row);
+    }
+
+    /**
+     * Move {@code row} out of {@code source} and into this store, returning its new row index. Every column is
+     * carried over generically, so an owner re-homing itself cannot forget one, and the source row is released:
+     * the owner switches to the returned row in the same breath and never reads the source again, which is what
+     * makes freeing safe here even for owners that cannot recycle on removal (see the class javadoc).
+     *
+     * <p>Only the initial variant is moved, since only single-variant networks can be merged or detached. The
+     * two stores necessarily agree on the column layout — they are keyed the same, and
+     * {@link #checkColumnLayout} enforces that — which is what lets this copy column by column blindly.</p>
+     */
+    public int importRow(NumericVariantStore source, int row) {
+        source.checkColumnLayout(doubleDefaults, intDefaults, booleanDefaults);
+        int newRow = allocateRow();
+        for (int c = 0; c < nDouble; c++) {
+            setDouble(0, c, newRow, source.getDouble(0, c, row));
+        }
+        for (int c = 0; c < nInt; c++) {
+            setInt(0, c, newRow, source.getInt(0, c, row));
+        }
+        for (int c = 0; c < nBoolean; c++) {
+            setBoolean(0, c, newRow, source.getBoolean(0, c, row));
+        }
+        source.freeRow(row);
+        return newRow;
+    }
+
+    /** Number of rows handed out, including those currently on the free list. For tests and diagnostics. */
+    int getRowCount() {
+        return rowCount;
+    }
+
+    /** Number of rows available for reuse. For tests and diagnostics. */
+    int getFreeRowCount() {
+        return freeRows.size();
     }
 
     public double getDouble(int variant, int col, int row) {

@@ -234,22 +234,9 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // extensions
-        NumericVariantStore oldStore = store();
-        double v0 = oldStore.getDouble(0, COL_V, busVariantStoreRow);
-        double angle0 = oldStore.getDouble(0, COL_ANGLE, busVariantStoreRow);
-        double ficP0 = oldStore.getDouble(0, COL_FIC_P0, busVariantStoreRow);
-        double ficQ0 = oldStore.getDouble(0, COL_FIC_Q0, busVariantStoreRow);
-        int cc0 = oldStore.getInt(0, COL_CC, busVariantStoreRow);
-        int sc0 = oldStore.getInt(0, COL_SC, busVariantStoreRow);
         NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.busVariantStoreRow = newStore.importRow(store(), busVariantStoreRow);
         this.variantStore = newStore;
-        this.busVariantStoreRow = newStore.allocateRow();
-        newStore.setDouble(0, COL_V, busVariantStoreRow, v0);
-        newStore.setDouble(0, COL_ANGLE, busVariantStoreRow, angle0);
-        newStore.setDouble(0, COL_FIC_P0, busVariantStoreRow, ficP0);
-        newStore.setDouble(0, COL_FIC_Q0, busVariantStoreRow, ficQ0);
-        newStore.setInt(0, COL_CC, busVariantStoreRow, cc0);
-        newStore.setInt(0, COL_SC, busVariantStoreRow, sc0);
     }
 
 }

@@ -134,10 +134,9 @@ class RegulatingPoint implements MultiVariantObject, Referrer<Terminal> {
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        boolean regulating0 = variantStore.getBoolean(0, COL_REGULATING, variantStoreRow);
-        int regulationMode0 = variantStore.getInt(0, COL_REGULATION_MODE, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, new int[] {regulationMode0}, new boolean[] {regulating0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 
     void remove() {

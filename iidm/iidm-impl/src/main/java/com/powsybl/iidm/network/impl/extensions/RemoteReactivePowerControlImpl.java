@@ -121,10 +121,9 @@ public class RemoteReactivePowerControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double targetQ0 = variantStore.getDouble(0, COL_TARGET_Q, variantStoreRow);
-        boolean enabled0 = variantStore.getBoolean(0, COL_ENABLED, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {targetQ0}, INT_DEFAULTS, new boolean[] {enabled0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 
     @Override

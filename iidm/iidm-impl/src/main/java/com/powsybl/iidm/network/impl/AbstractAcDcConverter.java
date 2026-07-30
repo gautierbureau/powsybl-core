@@ -383,10 +383,9 @@ abstract class AbstractAcDcConverter<I extends AcDcConverter<I>> extends Abstrac
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // AC terminals + extensions
-        double p0 = variantStore.getDouble(0, COL_TARGET_P, variantStoreRow);
-        double vdc0 = variantStore.getDouble(0, COL_TARGET_VDC, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {p0, vdc0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         for (DcTerminalImpl t : dcTerminals) {
             t.reHomeVariantStores(targetNetwork);
         }

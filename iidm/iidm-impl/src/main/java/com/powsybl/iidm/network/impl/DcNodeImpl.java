@@ -252,10 +252,8 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        double v0 = variantStore.getDouble(0, COL_V, variantStoreRow);
-        int cc0 = variantStore.getInt(0, COL_CC, variantStoreRow);
-        int dc0 = variantStore.getInt(0, COL_DC, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {v0}, new int[] {cc0, dc0}, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

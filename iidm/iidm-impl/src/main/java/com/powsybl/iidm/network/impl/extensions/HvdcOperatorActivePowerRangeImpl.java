@@ -116,9 +116,8 @@ public class HvdcOperatorActivePowerRangeImpl extends AbstractMultiVariantIdenti
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double opr12 = variantStore.getDouble(0, COL_OPR_CS1_TO_CS2, variantStoreRow);
-        double opr21 = variantStore.getDouble(0, COL_OPR_CS2_TO_CS1, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {opr12, opr21}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

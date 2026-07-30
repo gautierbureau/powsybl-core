@@ -142,9 +142,7 @@ class SwitchImpl extends AbstractIdentifiable<Switch> implements Switch, MultiVa
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // extensions
         SwitchVariantStore oldStore = getNetwork().getSwitchVariantStore();
-        boolean open0 = oldStore.getOpen(0, variantStoreRow);
-        boolean retained0 = oldStore.getRetained(0, variantStoreRow);
-        this.variantStoreRow = targetNetwork.getSwitchVariantStore().importRow(open0, retained0);
+        this.variantStoreRow = targetNetwork.getSwitchVariantStore().importRow(oldStore, variantStoreRow);
     }
 
     @Override

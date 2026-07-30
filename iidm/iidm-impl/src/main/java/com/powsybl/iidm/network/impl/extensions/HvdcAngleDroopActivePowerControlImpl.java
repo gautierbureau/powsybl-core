@@ -138,10 +138,8 @@ public class HvdcAngleDroopActivePowerControlImpl extends AbstractMultiVariantId
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double p00 = variantStore.getDouble(0, COL_P0, variantStoreRow);
-        double droop0 = variantStore.getDouble(0, COL_DROOP, variantStoreRow);
-        boolean enabled0 = variantStore.getBoolean(0, COL_ENABLED, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {p00, droop0}, INT_DEFAULTS, new boolean[] {enabled0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

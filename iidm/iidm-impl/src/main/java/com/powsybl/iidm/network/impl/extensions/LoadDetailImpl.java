@@ -124,12 +124,8 @@ public class LoadDetailImpl extends AbstractMultiVariantIdentifiableExtension<Lo
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double fixedActivePower0 = variantStore.getDouble(0, COL_FIXED_ACTIVE_POWER, variantStoreRow);
-        double fixedReactivePower0 = variantStore.getDouble(0, COL_FIXED_REACTIVE_POWER, variantStoreRow);
-        double variableActivePower0 = variantStore.getDouble(0, COL_VARIABLE_ACTIVE_POWER, variantStoreRow);
-        double variableReactivePower0 = variantStore.getDouble(0, COL_VARIABLE_REACTIVE_POWER, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(
-                new double[] {fixedActivePower0, fixedReactivePower0, variableActivePower0, variableReactivePower0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

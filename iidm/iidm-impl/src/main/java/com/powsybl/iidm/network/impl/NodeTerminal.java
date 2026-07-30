@@ -278,18 +278,9 @@ class NodeTerminal extends AbstractTerminal {
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork);
-        NumericVariantStore oldStore = nodeVariantStore;
-        double v0 = oldStore.getDouble(0, COL_V, nodeVariantStoreRow);
-        double angle0 = oldStore.getDouble(0, COL_ANGLE, nodeVariantStoreRow);
-        int cc0 = oldStore.getInt(0, COL_CC, nodeVariantStoreRow);
-        int sc0 = oldStore.getInt(0, COL_SC, nodeVariantStoreRow);
         NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.nodeVariantStoreRow = newStore.importRow(nodeVariantStore, nodeVariantStoreRow);
         this.nodeVariantStore = newStore;
-        this.nodeVariantStoreRow = newStore.allocateRow();
-        newStore.setDouble(0, COL_V, nodeVariantStoreRow, v0);
-        newStore.setDouble(0, COL_ANGLE, nodeVariantStoreRow, angle0);
-        newStore.setInt(0, COL_CC, nodeVariantStoreRow, cc0);
-        newStore.setInt(0, COL_SC, nodeVariantStoreRow, sc0);
     }
 
     @Override

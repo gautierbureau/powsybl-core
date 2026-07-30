@@ -308,15 +308,9 @@ abstract class AbstractTapChanger<H extends TapChangerParent, C extends Abstract
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        double targetDeadband0 = variantStore.getDouble(0, COL_TARGET_DEADBAND, variantStoreRow);
-        double regulationValue0 = variantStore.getDouble(0, COL_REGULATION_VALUE, variantStoreRow);
-        int tapPosition0 = variantStore.getInt(0, COL_TAP_POSITION, variantStoreRow);
-        int solvedTapPosition0 = variantStore.getInt(0, COL_SOLVED_TAP_POSITION, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(
-                new double[] {targetDeadband0, regulationValue0},
-                new int[] {tapPosition0, solvedTapPosition0},
-                BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
         regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 

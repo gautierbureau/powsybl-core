@@ -270,8 +270,8 @@ class BusTerminal extends AbstractTerminal {
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
         super.reHomeVariantStores(targetNetwork); // p/q
-        boolean connected0 = connectedStore.getBoolean(0, COL_CONNECTED, connectedStoreRow);
-        this.connectedStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.connectedStoreRow = connectedStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {connected0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.connectedStoreRow = newStore.importRow(connectedStore, connectedStoreRow);
+        this.connectedStore = newStore;
     }
 }

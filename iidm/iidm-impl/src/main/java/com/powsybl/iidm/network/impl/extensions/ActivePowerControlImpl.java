@@ -172,13 +172,9 @@ public class ActivePowerControlImpl<T extends Injection<T>> extends AbstractMult
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        boolean participate0 = variantStore.getBoolean(0, COL_PARTICIPATE, variantStoreRow);
-        double droop0 = variantStore.getDouble(0, COL_DROOP, variantStoreRow);
-        double pf0 = variantStore.getDouble(0, COL_PARTICIPATION_FACTOR, variantStoreRow);
-        double min0 = variantStore.getDouble(0, COL_MIN_TARGET_P, variantStoreRow);
-        double max0 = variantStore.getDouble(0, COL_MAX_TARGET_P, variantStoreRow);
-        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(new double[] {droop0, pf0, min0, max0}, INT_DEFAULTS, new boolean[] {participate0});
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 
     @Override
