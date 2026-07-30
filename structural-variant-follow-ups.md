@@ -2,7 +2,7 @@
 
 Tracking list for work deferred on the structural-variant stack (this branch, on top of
 the columnar variant storage PR). The shipped code is green on a full reactor run
-(93 modules, 10 408 tests, 0 failures).
+(93 modules, 10 454 tests, 0 failures).
 
 Note on vocabulary: there is **no** state-vs-structural distinction any more. There is one
 kind of variant; whether an implementation stores the divergence densely or partially is
@@ -22,14 +22,15 @@ internal, exactly as in powsybl-network-store. `VariantCloneStrategy` is gone fr
 - [ ] The non-terminal `NumericVariantStore` row leak (rows not freed on removal) rides
       underneath from the columnar PR.
 
-## Closing the rest of powsybl-core#721
+## powsybl-core#721
 
 #721 asks for variants that are safe to create **on demand, concurrently, from any thread**.
-What is delivered here: concurrent clone, concurrent structural divergence (removal *and*
-creation), and concurrent state writes, all on a shared network — but **into pre-reserved
-capacity**. `preAllocateVariants(int)` is therefore a hard contract, not a performance hint:
-overflow while multi-thread access is enabled throws rather than growing the arrays on a
-worker thread.
+That is delivered: concurrent clone with no reservation required, concurrent structural
+divergence (removal *and* creation), and concurrent state writes, all on a shared network.
+`preAllocateVariants(int)` remains as a performance hint — it keeps the storage growth out of
+the parallel region — but nothing depends on it for correctness.
+
+The items below are what it took, kept for the record, plus what is still open.
 
 - [x] **The four eager growers are gone.** `ShuntCompensatorImpl`'s two section counts moved
       into int columns of the `NumericVariantStore` row it already owned;
