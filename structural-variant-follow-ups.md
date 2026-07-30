@@ -37,29 +37,22 @@ worker thread.
       fictitious injection maps moved to `VariantRefArray`, which grows by appending chunks
       so an in-flight write to an existing chunk cannot be lost. Every `MultiVariantObject`
       now grows its per-variant state safely off the main thread.
-- [ ] **Flip the overflow path** so `preAllocateVariants` becomes a pure hint: today
-      `VariantManagerImpl` still throws rather than extending while multi-thread access is
-      enabled. One hazard has to be closed first, and it is *currently unreachable only
-      because* that throw is there — so it must be fixed in the same change, not after:
+- [x] **The overflow path is flipped.** Cloning past the reserved capacity while multi-thread
+      access is enabled grows the per-variant storage instead of throwing, so
+      `preAllocateVariants` is now a performance hint: it keeps the growth out of the parallel
+      region, but nothing depends on it for correctness. That closes powsybl-core#721's headline
+      ask — variants creatable on demand, concurrently, from any thread.
 
-      An object's constructor reads `getVariantArraySize()` (under the variant lock) and
-      sizes its per-variant state, then publishes itself in the index (under the index write
-      lock) as a separate step. A clone that runs entirely between those two points grows
-      every object in its stateful-objects snapshot — which cannot contain the new object,
-      as it is not published yet — and leaves the new object one slot short. Reading the new
-      variant on it then goes out of bounds.
-
-      Two ways out, both viable; the lock order is not the obstacle, since `removeVariant`
-      already establishes variant-lock-then-write-lock and either option follows it:
-      - hold the variant lock across construction *and* publication, so a clone cannot
-        interleave. Correct and simple to reason about, but object construction happens in
-        adders all over the codebase rather than at one choke point.
-      - top up short objects after the extend cascade, by re-reading the stateful list once
-        the growth is published. Contained, but `MultiVariantObject` has no way to report
-        how many variant slots it currently has, so it needs a small API addition.
-
-      Worth measuring the second one's cost before choosing: it adds work to every clone,
-      whereas the first only adds contention to concurrent creation.
+      What made it safe was making a missing slot unobservable rather than coordinating creation
+      against cloning: `VariantRefArray` and `VariantArray` materialise a slot on read. See
+      `structural-variant-lazy-slots-design.md` for the argument, and
+      `VariantConcurrentCloneAndCreateTest` for the reproducer (20/20 repetitions failed before,
+      pass after).
+- [x] **Store `extend` is synchronised on the store**, like `allocateRow` already was. Growing the
+      variant dimension replaces each band's chunk spine, so it must not interleave with a row
+      allocation appending chunks to one of them. This was reachable before today and no test
+      caught it — it was found by reading the code while justifying that the flip was safe, which
+      is worth remembering when reading the soak results below as evidence.
 - [ ] **Size `VariantRefArray`'s chunks deliberately.** They are 8 slots, chosen so the spine
       stays a single entry for typical variant counts. A single-variant network therefore
       allocates 8 reference slots per object where an `ArrayList` held about one — a few MB
