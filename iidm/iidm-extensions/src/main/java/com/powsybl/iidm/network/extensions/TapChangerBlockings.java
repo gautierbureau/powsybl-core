@@ -18,7 +18,7 @@ import java.util.Optional;
  */
 public interface TapChangerBlockings extends Extension<Network> {
 
-    String NAME = "tcbs";
+    String NAME = "tapChangerBlockings";
 
     List<TapChangerBlocking> getTapChangerBlockings();
 

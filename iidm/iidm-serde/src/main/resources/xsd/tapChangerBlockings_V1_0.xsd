@@ -10,8 +10,8 @@
 -->
 <xs:schema version="1.0"
            xmlns:xs="http://www.w3.org/2001/XMLSchema"
-           xmlns:tcb="http://www.powsybl.org/schema/iidm/ext/tcbs/1_0"
-           targetNamespace="http://www.powsybl.org/schema/iidm/ext/tcbs/1_0"
+           xmlns:tcb="http://www.powsybl.org/schema/iidm/ext/tapchangerblockings/1_0"
+           targetNamespace="http://www.powsybl.org/schema/iidm/ext/tapchangerblockings/1_0"
            elementFormDefault="qualified">
     <xs:complexType name="Bus">
         <xs:simpleContent>
@@ -41,7 +41,7 @@
         </xs:sequence>
         <xs:attribute name="name" use="required" type="xs:string"/>
     </xs:complexType>
-    <xs:element name="tcbs">
+    <xs:element name="tapChangerBlockings">
         <xs:complexType>
             <xs:sequence>
                 <xs:element name="tcb" type="tcb:Tcb" minOccurs="1" maxOccurs="unbounded"/>
