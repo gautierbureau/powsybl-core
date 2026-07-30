@@ -8,7 +8,6 @@
 package com.powsybl.iidm.network.impl;
 
 import com.google.common.collect.BiMap;
-import com.google.common.collect.FluentIterable;
 import com.google.common.collect.HashBiMap;
 import com.google.common.primitives.Ints;
 import com.powsybl.commons.PowsyblException;
@@ -101,8 +100,10 @@ public class VariantManagerImpl implements VariantManager {
         variantContext.setVariantIndex(index);
     }
 
-    private Iterable<MultiVariantObject> getStafulObjects() {
-        return FluentIterable.from(networkIndex.getAll()).filter(MultiVariantObject.class);
+    private List<MultiVariantObject> getStafulObjects() {
+        // the list is cached and incrementally invalidated by the network index, so repeated variant
+        // operations do not re-scan and re-filter all the network identifiables each time
+        return networkIndex.getStatefulObjects();
     }
 
     @Override
@@ -156,10 +157,13 @@ public class VariantManagerImpl implements VariantManager {
             }
         }
 
-        allocateVariantArrayElements(sourceIndex, recycled, overwritten);
+        // compute the stateful objects list only once for the whole clone operation
+        List<MultiVariantObject> statefulObjects = getStafulObjects();
+
+        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
 
         if (extendedCount > 0) {
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
             }
             LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
@@ -176,10 +180,11 @@ public class VariantManagerImpl implements VariantManager {
         }
     }
 
-    private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten) {
+    private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten,
+                                              List<MultiVariantObject> statefulObjects) {
         if (!recycled.isEmpty()) {
             int[] indexes = Ints.toArray(recycled);
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
@@ -188,7 +193,7 @@ public class VariantManagerImpl implements VariantManager {
         }
         if (!overwritten.isEmpty()) {
             int[] indexes = Ints.toArray(overwritten);
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
