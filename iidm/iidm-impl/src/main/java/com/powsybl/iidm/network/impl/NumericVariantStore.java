@@ -10,6 +10,7 @@ package com.powsybl.iidm.network.impl;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.Objects;
 
 /**
  * Generic columnar (structure-of-arrays) store of variant-dependent state, holding a fixed set of
@@ -40,6 +41,7 @@ public class NumericVariantStore implements VariantColumnStore {
 
     private static final int DEFAULT_ROW_CAPACITY = 16;
 
+    private final String key;
     private final int nDouble;
     private final int nInt;
     private final int nBoolean;
@@ -66,7 +68,8 @@ public class NumericVariantStore implements VariantColumnStore {
 
     private final Deque<Integer> freeRows = new ArrayDeque<>();
 
-    NumericVariantStore(int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
+    NumericVariantStore(String key, int variantArraySize, double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
+        this.key = Objects.requireNonNull(key);
         this.nDouble = doubleDefaults.length;
         this.nInt = intDefaults.length;
         this.nBoolean = booleanDefaults.length;
@@ -80,6 +83,38 @@ public class NumericVariantStore implements VariantColumnStore {
         this.doubles = new double[variantCapacity * nDouble * rowStride];
         this.ints = new int[variantCapacity * nInt * rowStride];
         this.booleans = new boolean[variantCapacity * nBoolean * rowStride];
+    }
+
+    /**
+     * Check that a later {@code getOrCreateNumericVariantStore} call for this store's key describes exactly the
+     * same columns, and fail loudly if it does not.
+     *
+     * <p>A store is shared by every object declaring its key, and each object addresses its state by column
+     * index, so two types sharing a key must agree on the column layout. Without this check a mistyped,
+     * copy-pasted or accidentally colliding key would silently hand one type another type's columns: reads
+     * would return a plausible value from the wrong column, or an {@link ArrayIndexOutOfBoundsException} would
+     * surface far from the cause. Sharing a key on purpose stays supported (ratio and phase tap changers do it)
+     * as long as the layouts match.</p>
+     *
+     * <p>{@link Arrays#equals(double[], double[])} compares {@code NaN} to {@code NaN} as equal, which is what
+     * the many {@code NaN} column defaults need.</p>
+     */
+    void checkColumnLayout(double[] expectedDoubleDefaults, int[] expectedIntDefaults, boolean[] expectedBooleanDefaults) {
+        if (!Arrays.equals(doubleDefaults, expectedDoubleDefaults)
+                || !Arrays.equals(intDefaults, expectedIntDefaults)
+                || !Arrays.equals(booleanDefaults, expectedBooleanDefaults)) {
+            throw new IllegalStateException("Columnar variant store '" + key
+                    + "' already exists with a different column layout: holds "
+                    + describeLayout(doubleDefaults, intDefaults, booleanDefaults) + " but was requested with "
+                    + describeLayout(expectedDoubleDefaults, expectedIntDefaults, expectedBooleanDefaults)
+                    + ". Two object types may only share a store key if they declare identical columns.");
+        }
+    }
+
+    private static String describeLayout(double[] doubleDefaults, int[] intDefaults, boolean[] booleanDefaults) {
+        return "double" + Arrays.toString(doubleDefaults)
+                + " int" + Arrays.toString(intDefaults)
+                + " boolean" + Arrays.toString(booleanDefaults);
     }
 
     private int doubleIndex(int variant, int col, int row) {

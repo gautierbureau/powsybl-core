@@ -265,10 +265,14 @@ public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, 
         if (store == null) {
             // created at the current variant array size (its bands hold the column defaults); registered so
             // that subsequent variant operations drive it. Creation happens on the main thread during build.
-            store = new NumericVariantStore(variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
+            store = new NumericVariantStore(key, variantManager.getVariantArraySize(), doubleDefaults, intDefaults,
                     booleanDefaults);
             numericVariantStores.put(key, store);
             variantColumnStores.add(store);
+        } else {
+            // the store is addressed by column index, so every caller of a given key must describe the same
+            // columns; a colliding key would otherwise silently hand one type another type's columns
+            store.checkColumnLayout(doubleDefaults, intDefaults, booleanDefaults);
         }
         return store;
     }
