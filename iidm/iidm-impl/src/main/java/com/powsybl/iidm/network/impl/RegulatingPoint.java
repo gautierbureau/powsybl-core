@@ -7,6 +7,7 @@
  */
 package com.powsybl.iidm.network.impl;
 
+import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.Bus;
 import com.powsybl.iidm.network.Terminal;
@@ -22,12 +23,19 @@ class RegulatingPoint implements MultiVariantObject, Referrer<Terminal> {
 
     private static final Logger LOG = LoggerFactory.getLogger(RegulatingPoint.class);
 
-    // regulating (boolean) and regulationMode (int) held columnarly; a given regulating point uses one or both
-    // columns depending on the constructor (flags below), matching the former nullable trove fields.
-    private static final String STORE_KEY = "RegulatingPoint";
-    private static final double[] DOUBLE_DEFAULTS = {};
-    private static final int[] INT_DEFAULTS = {-1};
-    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    // regulating (boolean) and regulationMode (int) are held columnarly. A regulating point carries one or
+    // both, depending on the constructor: a generator or tap changer has a regulating flag and no mode, an
+    // AC/DC converter has a mode and no regulating flag, a static var compensator has both. That is what the
+    // nullable trove fields used to express, and each kind gets its own store so that a point still only pays
+    // for the columns it actually has.
+    private static final String STORE_KEY_REGULATING = "RegulatingPoint.regulating";
+    private static final String STORE_KEY_MODE = "RegulatingPoint.mode";
+    private static final String STORE_KEY_REGULATING_AND_MODE = "RegulatingPoint.regulatingAndMode";
+    private static final double[] NO_DOUBLES = {};
+    private static final int[] NO_INTS = {};
+    private static final boolean[] NO_BOOLEANS = {};
+    private static final int[] MODE_DEFAULTS = {-1};
+    private static final boolean[] REGULATING_DEFAULTS = {false};
     private static final int COL_REGULATION_MODE = 0;
     private static final int COL_REGULATING = 0;
 
@@ -76,8 +84,42 @@ class RegulatingPoint implements MultiVariantObject, Referrer<Terminal> {
     }
 
     private void allocate(Ref<? extends VariantManagerHolder> networkRef, boolean regulating, int regulationMode) {
-        this.variantStore = networkRef.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
-        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, new int[] {regulationMode}, new boolean[] {regulating});
+        this.variantStore = networkRef.get().getOrCreateNumericVariantStore(storeKey(), NO_DOUBLES, intDefaults(), booleanDefaults());
+        this.variantStoreRow = variantStore.allocateRow(NO_DOUBLES,
+                hasRegulationMode ? new int[] {regulationMode} : NO_INTS,
+                hasRegulating ? new boolean[] {regulating} : NO_BOOLEANS);
+    }
+
+    private String storeKey() {
+        if (hasRegulating) {
+            return hasRegulationMode ? STORE_KEY_REGULATING_AND_MODE : STORE_KEY_REGULATING;
+        }
+        return STORE_KEY_MODE;
+    }
+
+    private int[] intDefaults() {
+        return hasRegulationMode ? MODE_DEFAULTS : NO_INTS;
+    }
+
+    private boolean[] booleanDefaults() {
+        return hasRegulating ? REGULATING_DEFAULTS : NO_BOOLEANS;
+    }
+
+    // A regulating point only answers for the attributes its constructor gave it. Asking for the other one used
+    // to be a NullPointerException off a null trove list; it stays an error rather than quietly reading a
+    // column that would always hold the default.
+    private void checkHasRegulating() {
+        if (!hasRegulating) {
+            throw new PowsyblException("Regulating point of '" + regulatedEquipmentId
+                    + "' has no regulating attribute, only a regulation mode");
+        }
+    }
+
+    private void checkHasRegulationMode() {
+        if (!hasRegulationMode) {
+            throw new PowsyblException("Regulating point of '" + regulatedEquipmentId
+                    + "' has no regulation mode attribute, only a regulating flag");
+        }
     }
 
     void setRegulatingTerminal(TerminalExt regulatingTerminal) {
@@ -96,18 +138,22 @@ class RegulatingPoint implements MultiVariantObject, Referrer<Terminal> {
     }
 
     boolean setRegulating(int index, boolean regulating) {
+        checkHasRegulating();
         return variantStore.setBoolean(index, COL_REGULATING, variantStoreRow, regulating);
     }
 
     boolean isRegulating(int index) {
+        checkHasRegulating();
         return variantStore.getBoolean(index, COL_REGULATING, variantStoreRow);
     }
 
     int setRegulationMode(int index, int regulationMode) {
+        checkHasRegulationMode();
         return variantStore.setInt(index, COL_REGULATION_MODE, variantStoreRow, regulationMode);
     }
 
     int getRegulationMode(int index) {
+        checkHasRegulationMode();
         return variantStore.getInt(index, COL_REGULATION_MODE, variantStoreRow);
     }
 
@@ -134,7 +180,7 @@ class RegulatingPoint implements MultiVariantObject, Referrer<Terminal> {
 
     @Override
     public void reHomeVariantStores(NetworkImpl targetNetwork) {
-        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(storeKey(), NO_DOUBLES, intDefaults(), booleanDefaults());
         this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
         this.variantStore = newStore;
     }
