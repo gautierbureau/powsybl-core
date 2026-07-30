@@ -7,9 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import java.util.ArrayDeque;
+import gnu.trove.stack.array.TIntArrayStack;
+
 import java.util.Arrays;
-import java.util.Deque;
 import java.util.Objects;
 
 /**
@@ -75,7 +75,7 @@ public class NumericVariantStore implements VariantColumnStore {
     private int variantSize;
     private int variantCapacity;
 
-    private final Deque<Integer> freeRows = new ArrayDeque<>();
+    private final TIntArrayStack freeRows = new TIntArrayStack();
 
     NumericVariantStore(String key, VariantManagerImpl variantManager, double[] doubleDefaults, int[] intDefaults,
                         boolean[] booleanDefaults) {
@@ -148,32 +148,42 @@ public class NumericVariantStore implements VariantColumnStore {
         return (variant * nBoolean + col) * rowStride + row;
     }
 
-    /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
-    public int allocateRow() {
+    // Take a row index - recycled if one is free, otherwise the next one, growing the stride if needed - and
+    // leave it uninitialised. Every caller writes the whole row straight after, so initialising here as well
+    // would write each cell of each live band twice on every object construction.
+    private int claimRow() {
         checkStructuralModification("allocateRow");
-        int row;
-        if (!freeRows.isEmpty()) {
-            row = freeRows.pop();
-        } else {
-            if (rowCount == rowStride) {
-                growRowStride();
-            }
-            row = rowCount++;
+        if (freeRows.size() > 0) {
+            return freeRows.pop();
         }
+        if (rowCount == rowStride) {
+            growRowStride();
+        }
+        return rowCount++;
+    }
+
+    // Write one set of values into every live variant band of a row.
+    private void fillRow(int row, double[] doubleValues, int[] intValues, boolean[] booleanValues) {
         double[] dd = doubles;
         int[] id = ints;
         boolean[] bd = booleans;
         for (int v = 0; v < variantSize; v++) {
             for (int c = 0; c < nDouble; c++) {
-                dd[doubleIndex(v, c, row)] = doubleDefaults[c];
+                dd[doubleIndex(v, c, row)] = doubleValues[c];
             }
             for (int c = 0; c < nInt; c++) {
-                id[intIndex(v, c, row)] = intDefaults[c];
+                id[intIndex(v, c, row)] = intValues[c];
             }
             for (int c = 0; c < nBoolean; c++) {
-                bd[booleanIndex(v, c, row)] = booleanDefaults[c];
+                bd[booleanIndex(v, c, row)] = booleanValues[c];
             }
         }
+    }
+
+    /** Allocate a row for a new object, initialised to the column defaults in every live variant band. */
+    public int allocateRow() {
+        int row = claimRow();
+        fillRow(row, doubleDefaults, intDefaults, booleanDefaults);
         return row;
     }
 
@@ -183,21 +193,8 @@ public class NumericVariantStore implements VariantColumnStore {
      * must match the store's column counts.
      */
     public int allocateRow(double[] doubleInit, int[] intInit, boolean[] booleanInit) {
-        int row = allocateRow();
-        double[] dd = doubles;
-        int[] id = ints;
-        boolean[] bd = booleans;
-        for (int v = 0; v < variantSize; v++) {
-            for (int c = 0; c < nDouble; c++) {
-                dd[doubleIndex(v, c, row)] = doubleInit[c];
-            }
-            for (int c = 0; c < nInt; c++) {
-                id[intIndex(v, c, row)] = intInit[c];
-            }
-            for (int c = 0; c < nBoolean; c++) {
-                bd[booleanIndex(v, c, row)] = booleanInit[c];
-            }
-        }
+        int row = claimRow();
+        fillRow(row, doubleInit, intInit, booleanInit);
         return row;
     }
 

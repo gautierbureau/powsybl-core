@@ -7,9 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import java.util.ArrayDeque;
+import gnu.trove.stack.array.TIntArrayStack;
+
 import java.util.Arrays;
-import java.util.Deque;
 import java.util.Objects;
 
 /**
@@ -52,7 +52,7 @@ class TerminalVariantStore implements VariantColumnStore {
     private int variantCapacity;
 
     // rows freed by removed terminals, available for reuse (avoids leaking a row per removed terminal)
-    private final Deque<Integer> freeRows = new ArrayDeque<>();
+    private final TIntArrayStack freeRows = new TIntArrayStack();
 
     private final VariantManagerImpl variantManager;
 
@@ -79,7 +79,7 @@ class TerminalVariantStore implements VariantColumnStore {
      */
     int allocateRow() {
         checkStructuralModification("allocateRow");
-        if (!freeRows.isEmpty()) {
+        if (freeRows.size() > 0) {
             int row = freeRows.pop();
             resetRow(row);
             return row;

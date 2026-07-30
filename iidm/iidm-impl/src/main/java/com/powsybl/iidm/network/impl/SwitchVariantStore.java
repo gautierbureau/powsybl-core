@@ -7,9 +7,9 @@
  */
 package com.powsybl.iidm.network.impl;
 
-import java.util.ArrayDeque;
+import gnu.trove.stack.array.TIntArrayStack;
+
 import java.util.Arrays;
-import java.util.Deque;
 import java.util.Objects;
 
 /**
@@ -49,7 +49,7 @@ class SwitchVariantStore implements VariantColumnStore {
     private int variantCapacity;
 
     // rows released by switches re-homed into another network's store (merge/detach), available for reuse
-    private final Deque<Integer> freeRows = new ArrayDeque<>();
+    private final TIntArrayStack freeRows = new TIntArrayStack();
 
     private final VariantManagerImpl variantManager;
 
@@ -71,7 +71,7 @@ class SwitchVariantStore implements VariantColumnStore {
     int allocateRow(boolean openValue, boolean retainedValue) {
         checkStructuralModification("allocateRow");
         int row;
-        if (!freeRows.isEmpty()) {
+        if (freeRows.size() > 0) {
             row = freeRows.pop();
         } else {
             if (rowCount == rowStride) {
