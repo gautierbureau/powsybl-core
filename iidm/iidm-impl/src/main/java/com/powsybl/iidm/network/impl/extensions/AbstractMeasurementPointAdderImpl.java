@@ -7,6 +7,7 @@
  */
 package com.powsybl.iidm.network.impl.extensions;
 
+import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.extensions.MeasurementPoint;
 import com.powsybl.iidm.network.extensions.MeasurementPointAdder;
 
@@ -27,7 +28,7 @@ public abstract class AbstractMeasurementPointAdderImpl<T> implements Measuremen
 
     protected String id;
 
-    AbstractMeasurementPointAdderImpl(T parent) {
+    protected AbstractMeasurementPointAdderImpl(T parent) {
         this.parent = Objects.requireNonNull(parent);
     }
 
@@ -47,5 +48,21 @@ public abstract class AbstractMeasurementPointAdderImpl<T> implements Measuremen
     public AbstractMeasurementPointAdderImpl<T> withId(String id) {
         this.id = id;
         return this;
+    }
+
+    /**
+     * Builds the measurement point these settings describe, for an implementing adder to hand to
+     * its own parent. The point is shared between the extensions watching one — a tap changer
+     * blocking, an ACMC, a SMACC — so building it, and refusing one that names nothing, is done once
+     * here rather than in each.
+     */
+    protected MeasurementPoint buildMeasurementPoint() {
+        if (buses.isEmpty() && busbarSectionIds.isEmpty()) {
+            throw new PowsyblException("Measurement point references neither a bus nor a busbar section");
+        }
+        if (id == null) {
+            throw new PowsyblException("Measurement point ID is not set");
+        }
+        return new MeasurementPointImpl(buses, busbarSectionIds, id);
     }
 }

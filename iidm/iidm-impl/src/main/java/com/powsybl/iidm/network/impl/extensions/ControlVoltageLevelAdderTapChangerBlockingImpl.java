@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.impl.extensions;
 
-import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.extensions.TapChangerBlockingAdder;
 
 /**
@@ -21,10 +20,8 @@ public class ControlVoltageLevelAdderTapChangerBlockingImpl extends AbstractCont
 
     @Override
     public TapChangerBlockingAdderImpl add() {
-        if (id == null) {
-            throw new PowsyblException("Control voltage level ID is not set");
-        }
-        ((TapChangerBlockingAdderImpl) parent).addControlVoltageLevel(new ControlVoltageLevelImpl(id, forceOneTransformerLoads));
-        return (TapChangerBlockingAdderImpl) parent;
+        TapChangerBlockingAdderImpl blockingAdder = (TapChangerBlockingAdderImpl) parent;
+        blockingAdder.addControlVoltageLevel(buildControlVoltageLevel());
+        return blockingAdder;
     }
 }

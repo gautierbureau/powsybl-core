@@ -45,7 +45,7 @@ public class TapChangerBlockingAdderImpl implements TapChangerBlockingAdder {
         return this;
     }
 
-    void setMeasurementPoint(MeasurementPointImpl measurementPoint) {
+    void setMeasurementPoint(MeasurementPoint measurementPoint) {
         measurementPoints.add(Objects.requireNonNull(measurementPoint));
     }
 
@@ -54,7 +54,7 @@ public class TapChangerBlockingAdderImpl implements TapChangerBlockingAdder {
         return new MeasurementPointAdderTapChangerBlockingImpl(this);
     }
 
-    void addControlVoltageLevel(ControlVoltageLevelImpl controlVoltageLevel) {
+    void addControlVoltageLevel(ControlVoltageLevel controlVoltageLevel) {
         controlVoltageLevels.add(Objects.requireNonNull(controlVoltageLevel));
     }
 

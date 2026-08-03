@@ -7,6 +7,8 @@
  */
 package com.powsybl.iidm.network.impl.extensions;
 
+import com.powsybl.commons.PowsyblException;
+import com.powsybl.iidm.network.extensions.ControlVoltageLevel;
 import com.powsybl.iidm.network.extensions.ControlVoltageLevelAdder;
 
 import java.util.Objects;
@@ -22,7 +24,7 @@ public abstract class AbstractControlVoltageLevelAdderImpl<T> implements Control
 
     protected boolean forceOneTransformerLoads = false;
 
-    AbstractControlVoltageLevelAdderImpl(T parent) {
+    protected AbstractControlVoltageLevelAdderImpl(T parent) {
         this.parent = Objects.requireNonNull(parent);
     }
 
@@ -36,5 +38,17 @@ public abstract class AbstractControlVoltageLevelAdderImpl<T> implements Control
     public AbstractControlVoltageLevelAdderImpl<T> withForceOneTransformerLoads() {
         this.forceOneTransformerLoads = true;
         return this;
+    }
+
+    /**
+     * Builds the controlled voltage level these settings describe, for an implementing adder to
+     * hand to its own parent, so building it, and refusing one that names no level, is done once
+     * here rather than in each extension that controls one.
+     */
+    protected ControlVoltageLevel buildControlVoltageLevel() {
+        if (id == null) {
+            throw new PowsyblException("Control voltage level ID is not set");
+        }
+        return new ControlVoltageLevelImpl(id, forceOneTransformerLoads);
     }
 }

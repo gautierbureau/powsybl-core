@@ -16,22 +16,20 @@ import com.powsybl.commons.io.SerializerContext;
 import com.powsybl.commons.io.TreeDataWriter;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.extensions.ControlVoltageLevel;
-import com.powsybl.iidm.network.extensions.ControlVoltageLevelAdder;
 import com.powsybl.iidm.network.extensions.MeasurementPoint;
 import com.powsybl.iidm.network.extensions.TapChangerBlocking;
 import com.powsybl.iidm.network.extensions.TapChangerBlockingAdder;
 import com.powsybl.iidm.network.extensions.TapChangerBlockings;
 import com.powsybl.iidm.network.extensions.TapChangerBlockingsAdder;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Reads and writes the tap changer blockings, the buses and busbar sections a point is measured at
- * kept apart the way the secondary voltage control pilot point keeps them: a bus as
- * {@code <bus voltageLevel="VL">busId</bus>}, a busbar section as
- * {@code <busbarSection>bbsId</busbarSection>}.
+ * Reads and writes the tap changer blockings. The measurement points a blocking watches and the
+ * voltage levels it controls are read and written by {@link MeasurementPointSerDe} and
+ * {@link ControlVoltageLevelSerDe}, shared with the other extensions that watch or control one.
  *
  * @author Gautier Bureau {@literal <gautier.bureau at rte-france.com>}
  */
@@ -43,14 +41,7 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
     private static final String MEASUREMENT_POINT_ARRAY_ELEMENT = "measurementPoints";
     private static final String CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT = "controlVoltageLevel";
     private static final String CONTROL_VOLTAGE_LEVEL_ARRAY_ELEMENT = "controlVoltageLevels";
-    private static final String BUS_ROOT_ELEMENT = "bus";
-    private static final String BUS_ARRAY_ELEMENT = "buses";
-    private static final String BUSBAR_SECTION_ROOT_ELEMENT = "busbarSection";
-    private static final String BUSBAR_SECTION_ARRAY_ELEMENT = "busbarSections";
-    private static final String VOLTAGE_LEVEL_ATTRIBUTE = "voltageLevel";
-    private static final String ID_ATTRIBUTE = "id";
     private static final String NAME_ATTRIBUTE = "name";
-    private static final String FORCE_ONE_TRANSFORMER_LOADS_ATTRIBUTE = "forceOneTransformerLoads";
 
     public TapChangerBlockingsSerDe() {
         super(TapChangerBlockings.NAME, "network", TapChangerBlockings.class,
@@ -59,10 +50,10 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
 
     @Override
     public Map<String, String> getArrayNameToSingleNameMap() {
-        return Map.of(MEASUREMENT_POINT_ARRAY_ELEMENT, MEASUREMENT_POINT_ROOT_ELEMENT,
-                CONTROL_VOLTAGE_LEVEL_ARRAY_ELEMENT, CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT,
-                BUS_ARRAY_ELEMENT, BUS_ROOT_ELEMENT,
-                BUSBAR_SECTION_ARRAY_ELEMENT, BUSBAR_SECTION_ROOT_ELEMENT);
+        Map<String, String> map = new HashMap<>(MeasurementPointSerDe.arrayNameToSingleNameMap());
+        map.put(MEASUREMENT_POINT_ARRAY_ELEMENT, MEASUREMENT_POINT_ROOT_ELEMENT);
+        map.put(CONTROL_VOLTAGE_LEVEL_ARRAY_ELEMENT, CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT);
+        return map;
     }
 
     @Override
@@ -72,33 +63,18 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
         for (TapChangerBlocking tcb : tcbs.getTapChangerBlockings()) {
             writer.writeStartNode(getNamespaceUri(), TCB_ROOT_ELEMENT);
             writer.writeStringAttribute(NAME_ATTRIBUTE, tcb.getName());
-            writeMeasurementPoints(tcb, writer);
+            writeMeasurementPoints(tcb.getMeasurementPoints(), writer);
             writeControlVoltageLevels(tcb.getControlVoltageLevels(), writer);
             writer.writeEndNode();
         }
         writer.writeEndNodes();
     }
 
-    private void writeMeasurementPoints(TapChangerBlocking tcb, TreeDataWriter writer) {
+    private void writeMeasurementPoints(List<MeasurementPoint> measurementPoints, TreeDataWriter writer) {
         writer.writeStartNodes();
-        for (MeasurementPoint measurementPoint : tcb.getMeasurementPoints()) {
+        for (MeasurementPoint measurementPoint : measurementPoints) {
             writer.writeStartNode(getNamespaceUri(), MEASUREMENT_POINT_ROOT_ELEMENT);
-            writer.writeStringAttribute(ID_ATTRIBUTE, measurementPoint.getId());
-            writer.writeStartNodes();
-            for (MeasurementPoint.BusRef bus : measurementPoint.getBuses()) {
-                writer.writeStartNode(getNamespaceUri(), BUS_ROOT_ELEMENT);
-                writer.writeStringAttribute(VOLTAGE_LEVEL_ATTRIBUTE, bus.voltageLevelId());
-                writer.writeNodeContent(bus.busId());
-                writer.writeEndNode();
-            }
-            writer.writeEndNodes();
-            writer.writeStartNodes();
-            for (String busbarSectionId : measurementPoint.getBusbarSectionIds()) {
-                writer.writeStartNode(getNamespaceUri(), BUSBAR_SECTION_ROOT_ELEMENT);
-                writer.writeNodeContent(busbarSectionId);
-                writer.writeEndNode();
-            }
-            writer.writeEndNodes();
+            MeasurementPointSerDe.writeBody(measurementPoint, writer, getNamespaceUri());
             writer.writeEndNode();
         }
         writer.writeEndNodes();
@@ -108,10 +84,7 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
         writer.writeStartNodes();
         for (ControlVoltageLevel controlVoltageLevel : controlVoltageLevels) {
             writer.writeStartNode(getNamespaceUri(), CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT);
-            if (controlVoltageLevel.forceOneTransformerLoads()) {
-                writer.writeStringAttribute(FORCE_ONE_TRANSFORMER_LOADS_ATTRIBUTE, "true");
-            }
-            writer.writeNodeContent(controlVoltageLevel.getId());
+            ControlVoltageLevelSerDe.writeBody(controlVoltageLevel, writer);
             writer.writeEndNode();
         }
         writer.writeEndNodes();
@@ -134,43 +107,16 @@ public class TapChangerBlockingsSerDe extends AbstractExtensionSerDe<Network, Ta
         TapChangerBlockingAdder tcbAdder = adder.newTapChangerBlocking().withName(name);
         context.getReader().readChildNodes(elementName -> {
             switch (elementName) {
-                case MEASUREMENT_POINT_ROOT_ELEMENT -> readMeasurementPoint(context, tcbAdder);
-                case CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT -> readControlVoltageLevel(context, tcbAdder);
+                case MEASUREMENT_POINT_ROOT_ELEMENT -> {
+                    var mpAdder = tcbAdder.newMeasurementPoint();
+                    MeasurementPointSerDe.readBody(mpAdder, context, MEASUREMENT_POINT_ROOT_ELEMENT);
+                    mpAdder.add();
+                }
+                case CONTROL_VOLTAGE_LEVEL_ROOT_ELEMENT -> ControlVoltageLevelSerDe.readBody(tcbAdder.newControlVoltageLevel(), context);
                 default -> throw new PowsyblException(getExceptionMessageUnknownElement(elementName, TCB_ROOT_ELEMENT));
             }
         });
         tcbAdder.add();
-    }
-
-    private static void readMeasurementPoint(DeserializerContext context, TapChangerBlockingAdder tcbAdder) {
-        String id = context.getReader().readStringAttribute(ID_ATTRIBUTE);
-        List<MeasurementPoint.BusRef> buses = new ArrayList<>();
-        List<String> busbarSectionIds = new ArrayList<>();
-        context.getReader().readChildNodes(elementName -> {
-            switch (elementName) {
-                case BUS_ROOT_ELEMENT -> {
-                    String voltageLevelId = context.getReader().readStringAttribute(VOLTAGE_LEVEL_ATTRIBUTE);
-                    buses.add(new MeasurementPoint.BusRef(voltageLevelId, context.getReader().readContent()));
-                }
-                case BUSBAR_SECTION_ROOT_ELEMENT -> busbarSectionIds.add(context.getReader().readContent());
-                default -> throw new PowsyblException(getExceptionMessageUnknownElement(elementName, MEASUREMENT_POINT_ROOT_ELEMENT));
-            }
-        });
-        tcbAdder.newMeasurementPoint()
-                .withBuses(buses)
-                .withBusbarSectionIds(busbarSectionIds)
-                .withId(id)
-                .add();
-    }
-
-    private static void readControlVoltageLevel(DeserializerContext context, TapChangerBlockingAdder tcbAdder) {
-        boolean forceOneTransformerLoads = context.getReader().readBooleanAttribute(FORCE_ONE_TRANSFORMER_LOADS_ATTRIBUTE, false);
-        String id = context.getReader().readContent();
-        ControlVoltageLevelAdder<TapChangerBlockingAdder> vlAdder = tcbAdder.newControlVoltageLevel().withId(id);
-        if (forceOneTransformerLoads) {
-            vlAdder.withForceOneTransformerLoads();
-        }
-        vlAdder.add();
     }
 
     private static String getExceptionMessageUnknownElement(String elementName, String where) {

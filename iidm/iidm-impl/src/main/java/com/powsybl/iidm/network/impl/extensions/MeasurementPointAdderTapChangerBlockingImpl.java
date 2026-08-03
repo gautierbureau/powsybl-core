@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.impl.extensions;
 
-import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.extensions.TapChangerBlockingAdder;
 
 /**
@@ -21,13 +20,8 @@ public class MeasurementPointAdderTapChangerBlockingImpl extends AbstractMeasure
 
     @Override
     public TapChangerBlockingAdderImpl add() {
-        if (buses.isEmpty() && busbarSectionIds.isEmpty()) {
-            throw new PowsyblException("Measurement point references neither a bus nor a busbar section");
-        }
-        if (id == null) {
-            throw new PowsyblException("Measurement point ID is not set");
-        }
-        ((TapChangerBlockingAdderImpl) parent).setMeasurementPoint(new MeasurementPointImpl(buses, busbarSectionIds, id));
-        return (TapChangerBlockingAdderImpl) parent;
+        TapChangerBlockingAdderImpl blockingAdder = (TapChangerBlockingAdderImpl) parent;
+        blockingAdder.setMeasurementPoint(buildMeasurementPoint());
+        return blockingAdder;
     }
 }
