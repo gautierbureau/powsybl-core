@@ -52,7 +52,6 @@ class TapChangerBlockingsXmlTest {
                         .add()
                     .newControlVoltageLevel()
                         .withId("VLHV2")
-                        .withForceOneTransformerLoads()
                         .add()
                     .add()
                 .add();
@@ -74,9 +73,9 @@ class TapChangerBlockingsXmlTest {
         assertEquals(List.of(), mp2.getBuses());
         assertEquals(List.of("BBS2", "BBS3"), mp2.getBusbarSectionIds());
 
-        ControlVoltageLevel forced = tcb.getControlVoltageLevel("VLHV2").orElseThrow();
-        assertEquals(true, forced.forceOneTransformerLoads());
-        assertEquals(false, tcb.getControlVoltageLevel("VLHV1").orElseThrow().forceOneTransformerLoads());
+        ControlVoltageLevel cvl2 = tcb.getControlVoltageLevel("VLHV2").orElseThrow();
+        assertEquals("VLHV2", cvl2.getId());
+        assertEquals("VLHV1", tcb.getControlVoltageLevel("VLHV1").orElseThrow().getId());
     }
 
     @Test

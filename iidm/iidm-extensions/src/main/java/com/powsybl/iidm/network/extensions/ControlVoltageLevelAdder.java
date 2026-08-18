@@ -14,7 +14,5 @@ public interface ControlVoltageLevelAdder<T> {
 
     ControlVoltageLevelAdder<T> withId(String id);
 
-    ControlVoltageLevelAdder<T> withForceOneTransformerLoads();
-
     T add();
 }

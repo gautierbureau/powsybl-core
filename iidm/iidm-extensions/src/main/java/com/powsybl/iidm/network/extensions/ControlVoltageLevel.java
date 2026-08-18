@@ -13,6 +13,4 @@ package com.powsybl.iidm.network.extensions;
 public interface ControlVoltageLevel {
 
     String getId();
-
-    boolean forceOneTransformerLoads();
 }

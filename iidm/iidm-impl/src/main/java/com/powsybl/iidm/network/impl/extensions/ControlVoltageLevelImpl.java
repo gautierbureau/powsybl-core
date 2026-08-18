@@ -18,24 +18,12 @@ class ControlVoltageLevelImpl implements ControlVoltageLevel {
 
     private final String id;
 
-    private boolean forceOneTransformerLoads;
-
     ControlVoltageLevelImpl(String id) {
         this.id = Objects.requireNonNull(id);
-    }
-
-    ControlVoltageLevelImpl(String id, boolean forceOneTransformerLoads) {
-        this.id = Objects.requireNonNull(id);
-        this.forceOneTransformerLoads = forceOneTransformerLoads;
     }
 
     @Override
     public String getId() {
         return id;
-    }
-
-    @Override
-    public boolean forceOneTransformerLoads() {
-        return forceOneTransformerLoads;
     }
 }
