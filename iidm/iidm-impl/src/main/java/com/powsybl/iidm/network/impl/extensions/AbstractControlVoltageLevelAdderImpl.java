@@ -22,8 +22,6 @@ public abstract class AbstractControlVoltageLevelAdderImpl<T> implements Control
 
     protected String id;
 
-    protected boolean forceOneTransformerLoads = false;
-
     protected AbstractControlVoltageLevelAdderImpl(T parent) {
         this.parent = Objects.requireNonNull(parent);
     }
@@ -31,12 +29,6 @@ public abstract class AbstractControlVoltageLevelAdderImpl<T> implements Control
     @Override
     public AbstractControlVoltageLevelAdderImpl<T> withId(String id) {
         this.id = Objects.requireNonNull(id);
-        return this;
-    }
-
-    @Override
-    public AbstractControlVoltageLevelAdderImpl<T> withForceOneTransformerLoads() {
-        this.forceOneTransformerLoads = true;
         return this;
     }
 
@@ -49,6 +41,6 @@ public abstract class AbstractControlVoltageLevelAdderImpl<T> implements Control
         if (id == null) {
             throw new PowsyblException("Control voltage level ID is not set");
         }
-        return new ControlVoltageLevelImpl(id, forceOneTransformerLoads);
+        return new ControlVoltageLevelImpl(id);
     }
 }
