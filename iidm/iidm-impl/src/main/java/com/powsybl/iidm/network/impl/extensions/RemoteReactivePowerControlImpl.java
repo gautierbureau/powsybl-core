@@ -8,14 +8,14 @@
 package com.powsybl.iidm.network.impl.extensions;
 
 import com.powsybl.commons.PowsyblException;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.extensions.RemoteReactivePowerControl;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import com.powsybl.iidm.network.impl.TerminalExt;
-import gnu.trove.list.array.TDoubleArrayList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,22 +28,24 @@ public class RemoteReactivePowerControlImpl extends AbstractMultiVariantIdentifi
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RemoteReactivePowerControlImpl.class);
 
-    private final TDoubleArrayList targetQ;
+    // targetQ (double) + enabled (boolean), held columnarly
+    private static final String STORE_KEY = "RemoteReactivePowerControl";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_TARGET_Q = 0;
+    private static final int COL_ENABLED = 0;
+
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private Terminal regulatingTerminal;
 
-    private final TBooleanArrayList enabled;
-
     public RemoteReactivePowerControlImpl(Generator generator, double targetQ, Terminal regulatingTerminal, boolean enabled) {
         super(generator);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.targetQ = new TDoubleArrayList();
         this.regulatingTerminal = Objects.requireNonNull(regulatingTerminal);
-        this.enabled = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.targetQ.add(targetQ);
-            this.enabled.add(enabled);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetQ}, INT_DEFAULTS, new boolean[] {enabled});
         if (regulatingTerminal.getVoltageLevel().getParentNetwork() != getExtendable().getParentNetwork()) {
             throw new PowsyblException("Regulating terminal is not in the right Network ("
                     + regulatingTerminal.getVoltageLevel().getParentNetwork().getId() + " instead of "
@@ -54,18 +56,18 @@ public class RemoteReactivePowerControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public double getTargetQ() {
-        return targetQ.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_TARGET_Q, variantStoreRow);
     }
 
     @Override
     public RemoteReactivePowerControl setTargetQ(double targetQ) {
-        this.targetQ.set(getVariantIndex(), targetQ);
+        variantStore.setDouble(getVariantIndex(), COL_TARGET_Q, variantStoreRow, targetQ);
         return this;
     }
 
     @Override
     public RemoteReactivePowerControl setEnabled(boolean enabled) {
-        this.enabled.set(getVariantIndex(), enabled);
+        variantStore.setBoolean(getVariantIndex(), COL_ENABLED, variantStoreRow, enabled);
         return this;
     }
 
@@ -94,23 +96,17 @@ public class RemoteReactivePowerControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public boolean isEnabled() {
-        return enabled.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_ENABLED, variantStoreRow);
     }
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        enabled.ensureCapacity(enabled.size() + number);
-        targetQ.ensureCapacity(targetQ.size() + number);
-        for (int i = 0; i < number; ++i) {
-            enabled.add(enabled.get(sourceIndex));
-            targetQ.add(targetQ.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        enabled.remove(enabled.size() - number, number);
-        targetQ.remove(targetQ.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -120,10 +116,15 @@ public class RemoteReactivePowerControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            targetQ.set(index, targetQ.get(sourceIndex));
-            enabled.set(index, enabled.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        double targetQ0 = variantStore.getDouble(0, COL_TARGET_Q, variantStoreRow);
+        boolean enabled0 = variantStore.getBoolean(0, COL_ENABLED, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetQ0}, INT_DEFAULTS, new boolean[] {enabled0});
     }
 
     @Override

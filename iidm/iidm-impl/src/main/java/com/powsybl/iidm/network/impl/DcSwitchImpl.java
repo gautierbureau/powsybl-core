@@ -8,7 +8,6 @@
 package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.*;
 
 import java.util.Objects;
@@ -27,9 +26,18 @@ public class DcSwitchImpl extends AbstractIdentifiable<DcSwitch> implements DcSw
     private final DcSwitchKind kind;
     private final DcNode dcNode1;
     private final DcNode dcNode2;
-    private final TBooleanArrayList open;
     private boolean removed = false;
     private double r;
+
+    // open held columnarly (boolean column)
+    private static final String STORE_KEY = "DcSwitch";
+    private static final double[] DOUBLE_DEFAULTS = {};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_OPEN = 0;
+
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     DcSwitchImpl(Ref<NetworkImpl> ref,
                  Ref<SubnetworkImpl> subnetworkRef,
@@ -48,11 +56,8 @@ public class DcSwitchImpl extends AbstractIdentifiable<DcSwitch> implements DcSw
         this.dcNode1 = dcNode1;
         this.dcNode2 = dcNode2;
 
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.open = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.open.add(open);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {open});
         this.r = r;
     }
 
@@ -97,16 +102,16 @@ public class DcSwitchImpl extends AbstractIdentifiable<DcSwitch> implements DcSw
     @Override
     public boolean isOpen() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, OPEN_ATTRIBUTE);
-        return this.open.get(getVariantManagerHolder().getVariantIndex());
+        return variantStore.getBoolean(getVariantManagerHolder().getVariantIndex(), COL_OPEN, variantStoreRow);
     }
 
     @Override
     public DcSwitch setOpen(boolean open) {
         ValidationUtil.checkModifyOfRemovedEquipment(this.id, this.removed, OPEN_ATTRIBUTE);
         int variantIndex = getVariantManagerHolder().getVariantIndex();
-        boolean oldValue = this.open.get(variantIndex);
+        boolean oldValue = variantStore.getBoolean(variantIndex, COL_OPEN, variantStoreRow);
         if (oldValue != open) {
-            this.open.set(variantIndex, open);
+            variantStore.setBoolean(variantIndex, COL_OPEN, variantStoreRow, open);
             ((AbstractNetwork) getParentNetwork()).getDcTopologyModel().invalidateCache();
             String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
             getNetwork().getListeners().notifyUpdate(this, OPEN_ATTRIBUTE, variantId, oldValue, open);
@@ -114,19 +119,15 @@ public class DcSwitchImpl extends AbstractIdentifiable<DcSwitch> implements DcSw
         return this;
     }
 
+    // open is maintained columnarly by the network-level store, driven once per variant operation by NetworkImpl
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        open.ensureCapacity(open.size() + number);
-        for (int i = 0; i < number; i++) {
-            open.add(open.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        for (int i = 0; i < number; i++) {
-            open.removeAt(open.size() - 1);
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -137,9 +138,15 @@ public class DcSwitchImpl extends AbstractIdentifiable<DcSwitch> implements DcSw
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            open.set(index, open.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // extensions
+        boolean open0 = variantStore.getBoolean(0, COL_OPEN, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {open0});
     }
 
     @Override

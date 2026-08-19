@@ -236,36 +236,54 @@ abstract class AbstractIdentifiable<I extends Identifiable<I>> extends AbstractE
         return id;
     }
 
+    // These are called for every identifiable (and its subclasses via super) on every variant clone/remove,
+    // so iterate the extensions with a plain loop instead of allocating a stream pipeline per object per
+    // operation - getExtensions() is empty for most identifiables, making the loop essentially free.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        getExtensions().stream()
-                .filter(e -> e instanceof MultiVariantObject)
-                .map(e -> (MultiVariantObject) e)
-                .forEach(e -> e.extendVariantArraySize(initVariantArraySize, number, sourceIndex));
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
+            }
+        }
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        getExtensions().stream()
-                .filter(e -> e instanceof MultiVariantObject)
-                .map(e -> (MultiVariantObject) e)
-                .forEach(e -> e.reduceVariantArraySize(number));
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reduceVariantArraySize(number);
+            }
+        }
     }
 
     @Override
     public void deleteVariantArrayElement(int index) {
-        getExtensions().stream()
-                .filter(e -> e instanceof MultiVariantObject)
-                .map(e -> (MultiVariantObject) e)
-                .forEach(e -> e.deleteVariantArrayElement(index));
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.deleteVariantArrayElement(index);
+            }
+        }
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        getExtensions().stream()
-                .filter(e -> e instanceof MultiVariantObject)
-                .map(e -> (MultiVariantObject) e)
-                .forEach(e -> e.allocateVariantArrayElement(indexes, sourceIndex));
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.allocateVariantArrayElement(indexes, sourceIndex);
+            }
+        }
+    }
+
+    // Re-home the columnar variant state on merge/detach; cascade to the (multi-variant) extensions, mirroring
+    // the extend cascade. Subclasses with their own columnar state override and call super.
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        for (Extension<I> e : getExtensions()) {
+            if (e instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(targetNetwork);
+            }
+        }
     }
 
     @Override

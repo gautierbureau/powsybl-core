@@ -8,21 +8,28 @@
 package com.powsybl.iidm.network.impl.extensions;
 
 import com.powsybl.commons.PowsyblException;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.*;
 import com.powsybl.iidm.network.extensions.VoltageRegulation;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import com.powsybl.iidm.network.impl.TerminalExt;
-import gnu.trove.list.array.TDoubleArrayList;
 
 /**
  * @author Coline Piloquet {@literal <coline.piloquet@rte-france.fr>}
  */
 public class VoltageRegulationImpl extends AbstractMultiVariantIdentifiableExtension<Battery> implements VoltageRegulation {
 
-    private final TBooleanArrayList voltageRegulatorOn;
+    // voltageRegulatorOn (boolean) + targetV (double), held columnarly
+    private static final String STORE_KEY = "VoltageRegulation";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_TARGET_V = 0;
+    private static final int COL_VOLTAGE_REGULATOR_ON = 0;
 
-    private final TDoubleArrayList targetV;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private Terminal regulatingTerminal;
 
@@ -32,14 +39,9 @@ public class VoltageRegulationImpl extends AbstractMultiVariantIdentifiableExten
         if (voltageRegulatorOn == null) {
             throw new PowsyblException("Voltage regulator status is not defined");
         }
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
         setRegulatingTerminal(regulatingTerminal);
-        this.voltageRegulatorOn = new TBooleanArrayList(variantArraySize);
-        this.targetV = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.voltageRegulatorOn.add(voltageRegulatorOn);
-            this.targetV.add(targetV);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV}, INT_DEFAULTS, new boolean[] {voltageRegulatorOn});
     }
 
     private static void checkRegulatingTerminal(Terminal regulatingTerminal, Network network) {
@@ -68,38 +70,32 @@ public class VoltageRegulationImpl extends AbstractMultiVariantIdentifiableExten
 
     @Override
     public boolean isVoltageRegulatorOn() {
-        return voltageRegulatorOn.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_VOLTAGE_REGULATOR_ON, variantStoreRow);
     }
 
     @Override
     public void setVoltageRegulatorOn(boolean voltageRegulatorOn) {
-        this.voltageRegulatorOn.set(getVariantIndex(), voltageRegulatorOn);
+        variantStore.setBoolean(getVariantIndex(), COL_VOLTAGE_REGULATOR_ON, variantStoreRow, voltageRegulatorOn);
     }
 
     @Override
     public double getTargetV() {
-        return targetV.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_TARGET_V, variantStoreRow);
     }
 
     @Override
     public void setTargetV(double targetV) {
-        this.targetV.set(getVariantIndex(), targetV);
+        variantStore.setDouble(getVariantIndex(), COL_TARGET_V, variantStoreRow, targetV);
     }
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        voltageRegulatorOn.ensureCapacity(voltageRegulatorOn.size() + number);
-        targetV.ensureCapacity(targetV.size() + number);
-        for (int i = 0; i < number; ++i) {
-            voltageRegulatorOn.add(voltageRegulatorOn.get(sourceIndex));
-            targetV.add(targetV.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        voltageRegulatorOn.remove(voltageRegulatorOn.size() - number, number);
-        targetV.remove(targetV.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -109,10 +105,15 @@ public class VoltageRegulationImpl extends AbstractMultiVariantIdentifiableExten
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            voltageRegulatorOn.set(index, voltageRegulatorOn.get(sourceIndex));
-            targetV.set(index, targetV.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        double targetV0 = variantStore.getDouble(0, COL_TARGET_V, variantStoreRow);
+        boolean voltageRegulatorOn0 = variantStore.getBoolean(0, COL_VOLTAGE_REGULATOR_ON, variantStoreRow);
+        this.variantStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV0}, INT_DEFAULTS, new boolean[] {voltageRegulatorOn0});
     }
 
     private Network getNetworkFromExtendable() {

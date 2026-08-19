@@ -284,7 +284,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
 
                 // check that the component is a bus
                 String busId = Identifiables.getUniqueId(NAMING_STRATEGY.getId(voltageLevel, nodes), getNetwork().getIndex()::contains);
-                CopyOnWriteArrayList<NodeTerminal> terminals = new CopyOnWriteArrayList<>();
+                List<NodeTerminal> terminals = new ArrayList<>(nodes.size());
                 for (int i = 0; i < nodes.size(); i++) {
                     int n2 = nodes.getQuick(i);
                     NodeTerminal terminal2 = graph.getVertexObject(n2);
@@ -293,7 +293,9 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
                     }
                 }
                 if (getBusChecker().isValid(graph, nodes, terminals)) {
-                    addBus(nodes, id2bus, node2bus, busId, terminals);
+                    // wrap in a CopyOnWriteArrayList in a single copy, instead of adding terminals
+                    // one by one, as each add on a CopyOnWriteArrayList copies the backing array
+                    addBus(nodes, id2bus, node2bus, busId, new CopyOnWriteArrayList<>(terminals));
                 }
             }
         }
@@ -1099,10 +1101,11 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         @Override
         public Collection<Bus> getBusesFromBusViewBusId(String mergedBusId) {
             Set<Bus> buses = new HashSet<>();
+            VariantImpl variant = variants.get();
             for (int i = 0; i < graph.getVertexCapacity(); i++) {
-                Bus b = variants.get().calculatedBusTopology.getBus(i);
+                Bus b = variant.calculatedBusTopology.getBus(i);
                 if (b != null && b.getId().equals(mergedBusId)) {
-                    buses.add(variants.get().calculatedBusBreakerTopology.getBus(i));
+                    buses.add(variant.calculatedBusBreakerTopology.getBus(i));
                 }
             }
             if (buses.isEmpty()) {
@@ -1273,6 +1276,19 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         }
     }
 
+    /**
+     * Count the open switches in a path, without allocating an intermediate collection.
+     */
+    private int countOpenSwitches(TIntArrayList path) {
+        int count = 0;
+        for (int i = 0; i < path.size(); i++) {
+            if (SwitchPredicates.IS_OPEN.test(graph.getEdgeObject(path.getQuick(i)))) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     boolean getConnectingSwitches(Terminal terminal, Predicate<? super SwitchImpl> isSwitchOperable, Set<SwitchImpl> switchForConnection) {
         // Check the topology kind
         checkTopologyKind(terminal);
@@ -1282,8 +1298,7 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         // that is not of the type of switch the user wants to operate
         // Paths are already sorted by the number of open switches and by the size of the paths
         List<TIntArrayList> paths = graph.findAllPaths(node, NodeBreakerTopologyModel::isBusbarSection, sw -> checkNonClosableSwitch(sw, isSwitchOperable),
-            Comparator.comparing((TIntArrayList o) -> o.grep(idx -> SwitchPredicates.IS_OPEN.test(graph.getEdgeObject(idx))).size())
-                .thenComparing(TIntArrayList::size));
+            Comparator.comparingInt(this::countOpenSwitches).thenComparingInt(TIntArrayList::size));
         if (!paths.isEmpty()) {
             // the shortest path is the best
             TIntArrayList shortestPath = paths.get(0);

@@ -71,10 +71,14 @@ public class CgmesNamingStrategy implements NamingStrategy {
     public String getCgmesId(CgmesObjectReference... refs) {
         String seed = "_" + combine(refs);
         String uuid = nameBasedGenerator.generate(seed).toString();
-        if (uuidSeed.containsKey(uuid)) {
-            LOG.debug("Unique ID for seed {} called multiple times ", seed);
+        // only track the generated ids when debug logging is enabled, as this bookkeeping
+        // is done for every generated id and is only used to emit the debug message below
+        if (LOG.isDebugEnabled()) {
+            if (uuidSeed.containsKey(uuid)) {
+                LOG.debug("Unique ID for seed {} called multiple times ", seed);
+            }
+            uuidSeed.put(uuid, seed);
         }
-        uuidSeed.put(uuid, seed);
         return uuid;
     }
 
@@ -96,16 +100,18 @@ public class CgmesNamingStrategy implements NamingStrategy {
 
     @Override
     public String getCgmesIdFromAlias(Identifiable<?> identifiable, String aliasType) {
-        if (identifiable.getAliasFromType(aliasType).isPresent()) {
-            return getCgmesId(identifiable.getAliasFromType(aliasType).orElseThrow());
+        Optional<String> alias = identifiable.getAliasFromType(aliasType);
+        if (alias.isPresent()) {
+            return getCgmesId(alias.get());
         }
         return getCgmesId(getCgmesObjectReferences(identifiable, aliasType));
     }
 
     @Override
     public String getCgmesIdFromProperty(Identifiable<?> identifiable, String propertyName) {
-        if (identifiable.hasProperty(propertyName)) {
-            return getCgmesId(identifiable.getProperty(propertyName));
+        String property = identifiable.getProperty(propertyName);
+        if (property != null) {
+            return getCgmesId(property);
         }
         return getCgmesId(getCgmesObjectReferences(identifiable, propertyName));
     }

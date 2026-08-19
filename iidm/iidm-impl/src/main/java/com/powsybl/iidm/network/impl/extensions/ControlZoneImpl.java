@@ -10,6 +10,7 @@ package com.powsybl.iidm.network.impl.extensions;
 import com.powsybl.iidm.network.extensions.ControlUnit;
 import com.powsybl.iidm.network.extensions.ControlZone;
 import com.powsybl.iidm.network.extensions.PilotPoint;
+import com.powsybl.iidm.network.impl.NetworkImpl;
 
 import java.util.*;
 import java.util.function.Predicate;
@@ -89,6 +90,13 @@ class ControlZoneImpl implements ControlZone {
         ((PilotPointImpl) pilotPoint).allocateVariantArrayElement(indexes, sourceIndex);
         for (ControlUnit controlUnit : controlUnits) {
             ((ControlUnitImpl) controlUnit).allocateVariantArrayElement(indexes, sourceIndex);
+        }
+    }
+
+    void reHomeVariantStores(NetworkImpl targetNetwork) {
+        ((PilotPointImpl) pilotPoint).reHomeVariantStores(targetNetwork);
+        for (ControlUnit controlUnit : controlUnits) {
+            ((ControlUnitImpl) controlUnit).reHomeVariantStores(targetNetwork);
         }
     }
 }

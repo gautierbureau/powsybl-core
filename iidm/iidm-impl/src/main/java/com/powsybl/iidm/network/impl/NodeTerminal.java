@@ -11,8 +11,6 @@ import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
 import com.powsybl.math.graph.TraversalType;
-import gnu.trove.list.array.TDoubleArrayList;
-import gnu.trove.list.array.TIntArrayList;
 
 import java.util.Set;
 
@@ -25,15 +23,19 @@ class NodeTerminal extends AbstractTerminal {
 
     private final int node;
 
-    // attributes depending on the variant
+    // attributes depending on the variant, held columnarly in the network-level node-terminal store
+    // (see NumericVariantStore): columns v, angle (double) and connected/synchronous component number (int)
+    private static final String STORE_KEY = "NodeTerminal";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {0, 0};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_V = 0;
+    private static final int COL_ANGLE = 1;
+    private static final int COL_CC = 0;
+    private static final int COL_SC = 1;
 
-    protected final TDoubleArrayList v;
-
-    protected final TDoubleArrayList angle;
-
-    protected final TIntArrayList connectedComponentNumber;
-
-    protected final TIntArrayList synchronousComponentNumber;
+    private NumericVariantStore nodeVariantStore;
+    private int nodeVariantStoreRow;
 
     private final NodeBreakerView nodeBreakerView = new NodeBreakerView() {
 
@@ -42,7 +44,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException("Cannot access node of removed equipment " + connectable.id);
             }
-            return node;
+            return resolveBranchNode(node);
         }
 
         @Override
@@ -55,7 +57,9 @@ class NodeTerminal extends AbstractTerminal {
     };
 
     private NodeBreakerTopologyModel getTopologyModel() {
-        return (NodeBreakerTopologyModel) voltageLevel.getTopologyModel();
+        // resolveVoltageLevel (not the raw field) so a rebound terminal's bus resolution follows the
+        // active branch context to the branch voltage level; unchanged for non-rebound terminals.
+        return (NodeBreakerTopologyModel) resolveVoltageLevel().getTopologyModel();
     }
 
     private final BusBreakerViewExt busBreakerView = new BusBreakerViewExt() {
@@ -65,7 +69,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(node);
+            return getTopologyModel().getCalculatedBusBreakerTopology().getBus(resolveBranchNode(node));
         }
 
         @Override
@@ -73,7 +77,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(node);
+            return getTopologyModel().getCalculatedBusBreakerTopology().getConnectableBus(resolveBranchNode(node));
         }
 
         @Override
@@ -103,7 +107,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getBus(node);
+            return getTopologyModel().getCalculatedBusTopology().getBus(resolveBranchNode(node));
         }
 
         @Override
@@ -111,7 +115,7 @@ class NodeTerminal extends AbstractTerminal {
             if (removed) {
                 throw new PowsyblException(CANNOT_ACCESS_BUS_REMOVED_EQUIPMENT + connectable.id);
             }
-            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(node);
+            return getTopologyModel().getCalculatedBusTopology().getConnectableBus(resolveBranchNode(node));
         }
 
     };
@@ -119,17 +123,8 @@ class NodeTerminal extends AbstractTerminal {
     NodeTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, int node) {
         super(network, side, terminalNumber);
         this.node = node;
-        int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        v = new TDoubleArrayList(variantArraySize);
-        angle = new TDoubleArrayList(variantArraySize);
-        connectedComponentNumber = new TIntArrayList(variantArraySize);
-        synchronousComponentNumber = new TIntArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            v.add(Double.NaN);
-            angle.add(Double.NaN);
-            connectedComponentNumber.add(0);
-            synchronousComponentNumber.add(0);
-        }
+        this.nodeVariantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.nodeVariantStoreRow = nodeVariantStore.allocateRow();
     }
 
     protected void notifyUpdate(String attribute, String variantId, Object oldValue, Object newValue) {
@@ -145,7 +140,8 @@ class NodeTerminal extends AbstractTerminal {
         if (removed) {
             throw new PowsyblException("Cannot access v of removed equipment " + connectable.id);
         }
-        return v.get(getVariantManagerHolder().getVariantIndex());
+        VariantManagerHolder holder = getVariantManagerHolder();
+        return nodeVariantStore.getDouble(holder.getVariantIndex(), COL_V, nodeVariantStoreRow);
     }
 
     void setV(double v) {
@@ -155,9 +151,10 @@ class NodeTerminal extends AbstractTerminal {
         if (v < 0) {
             throw new ValidationException(connectable, "voltage cannot be < 0");
         }
-        int variantIndex = getVariantManagerHolder().getVariantIndex();
-        double oldValue = this.v.set(variantIndex, v);
-        String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
+        VariantManagerHolder holder = getVariantManagerHolder();
+        int variantIndex = holder.getVariantIndex();
+        double oldValue = nodeVariantStore.setDouble(variantIndex, COL_V, nodeVariantStoreRow, v);
+        String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("v", variantId, oldValue, v);
     }
 
@@ -165,16 +162,18 @@ class NodeTerminal extends AbstractTerminal {
         if (removed) {
             throw new PowsyblException("Cannot access angle of removed equipment " + connectable.id);
         }
-        return angle.get(getVariantManagerHolder().getVariantIndex());
+        VariantManagerHolder holder = getVariantManagerHolder();
+        return nodeVariantStore.getDouble(holder.getVariantIndex(), COL_ANGLE, nodeVariantStoreRow);
     }
 
     void setAngle(double angle) {
         if (removed) {
             throw new PowsyblException(UNMODIFIABLE_REMOVED_EQUIPMENT + connectable.id);
         }
-        int variantIndex = getVariantManagerHolder().getVariantIndex();
-        double oldValue = this.angle.set(variantIndex, angle);
-        String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
+        VariantManagerHolder holder = getVariantManagerHolder();
+        int variantIndex = holder.getVariantIndex();
+        double oldValue = nodeVariantStore.setDouble(variantIndex, COL_ANGLE, nodeVariantStoreRow, angle);
+        String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("angle", variantId, oldValue, angle);
     }
 
@@ -182,16 +181,18 @@ class NodeTerminal extends AbstractTerminal {
         if (removed) {
             throw new PowsyblException("Cannot access connected component of removed equipment " + connectable.id);
         }
-        return connectedComponentNumber.get(getVariantManagerHolder().getVariantIndex());
+        VariantManagerHolder holder = getVariantManagerHolder();
+        return nodeVariantStore.getInt(holder.getVariantIndex(), COL_CC, nodeVariantStoreRow);
     }
 
     void setConnectedComponentNumber(int connectedComponentNumber) {
         if (removed) {
             throw new PowsyblException(UNMODIFIABLE_REMOVED_EQUIPMENT + connectable.id);
         }
-        int variantIndex = getVariantManagerHolder().getVariantIndex();
-        int oldValue = this.connectedComponentNumber.set(variantIndex, connectedComponentNumber);
-        String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
+        VariantManagerHolder holder = getVariantManagerHolder();
+        int variantIndex = holder.getVariantIndex();
+        int oldValue = nodeVariantStore.setInt(variantIndex, COL_CC, nodeVariantStoreRow, connectedComponentNumber);
+        String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("connectedComponentNumber", variantId, oldValue, connectedComponentNumber);
     }
 
@@ -199,16 +200,18 @@ class NodeTerminal extends AbstractTerminal {
         if (removed) {
             throw new PowsyblException("Cannot access synchronous component of removed equipment " + connectable.id);
         }
-        return synchronousComponentNumber.get(getVariantManagerHolder().getVariantIndex());
+        VariantManagerHolder holder = getVariantManagerHolder();
+        return nodeVariantStore.getInt(holder.getVariantIndex(), COL_SC, nodeVariantStoreRow);
     }
 
     void setSynchronousComponentNumber(int componentNumber) {
         if (removed) {
             throw new PowsyblException(UNMODIFIABLE_REMOVED_EQUIPMENT + connectable.id);
         }
-        int variantIndex = getVariantManagerHolder().getVariantIndex();
-        int oldValue = this.synchronousComponentNumber.set(variantIndex, componentNumber);
-        String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
+        VariantManagerHolder holder = getVariantManagerHolder();
+        int variantIndex = holder.getVariantIndex();
+        int oldValue = nodeVariantStore.setInt(variantIndex, COL_SC, nodeVariantStoreRow, componentNumber);
+        String variantId = holder.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("synchronousComponentNumber", variantId, oldValue, componentNumber);
     }
 
@@ -256,38 +259,47 @@ class NodeTerminal extends AbstractTerminal {
         getTopologyModel().traverse(this, traverser, traversalType);
     }
 
+    // v/angle/component numbers are maintained columnarly by the network-level node-terminal store, driven
+    // once per variant operation by NetworkImpl; these per-terminal hooks (super handles p/q) have nothing
+    // more to do.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        v.ensureCapacity(v.size() + number);
-        angle.ensureCapacity(angle.size() + number);
-        connectedComponentNumber.ensureCapacity(connectedComponentNumber.size() + number);
-        synchronousComponentNumber.ensureCapacity(synchronousComponentNumber.size() + number);
-        for (int i = 0; i < number; i++) {
-            v.add(v.get(sourceIndex));
-            angle.add(angle.get(sourceIndex));
-            connectedComponentNumber.add(connectedComponentNumber.get(sourceIndex));
-            synchronousComponentNumber.add(synchronousComponentNumber.get(sourceIndex));
-        }
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        v.remove(v.size() - number, number);
-        angle.remove(angle.size() - number, number);
-        connectedComponentNumber.remove(connectedComponentNumber.size() - number, number);
-        synchronousComponentNumber.remove(synchronousComponentNumber.size() - number, number);
     }
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            v.set(index, v.get(sourceIndex));
-            angle.set(index, angle.get(sourceIndex));
-            connectedComponentNumber.set(index, connectedComponentNumber.get(sourceIndex));
-            synchronousComponentNumber.set(index, synchronousComponentNumber.get(sourceIndex));
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        NumericVariantStore oldStore = nodeVariantStore;
+        double v0 = oldStore.getDouble(0, COL_V, nodeVariantStoreRow);
+        double angle0 = oldStore.getDouble(0, COL_ANGLE, nodeVariantStoreRow);
+        int cc0 = oldStore.getInt(0, COL_CC, nodeVariantStoreRow);
+        int sc0 = oldStore.getInt(0, COL_SC, nodeVariantStoreRow);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.nodeVariantStore = newStore;
+        this.nodeVariantStoreRow = newStore.allocateRow();
+        newStore.setDouble(0, COL_V, nodeVariantStoreRow, v0);
+        newStore.setDouble(0, COL_ANGLE, nodeVariantStoreRow, angle0);
+        newStore.setInt(0, COL_CC, nodeVariantStoreRow, cc0);
+        newStore.setInt(0, COL_SC, nodeVariantStoreRow, sc0);
+    }
+
+    @Override
+    public void remove() {
+        boolean wasRemoved = removed;
+        super.remove(); // frees the p/q store row (and sets removed)
+        if (!wasRemoved) {
+            nodeVariantStore.freeRow(nodeVariantStoreRow);
         }
     }
 

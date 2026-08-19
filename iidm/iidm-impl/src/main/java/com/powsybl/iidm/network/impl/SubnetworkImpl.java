@@ -1008,6 +1008,15 @@ public class SubnetworkImpl extends AbstractNetwork {
         Collection<Identifiable<?>> identifiables = getIdentifiables();
         Iterable<VoltageAngleLimit> vals = getVoltageAngleLimits();
 
+        // Re-home the columnar variant state of the detached elements into the detached network's stores,
+        // while the network reference still resolves to the current owner. Each object cascades to its
+        // children (terminals, extensions, ...), mirroring the extend cascade.
+        for (Identifiable<?> i : identifiables) {
+            if (i instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(detachedNetwork);
+            }
+        }
+
         // Move the substations and voltageLevels to the new network
         ref.setRef(detachedNetwork.getSubnetworkRef());
 

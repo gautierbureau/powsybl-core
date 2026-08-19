@@ -81,22 +81,43 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
         return super.getVoltageLevel();
     }
 
+    // Spike (structural-variant branching): under an active branch context, a calculated bus of a
+    // branch voltage level also includes the terminals rebound onto one of its nodes. No active
+    // context (all normal use) -> empty, so behaviour is unchanged.
+    private List<TerminalExt> branchAttachedConnectedTerminals() {
+        BranchContext context = ThreadLocalBranchContext.get();
+        if (context == null) {
+            return List.of();
+        }
+        Set<Integer> nodeSet = new HashSet<>();
+        for (int node : nodes) {
+            nodeSet.add(node);
+        }
+        return context.branchAttachedTerminalsOnNodes((VoltageLevelExt) super.getVoltageLevel(), nodeSet);
+    }
+
     @Override
     public int getConnectedTerminalCount() {
         checkValidity();
-        return terminals.size();
+        return terminals.size() + branchAttachedConnectedTerminals().size();
     }
 
     @Override
     public Collection<TerminalExt> getConnectedTerminals() {
         checkValidity();
-        return Collections.unmodifiableCollection(terminals);
+        List<TerminalExt> attached = branchAttachedConnectedTerminals();
+        if (attached.isEmpty()) {
+            return Collections.unmodifiableCollection(terminals);
+        }
+        List<TerminalExt> all = new ArrayList<>(terminals);
+        all.addAll(attached);
+        return Collections.unmodifiableCollection(all);
     }
 
     @Override
     public Stream<TerminalExt> getConnectedTerminalStream() {
         checkValidity();
-        return terminals.stream().map(Function.identity());
+        return Stream.concat(terminals.stream().map(Function.identity()), branchAttachedConnectedTerminals().stream());
     }
 
     @Override
@@ -363,13 +384,15 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
 
     private List<TerminalExt> buildConnectableTerminalsCache() {
         List<TerminalExt> connectableTerminalsList = new ArrayList<>(terminals);
+        // use a set for O(1) duplicate detection instead of a linear scan of the list at each iteration
+        Set<TerminalExt> connectableTerminalsSet = new HashSet<>(connectableTerminalsList);
         int[] vlNodes = voltageLevel.getNodeBreakerView().getNodes();
         for (int n : vlNodes) {
             Terminal t = voltageLevel.getNodeBreakerView().getTerminal(n);
             if (t instanceof TerminalExt te) {
                 try {
                     Bus connectableBus = te.getBusView().getConnectableBus();
-                    if (this.equals(connectableBus) && !connectableTerminalsList.contains(te)) {
+                    if (this.equals(connectableBus) && connectableTerminalsSet.add(te)) {
                         connectableTerminalsList.add(te);
                     }
                 } catch (PowsyblException e) {
