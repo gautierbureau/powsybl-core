@@ -801,7 +801,8 @@ public final class NetworkSerDe {
      */
     private static boolean isElementWrittenInsideNetwork(Identifiable<?> element, Network n, NetworkSerializerContext context) {
         // if subnetworks not supported, all elements need to be written in the root network (in that case this is only called with n being the root network)
-        if (!supportSubnetworksExport(context)) {
+        // likewise, if the network has no subnetwork, every element is written inside the root network
+        if (!supportSubnetworksExport(context) || context.hasNoSubnetworks()) {
             return true;
         }
         // corner case: if the element is the given network, it is considered as written within that network, as extensions have to be written within the network
@@ -821,7 +822,8 @@ public final class NetworkSerDe {
     private static NetworkSerializerContext createContext(Network n, ExportOptions options, TreeDataWriter writer) {
         BusFilter filter = BusFilter.create(n, options);
         Anonymizer anonymizer = options.isAnonymized() ? new SimpleAnonymizer() : null;
-        return new NetworkSerializerContext(anonymizer, writer, options, filter, options.getVersion(), n.getValidationLevel() == ValidationLevel.STEADY_STATE_HYPOTHESIS);
+        return new NetworkSerializerContext(anonymizer, writer, options, filter, options.getVersion(),
+                n.getValidationLevel() == ValidationLevel.STEADY_STATE_HYPOTHESIS, n.getSubnetworks().isEmpty());
     }
 
     public static Anonymizer write(Network n, OutputStream os) {

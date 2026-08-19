@@ -23,7 +23,7 @@ import static org.mockito.Mockito.mock;
 class NetworkSerializerContextTest extends AbstractSerDeTest {
 
     private static NetworkSerializerContext newContext(Anonymizer anonymizer, IidmVersion version) {
-        return new NetworkSerializerContext(anonymizer, mock(TreeDataWriter.class), new ExportOptions(), null, version, true);
+        return new NetworkSerializerContext(anonymizer, mock(TreeDataWriter.class), new ExportOptions(), null, version, true, true);
     }
 
     @Test

@@ -24,17 +24,25 @@ public class NetworkSerializerContext extends AbstractNetworkSerDeContext<Export
     private final ExportOptions options;
     private final BusFilter filter;
     private final boolean valid;
+    // true when the network being written has no subnetwork: every identifiable is then written inside the
+    // root network, so the per-element "written inside network" test can be short-circuited (common case).
+    private final boolean noSubnetworks;
     private final Set<Identifiable> exportedEquipments;
     private final Map<String, TopologyLevel> voltageLevelExportTopologyLevel;
 
-    NetworkSerializerContext(Anonymizer anonymizer, TreeDataWriter writer, ExportOptions options, BusFilter filter, IidmVersion version, boolean valid) {
+    NetworkSerializerContext(Anonymizer anonymizer, TreeDataWriter writer, ExportOptions options, BusFilter filter, IidmVersion version, boolean valid, boolean noSubnetworks) {
         super(anonymizer, version);
         this.writer = Objects.requireNonNull(writer);
         this.options = options;
         this.filter = filter;
         this.valid = valid;
+        this.noSubnetworks = noSubnetworks;
         this.exportedEquipments = new HashSet<>();
         this.voltageLevelExportTopologyLevel = new HashMap<>();
+    }
+
+    public boolean hasNoSubnetworks() {
+        return noSubnetworks;
     }
 
     @Override
