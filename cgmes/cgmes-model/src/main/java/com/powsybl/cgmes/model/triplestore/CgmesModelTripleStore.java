@@ -67,8 +67,9 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
 
     @Override
     public void read(InputStream is, String baseName, String contextName, ReportNode reportNode) {
-        // Reset cached nodeBreaker value everytime we read new data
+        // Reset cached values everytime we read new data
         nodeBreaker = null;
+        invalidateQueryCache();
         tripleStore.read(is, baseName, contextName);
     }
 
@@ -631,6 +632,19 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
             LOG.debug("Query [{}] not found in catalog", name);
             return new PropertyBags();
         }
+        // Cache parameterless queries: the structural queries (terminals, acLineSegments,
+        // transformers...) are run several times during a single import and only depend on the
+        // triple store content, which is invalidated on any read/update/add/clear (see
+        // invalidateQueryCache). Parameterized queries are not cached (their result depends on
+        // the injected parameters). This mirrors the existing connectivityNodes/topologicalNodes
+        // caching, which likewise returns the cached PropertyBags instance directly.
+        boolean cacheable = params.length == 0;
+        if (cacheable) {
+            PropertyBags cached = cachedQueries.get(name);
+            if (cached != null) {
+                return cached;
+            }
+        }
         // Optimization hint: Now we do the parameter injection by ourselves,
         // to maintain independence of the triple store engine,
         // instead of using native query parameters
@@ -642,7 +656,22 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
             LOG.debug("results query {}{}{}", name, System.lineSeparator(), r.tabulateLocals());
             LOG.debug("dt query {} {} ms, result set size = {}", name, t1 - t0, r.size());
         }
+        if (cacheable) {
+            cachedQueries.put(name, r);
+        }
         return r;
+    }
+
+    private void invalidateQueryCache() {
+        if (!cachedQueries.isEmpty()) {
+            cachedQueries.clear();
+        }
+    }
+
+    @Override
+    protected void invalidateCaches() {
+        super.invalidateCaches();
+        invalidateQueryCache();
     }
 
     public void namedQueryUpdate(String name, String... params) {
@@ -667,6 +696,8 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
     }
 
     public void update(String queryText) {
+        // The store content changes: cached query results are no longer valid
+        invalidateQueryCache();
         tripleStore.update(queryText);
     }
 
@@ -713,6 +744,7 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
         // TODO Remove all contexts that are related to the profile of the subset
         // For example for state variables:
         // <md:Model.profile>http://entsoe.eu/CIM/StateVariables/4/1</md:Model.profile>
+        invalidateQueryCache();
         Set<String> contextNames = tripleStore.contextNames();
         for (String contextName : contextNames) {
             if (subset.isValidName(contextName)) {
@@ -723,6 +755,7 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
 
     @Override
     public void add(CgmesSubset subset, String type, PropertyBags objects) {
+        invalidateQueryCache();
         String contextName = contextNameFor(subset);
         try {
             tripleStore.add(contextName, cimNamespace, type, objects);
@@ -734,6 +767,7 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
 
     @Override
     public void add(String context, String type, PropertyBags objects) {
+        invalidateQueryCache();
         String contextName = EnumUtils.isValidEnum(CgmesSubset.class, context)
             ? contextNameFor(CgmesSubset.valueOf(context))
             : context;
@@ -813,6 +847,8 @@ public class CgmesModelTripleStore extends AbstractCgmesModel {
     private final TripleStore tripleStore;
     private QueryCatalog queryCatalog;
     private Boolean nodeBreaker = null;
+    // Cache of parameterless query results, invalidated on any triple store mutation
+    private final Map<String, PropertyBags> cachedQueries = new HashMap<>();
 
     private static final String MODEL_PROFILES = "modelProfiles";
     private static final String PROFILE = "profile";
