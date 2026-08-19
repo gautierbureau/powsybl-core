@@ -57,11 +57,16 @@ public class SensitivityAnalysisResult {
 
     private final List<SensitivityValue> values;
 
+    // The three per-value lookup indexes below are derived from #values. Building them is O(number of values) and
+    // allocates several composite keys per value, which is wasteful for the very common case of a caller that only
+    // iterates getValues() / getPreContingencyValues(). They are therefore built lazily on first key-based access.
     private final Map<SensitivityState, List<SensitivityValue>> valuesByState = new HashMap<>();
 
     private final Map<SensitivityValueKey, SensitivityValue> valuesByKey = new HashMap<>();
 
     private final Map<Triple<SensitivityFunctionType, SensitivityState, String>, Double> functionReferenceByContingencyAndFunction = new HashMap<>();
+
+    private volatile boolean indexed;
 
     private final Map<SensitivityState, SensitivityStateStatus> statusByState = new HashMap<>();
 
@@ -179,19 +184,47 @@ public class SensitivityAnalysisResult {
         this.contingencyIds = Collections.unmodifiableList(Objects.requireNonNull(contingencyIds));
         this.operatorStrategyIds = Collections.unmodifiableList(Objects.requireNonNull(operatorStrategyIds));
         this.values = Collections.unmodifiableList(Objects.requireNonNull(values));
-        for (SensitivityValue value : values) {
-            SensitivityFactor factor = factors.get(value.getFactorIndex());
-            String contingencyId = value.getContingencyIndex() != -1 ? contingencyIds.get(value.getContingencyIndex()) : null;
-            String operatorStrategyId = value.getOperatorStrategyIndex() != -1 ? operatorStrategyIds.get(value.getOperatorStrategyIndex()) : null;
-            SensitivityState state = new SensitivityState(contingencyId, operatorStrategyId);
-            valuesByState.computeIfAbsent(state, k -> new ArrayList<>())
-                    .add(value);
-            valuesByKey.put(new SensitivityValueKey(state, factor.getVariableId(), factor.getFunctionId(), factor.getFunctionType(), factor.getVariableType()), value);
-            functionReferenceByContingencyAndFunction.put(Triple.of(factor.getFunctionType(), state, factor.getFunctionId()), value.getFunctionReference());
-        }
 
+        // The per-value indexes (valuesByState / valuesByKey / functionReferenceByContingencyAndFunction) are built
+        // lazily on first key-based access, see #ensureIndexed. statusByState is derived from the (small) list of
+        // state statuses, so it is built eagerly here.
         for (SensitivityStateStatus stateStatus : stateStatuses) {
             this.statusByState.put(stateStatus.getState(), stateStatus);
+        }
+    }
+
+    /**
+     * Builds the per-value lookup indexes on first access. Iterating {@link #getValues()} does not need them, so
+     * callers that never query a value by key or contingency state pay nothing for them.
+     */
+    private void ensureIndexed() {
+        if (!indexed) {
+            synchronized (this) {
+                if (!indexed) {
+                    // There is one SensitivityState per (contingency, operator strategy) pair but one value per
+                    // (state, factor), so minting a fresh state - and re-resolving its ids - for every value is
+                    // wasteful. Reuse a single state instance per pair, keyed by the (contingencyIndex,
+                    // operatorStrategyIndex) pair packed into a long. SensitivityState is a value record, so map
+                    // behaviour is unchanged.
+                    Map<Long, SensitivityState> stateByIndexes = new HashMap<>();
+                    for (SensitivityValue value : values) {
+                        SensitivityFactor factor = factors.get(value.getFactorIndex());
+                        int contingencyIndex = value.getContingencyIndex();
+                        int operatorStrategyIndex = value.getOperatorStrategyIndex();
+                        long stateKey = ((long) contingencyIndex << 32) | (operatorStrategyIndex & 0xFFFFFFFFL);
+                        SensitivityState state = stateByIndexes.computeIfAbsent(stateKey, k -> {
+                            String contingencyId = contingencyIndex != -1 ? contingencyIds.get(contingencyIndex) : null;
+                            String operatorStrategyId = operatorStrategyIndex != -1 ? operatorStrategyIds.get(operatorStrategyIndex) : null;
+                            return new SensitivityState(contingencyId, operatorStrategyId);
+                        });
+                        valuesByState.computeIfAbsent(state, k -> new ArrayList<>())
+                                .add(value);
+                        valuesByKey.put(new SensitivityValueKey(state, factor.getVariableId(), factor.getFunctionId(), factor.getFunctionType(), factor.getVariableType()), value);
+                        functionReferenceByContingencyAndFunction.put(Triple.of(factor.getFunctionType(), state, factor.getFunctionId()), value.getFunctionReference());
+                    }
+                    indexed = true;
+                }
+            }
         }
     }
 
@@ -248,6 +281,7 @@ public class SensitivityAnalysisResult {
      */
     public List<SensitivityValue> getValues(SensitivityState state) {
         Objects.requireNonNull(state);
+        ensureIndexed();
         return valuesByState.getOrDefault(state, Collections.emptyList());
     }
 
@@ -257,6 +291,7 @@ public class SensitivityAnalysisResult {
      * @return a list of all the pre-contingency sensitivity values.
      */
     public List<SensitivityValue> getPreContingencyValues() {
+        ensureIndexed();
         return valuesByState.getOrDefault(SensitivityState.PRE_CONTINGENCY, Collections.emptyList());
     }
 
@@ -275,6 +310,7 @@ public class SensitivityAnalysisResult {
         Objects.requireNonNull(functionId);
         Objects.requireNonNull(functionType);
         Objects.requireNonNull(variableType);
+        ensureIndexed();
         SensitivityValue value = valuesByKey.get(new SensitivityValueKey(state, variableId, functionId, functionType, variableType));
         if (value != null) {
             return value.getValue();
@@ -468,6 +504,7 @@ public class SensitivityAnalysisResult {
         Objects.requireNonNull(state);
         Objects.requireNonNull(functionId);
         Objects.requireNonNull(functionType);
+        ensureIndexed();
         Double value = functionReferenceByContingencyAndFunction.get(Triple.of(functionType, state, functionId));
         if (value == null) {
             throw new PowsyblException("Reference flow value not found for contingency '" + state.contingencyId() + "' and operator strategy '"
