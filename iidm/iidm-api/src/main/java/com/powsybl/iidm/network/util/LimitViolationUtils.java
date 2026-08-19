@@ -461,9 +461,16 @@ public final class LimitViolationUtils {
             case THREE_WINDINGS_TRANSFORMER -> ((ThreeWindingsTransformer) identifiable).getLeg(side).getSelectedOperationalLimitsGroupId();
             default -> Optional.empty();
         };
-        return groupId.flatMap(s -> computer.computeLimits(identifiable, type, side, false).stream()
-                .filter(container -> s.equals(container.getOperationalLimitsGroupId()))
-                .findFirst());
+        if (groupId.isEmpty()) {
+            return Optional.empty();
+        }
+        String selectedGroupId = groupId.get();
+        for (LimitsContainer<LoadingLimits> container : computer.computeLimits(identifiable, type, side, false)) {
+            if (selectedGroupId.equals(container.getOperationalLimitsGroupId())) {
+                return Optional.of(container);
+            }
+        }
+        return Optional.empty();
     }
 
     /**
