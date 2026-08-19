@@ -15,6 +15,7 @@ import com.powsybl.contingency.strategy.OperatorStrategy;
 import com.powsybl.contingency.violations.LimitViolationFilter;
 import com.powsybl.security.interceptors.SecurityAnalysisInterceptor;
 import com.powsybl.security.monitor.StateMonitor;
+import com.powsybl.security.writer.SecurityAnalysisResultWriterFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +37,7 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     private List<Action> actions = new ArrayList<>();
     private List<StateMonitor> monitors = new ArrayList<>();
     private ReportNode reportNode = ReportNode.NO_OP;
+    private SecurityAnalysisResultWriterFactory resultWriterFactory = SecurityAnalysisResultWriterFactory.NO_OP;
 
     /**
      * {@link LimitViolationFilter} getter<br>
@@ -77,6 +79,14 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
 
     public ReportNode getReportNode() {
         return reportNode;
+    }
+
+    /**
+     * {@link SecurityAnalysisResultWriterFactory} getter. Defaults to
+     * {@link SecurityAnalysisResultWriterFactory#NO_OP}, i.e. streaming disabled.
+     */
+    public SecurityAnalysisResultWriterFactory getResultWriterFactory() {
+        return resultWriterFactory;
     }
 
     public T setFilter(LimitViolationFilter filter) {
@@ -162,6 +172,18 @@ public abstract class AbstractSecurityAnalysisRunParameters<T extends AbstractSe
     public T addAction(Action action) {
         Objects.requireNonNull(action, "Action should not be null");
         actions.add(action);
+        return self();
+    }
+
+    /**
+     * Sets the factory building the per-partition writers used to stream results incrementally, see
+     * {@link SecurityAnalysisResultWriterFactory}.
+     * <p>Support is provider-dependent: a provider that does not support streaming ignores it. Set to
+     * {@link SecurityAnalysisResultWriterFactory#NO_OP} (the default) to disable streaming.
+     */
+    public T setResultWriterFactory(SecurityAnalysisResultWriterFactory resultWriterFactory) {
+        Objects.requireNonNull(resultWriterFactory, "SecurityAnalysisResultWriterFactory should not be null");
+        this.resultWriterFactory = resultWriterFactory;
         return self();
     }
 
