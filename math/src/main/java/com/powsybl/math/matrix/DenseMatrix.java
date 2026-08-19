@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -67,6 +68,11 @@ public class DenseMatrix extends AbstractMatrix {
 
     private final int columnCount;
 
+    // primary column-major storage; a plain double[] so that get/set are JIT-friendly array accesses (bounds-check
+    // elidable in tight loops) instead of going through a direct ByteBuffer, which showed up in profiling of the DC
+    // Woodbury / sensitivity hot loops. The direct buffer is kept only to feed the native solver (see getBuffer).
+    private final double[] values;
+
     private final ByteBuffer buffer;
 
     private static ByteBuffer createBuffer(int rowCount, int columnCount) {
@@ -105,6 +111,9 @@ public class DenseMatrix extends AbstractMatrix {
             throw new MatrixException("values size (" + buffer.capacity() +
                     ") is incorrect (should be " + rowCount * columnCount + ")");
         }
+        values = new double[rowCount * columnCount];
+        // initialize the primary storage from the supplied buffer (a caller may pass a pre-filled buffer, e.g. transpose)
+        buffer.asDoubleBuffer().get(values);
     }
 
     public DenseMatrix(Jama.Matrix matrix) {
@@ -124,11 +133,11 @@ public class DenseMatrix extends AbstractMatrix {
     }
 
     private double getUnsafe(int i, int j) {
-        return buffer.getDouble(j * Double.BYTES * rowCount + i * Double.BYTES);
+        return values[j * rowCount + i];
     }
 
     private void setUnsafe(int i, int j, double value) {
-        buffer.putDouble(j * Double.BYTES * rowCount + i * Double.BYTES, value);
+        values[j * rowCount + i] = value;
     }
 
     @Override
@@ -138,8 +147,7 @@ public class DenseMatrix extends AbstractMatrix {
     }
 
     private void addUnsafe(int i, int j, double value) {
-        int index = j * Double.BYTES * rowCount + i * Double.BYTES;
-        buffer.putDouble(index, buffer.getDouble(index) + value);
+        values[j * rowCount + i] += value;
     }
 
     @Override
@@ -194,9 +202,7 @@ public class DenseMatrix extends AbstractMatrix {
 
     @Override
     public void reset() {
-        for (int k = 0; k < rowCount * columnCount; k++) {
-            buffer.putDouble(k * Double.BYTES, 0);
-        }
+        Arrays.fill(values, 0);
     }
 
     @Override
@@ -209,24 +215,33 @@ public class DenseMatrix extends AbstractMatrix {
         return columnCount;
     }
 
+    /**
+     * Returns the direct buffer used by the native solver, after copying the current values into it. The native solver
+     * reads and writes this buffer in place, so {@link #syncFromBuffer()} must be called once it is done to copy the
+     * result back into the primary storage.
+     */
     ByteBuffer getBuffer() {
+        buffer.asDoubleBuffer().put(values);
         return buffer;
     }
 
-    void setValues(double[] values) {
-        if (values.length != rowCount * columnCount) {
+    /**
+     * Copy the buffer content back into the primary storage, after the native solver has written into the buffer.
+     */
+    void syncFromBuffer() {
+        buffer.asDoubleBuffer().get(values);
+    }
+
+    void setValues(double[] newValues) {
+        if (newValues.length != rowCount * columnCount) {
             throw new MatrixException("Incorrect values array size "
-                    + values.length + ", expected " + rowCount * columnCount);
+                    + newValues.length + ", expected " + rowCount * columnCount);
         }
-        for (int i = 0; i < values.length; i++) {
-            buffer.putDouble(i * Double.BYTES, values[i]);
-        }
+        System.arraycopy(newValues, 0, values, 0, newValues.length);
     }
 
     private double[] getValuesCopy() {
-        double[] values = new double[rowCount * columnCount];
-        buffer.asDoubleBuffer().get(values);
-        return values;
+        return values.clone();
     }
 
     /**
@@ -348,7 +363,7 @@ public class DenseMatrix extends AbstractMatrix {
         ByteBuffer transposedBuffer = createBuffer(transposedRowCount, transposedColumnCount);
         for (int i = 0; i < rowCount; i++) {
             for (int j = 0; j < columnCount; j++) {
-                double value = this.buffer.getDouble(j * Double.BYTES * rowCount + i * Double.BYTES);
+                double value = getUnsafe(i, j);
                 transposedBuffer.putDouble(i * Double.BYTES * transposedRowCount + j * Double.BYTES, value);
             }
         }
@@ -361,11 +376,7 @@ public class DenseMatrix extends AbstractMatrix {
      */
     public void copyValuesFrom(DenseMatrix originalMatrix) {
         if (originalMatrix.getRowCount() == getRowCount() && originalMatrix.getColumnCount() == getColumnCount()) {
-            for (int columnIndex = 0; columnIndex < originalMatrix.getColumnCount(); columnIndex++) {
-                for (int rowIndex = 0; rowIndex < originalMatrix.getRowCount(); rowIndex++) {
-                    set(rowIndex, columnIndex, originalMatrix.get(rowIndex, columnIndex));
-                }
-            }
+            System.arraycopy(originalMatrix.values, 0, values, 0, values.length);
         } else {
             throw new MatrixException("Incompatible matrix dimensions when copying values. Received (" + originalMatrix.getRowCount()
                 + ", " + originalMatrix.getColumnCount() + ") but expected (" + getRowCount() + ", " + getColumnCount() + ")");
@@ -462,13 +473,13 @@ public class DenseMatrix extends AbstractMatrix {
 
     @Override
     public int hashCode() {
-        return rowCount + columnCount + buffer.hashCode();
+        return rowCount + columnCount + Arrays.hashCode(values);
     }
 
     @Override
     public boolean equals(Object obj) {
         if (obj instanceof DenseMatrix other) {
-            return rowCount == other.rowCount && columnCount == other.columnCount && buffer.equals(other.buffer);
+            return rowCount == other.rowCount && columnCount == other.columnCount && Arrays.equals(values, other.values);
         }
         return false;
     }
