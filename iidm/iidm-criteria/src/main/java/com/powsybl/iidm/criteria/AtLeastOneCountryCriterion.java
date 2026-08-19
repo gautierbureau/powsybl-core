@@ -13,8 +13,10 @@ import com.powsybl.iidm.network.*;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * <p>Criterion checking that one of the sides of the network element belongs to a country defined in a list.</p>
@@ -24,10 +26,13 @@ import java.util.Objects;
  */
 public class AtLeastOneCountryCriterion implements Criterion {
     private final List<Country> countries;
+    // O(1) membership on the per-element filter path (the list getter is kept for the API)
+    private final Set<Country> countrySet;
 
     public AtLeastOneCountryCriterion(List<Country> countries) {
         Objects.requireNonNull(countries);
         this.countries = ImmutableList.copyOf(countries);
+        this.countrySet = this.countries.isEmpty() ? EnumSet.noneOf(Country.class) : EnumSet.copyOf(this.countries);
     }
 
     @Override
@@ -71,6 +76,15 @@ public class AtLeastOneCountryCriterion implements Criterion {
     }
 
     private boolean filterWithCountries(List<Country> countriesToCheck) {
-        return countries.isEmpty() || countriesToCheck.stream().filter(Objects::nonNull).anyMatch(countries::contains);
+        if (countrySet.isEmpty()) {
+            return true;
+        }
+        // direct loop instead of a stream pipeline allocated on every filter call
+        for (Country country : countriesToCheck) {
+            if (country != null && countrySet.contains(country)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
