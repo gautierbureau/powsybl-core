@@ -29,8 +29,14 @@ public class BinWriter extends AbstractTreeDataWriter {
     private final byte[] binaryMagicNumber;
     private final OutputStream outputStream;
     private final SegmentedByteBuffer body = new SegmentedByteBuffer();
-    private final Map<TypedName, Integer> namesIndex = new LinkedHashMap<>();
+    // Lookup keyed by name, holding the assigned index per type tag (0 = not yet assigned), so the hot
+    // writeEntry path does not allocate a TypedName key on every attribute. The dictionary list keeps the
+    // (name, type) entries in index order for serialization - index of an entry is its position + 1.
+    private final Map<String, int[]> namesIndex = new HashMap<>();
+    private final List<TypedName> dictionary = new ArrayList<>();
     private Map<String, String> extensionVersions = Collections.emptyMap();
+
+    private static final int NB_TYPES = TYPE_OBJECT + 1;
 
     private record TypedName(String name, byte type) { }
 
@@ -57,9 +63,10 @@ public class BinWriter extends AbstractTreeDataWriter {
 
     @Override
     public void writeStartNode(String namespace, String name) {
-        if (namesIndex.isEmpty()) {
+        if (dictionary.isEmpty()) {
             // root element is not a child of another node, its index is not consumed in the body
-            namesIndex.put(new TypedName(name, TYPE_OBJECT), 1);
+            namesIndex.computeIfAbsent(name, k -> new int[NB_TYPES])[TYPE_OBJECT] = 1;
+            dictionary.add(new TypedName(name, TYPE_OBJECT));
         } else {
             writeEntry(name, TYPE_OBJECT);
         }
@@ -71,15 +78,15 @@ public class BinWriter extends AbstractTreeDataWriter {
     }
 
     private void writeEntry(String name, byte type) {
-        TypedName key = new TypedName(name, type);
-        Integer index = namesIndex.get(key);
-        if (index == null) {
-            int newIndex = namesIndex.size() + 1;
-            if (newIndex > MAX_NAME_IDX) {
+        int[] indexByType = namesIndex.computeIfAbsent(name, k -> new int[NB_TYPES]);
+        int index = indexByType[type];
+        if (index == 0) {
+            index = dictionary.size() + 1;
+            if (index > MAX_NAME_IDX) {
                 throw new PowsyblException("Binary format: too many distinct names (max " + MAX_NAME_IDX + ")");
             }
-            namesIndex.put(key, newIndex);
-            index = newIndex;
+            indexByType[type] = index;
+            dictionary.add(new TypedName(name, type));
         }
         body.writeShort(index);
     }
@@ -239,8 +246,8 @@ public class BinWriter extends AbstractTreeDataWriter {
             writeString(entry.getValue(), out);
         }
 
-        writeShort(out, namesIndex.size());
-        for (TypedName key : namesIndex.keySet()) {
+        writeShort(out, dictionary.size());
+        for (TypedName key : dictionary) {
             writeString(key.name(), out);
             out.write(key.type());
         }
