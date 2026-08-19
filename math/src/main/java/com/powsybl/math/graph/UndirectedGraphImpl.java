@@ -507,7 +507,7 @@ public class UndirectedGraphImpl<V, E> implements UndirectedGraph<V, E> {
         adjacencyListCache = null;
     }
 
-    private void traverseVertex(int vToTraverse, boolean[] vEncountered, Deque<DirectedEdge> edgesToTraverse,
+    private void traverseVertex(int vToTraverse, boolean[] vEncountered, TIntArrayList edgesToTraverse,
                                 TIntArrayList[] adjacencyList, TraversalType traversalType) {
         if (vEncountered[vToTraverse]) {
             return;
@@ -525,17 +525,16 @@ public class UndirectedGraphImpl<V, E> implements UndirectedGraph<V, E> {
 
             int adjacentEdgeIndex = adjacentEdges.getQuick(iEdge);
             boolean flippedEdge = edges.get(adjacentEdgeIndex).v1 != vToTraverse;
-            edgesToTraverse.add(new DirectedEdge(adjacentEdgeIndex, flippedEdge));
+            // Encode the directed edge as a single int (edge index in the low 31 bits, "flipped" flag in the
+            // sign bit) to avoid allocating a DirectedEdge object per adjacent edge; edge indices are well
+            // below 2^31.
+            edgesToTraverse.add(flippedEdge ? adjacentEdgeIndex | FLIPPED_EDGE_FLAG : adjacentEdgeIndex);
         }
     }
 
-    /**
-     * Record to store which edge has to be traversed and in which direction
-     * @param index index of the edge within the edges list
-     * @param flippedDirection if true, edge.getNode2() has already been visited, otherwise it's edge.getNode1()
-     */
-    private record DirectedEdge(int index, boolean flippedDirection) {
-    }
+    // Sign bit of the encoded directed edge marks that edge.getNode2() has already been visited (flipped
+    // direction); otherwise it's edge.getNode1(). See traverseVertex.
+    private static final int FLIPPED_EDGE_FLAG = Integer.MIN_VALUE;
 
     @Override
     public boolean traverse(int v, TraversalType traversalType, Traverser traverser, boolean[] encounteredVertices) {
@@ -551,22 +550,35 @@ public class UndirectedGraphImpl<V, E> implements UndirectedGraph<V, E> {
         TIntArrayList[] adjacencyList = getAdjacencyList();
         boolean keepGoing = true;
 
-        Deque<DirectedEdge> edgesToTraverse = new ArrayDeque<>();
+        // Primitive int deque holding encoded directed edges: depth-first pops from the tail (stack), breadth-first
+        // reads forward through the head cursor (FIFO). Avoids a DirectedEdge object per edge and boxing.
+        TIntArrayList edgesToTraverse = new TIntArrayList();
+        int head = 0;
         traverseVertex(v, encounteredVertices, edgesToTraverse, adjacencyList, traversalType);
-        while (!edgesToTraverse.isEmpty() && keepGoing) {
-            DirectedEdge directedEdge = switch (traversalType) {
-                case DEPTH_FIRST -> edgesToTraverse.pollLast();
-                case BREADTH_FIRST -> edgesToTraverse.pollFirst();
-            };
+        while (keepGoing) {
+            int encodedEdge;
+            if (traversalType == TraversalType.DEPTH_FIRST) {
+                if (edgesToTraverse.isEmpty()) {
+                    break;
+                }
+                encodedEdge = edgesToTraverse.removeAt(edgesToTraverse.size() - 1);
+            } else {
+                if (head >= edgesToTraverse.size()) {
+                    break;
+                }
+                encodedEdge = edgesToTraverse.getQuick(head++);
+            }
+            int edgeIndex = encodedEdge & Integer.MAX_VALUE;
+            boolean flippedDirection = encodedEdge < 0;
 
-            if (!encounteredEdges[directedEdge.index]) {
-                encounteredEdges[directedEdge.index] = true;
+            if (!encounteredEdges[edgeIndex]) {
+                encounteredEdges[edgeIndex] = true;
 
-                Edge<E> edge = edges.get(directedEdge.index);
-                int vOrigin = directedEdge.flippedDirection ? edge.getV2() : edge.getV1();
-                int vDest = directedEdge.flippedDirection ? edge.getV1() : edge.getV2();
+                Edge<E> edge = edges.get(edgeIndex);
+                int vOrigin = flippedDirection ? edge.getV2() : edge.getV1();
+                int vDest = flippedDirection ? edge.getV1() : edge.getV2();
 
-                TraverseResult traverserResult = traverser.traverse(vOrigin, directedEdge.index, vDest);
+                TraverseResult traverserResult = traverser.traverse(vOrigin, edgeIndex, vDest);
                 switch (traverserResult) {
                     case CONTINUE -> traverseVertex(vDest, encounteredVertices, edgesToTraverse, adjacencyList, traversalType);
                     case TERMINATE_TRAVERSER -> keepGoing = false; // the whole traversing needs to stop

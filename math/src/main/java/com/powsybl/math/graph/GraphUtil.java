@@ -56,19 +56,22 @@ public final class GraphUtil {
     private static void computeConnectedComponents(int v1, List<Integer> componentSizes, TIntArrayList[] adjacencyList, int[] componentNumbers) {
         int c = componentSizes.size();
         int componentSize = 0;
-        Queue<Integer> nodes = new ArrayDeque<>();
+        // Primitive int stack (a DFS visits the same nodes as the former boxed BFS - every reachable node ends
+        // up in the same component - so this avoids boxing every node/neighbour into an Integer).
+        TIntArrayList nodes = new TIntArrayList();
         nodes.add(v1);
         while (!nodes.isEmpty()) {
-            int node = nodes.poll();
+            int node = nodes.removeAt(nodes.size() - 1);
             if (componentNumbers[node] == -1) {
                 componentSize++;
                 componentNumbers[node] = c;
-                adjacencyList[node].forEach(e -> {
+                TIntArrayList adjacentNodes = adjacencyList[node];
+                for (int i = 0, n = adjacentNodes.size(); i < n; i++) {
+                    int e = adjacentNodes.getQuick(i);
                     if (componentNumbers[e] == -1) {
                         nodes.add(e);
                     }
-                    return true;
-                });
+                }
             }
         }
         componentSizes.add(componentSize);
