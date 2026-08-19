@@ -210,8 +210,11 @@ public class StaticVarCompensatorImpl extends AbstractConnectable<StaticVarCompe
         NetworkImpl n = getNetwork();
         ValidationUtil.checkSvcRegulator(this, regulating, getVoltageSetpoint(), getReactivePowerSetpoint(), getRegulationMode(),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        int variantIndex = getNetwork().getVariantIndex();
-        this.regulatingPoint.setRegulating(variantIndex, regulating);
+        int variantIndex = n.getVariantIndex();
+        boolean oldValue = this.regulatingPoint.setRegulating(variantIndex, regulating);
+        String variantId = n.getVariantManager().getVariantId(variantIndex);
+        n.invalidateValidationLevel();
+        notifyUpdate("regulating", variantId, oldValue, regulating);
         return this;
     }
 
