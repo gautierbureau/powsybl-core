@@ -12,7 +12,9 @@ import com.powsybl.contingency.violations.LimitViolation;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -29,6 +31,10 @@ abstract class AbstractFaultResult extends AbstractExtendable<FaultResult> imple
     private final Duration timeConstant;
 
     private final List<FeederResult> feederResults;
+
+    // Lazily-built index of feederResults by connectable id, so getFeederCurrent is O(1) instead of a linear
+    // scan (callers reading many feeders of a fault would otherwise be O(feeders^2)).
+    private transient volatile Map<String, FeederResult> feederResultsById;
 
     private final List<LimitViolation> limitViolations;
 
@@ -91,16 +97,24 @@ abstract class AbstractFaultResult extends AbstractExtendable<FaultResult> imple
 
     @Override
     public double getFeederCurrent(String feederId) {
-        for (FeederResult feederResult : feederResults) {
-            if (feederResult.getConnectableId().equals(feederId)) {
-                if (feederResult instanceof FortescueFeederResult fortescueFeederResult) {
-                    return fortescueFeederResult.getCurrent().getPositiveMagnitude();
-                } else {
-                    return ((MagnitudeFaultResult) feederResult).getCurrent();
-                }
+        Map<String, FeederResult> index = feederResultsById;
+        if (index == null) {
+            index = new HashMap<>();
+            for (FeederResult feederResult : feederResults) {
+                // keep the first result per id, matching the former first-match linear scan
+                index.putIfAbsent(feederResult.getConnectableId(), feederResult);
             }
+            feederResultsById = index;
         }
-        return Double.NaN;
+        FeederResult feederResult = index.get(feederId);
+        if (feederResult == null) {
+            return Double.NaN;
+        }
+        if (feederResult instanceof FortescueFeederResult fortescueFeederResult) {
+            return fortescueFeederResult.getCurrent().getPositiveMagnitude();
+        } else {
+            return ((MagnitudeFaultResult) feederResult).getCurrent();
+        }
     }
 
 }
