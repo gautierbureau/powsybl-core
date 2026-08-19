@@ -23,6 +23,11 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -436,5 +441,58 @@ class CalculatedTimeSeriesTest {
             "} ]");
         e0 = assertThrows(TimeSeriesException.class, () -> TimeSeries.parseJson(jsonValueNull));
         assertEquals("Unexpected JSON token: VALUE_NULL", e0.getMessage());
+    }
+
+    /**
+     * The index is computed lazily and cached. Reading a shared calculated time series from several threads (reading
+     * values reaches getIndex() through toArray()) must compute it exactly once, and never publish a half-built one.
+     */
+    @Test
+    void getIndexIsComputedOnceUnderConcurrentReads() throws Exception {
+        TimeSeriesIndex sharedIndex = RegularTimeSeriesIndex.create(Interval.parse("2015-01-01T00:00:00Z/2015-07-20T00:00:00Z"),
+                Duration.ofDays(200));
+        DoubleTimeSeries ts = TimeSeries.createDouble("ts", sharedIndex, 1d, 2d);
+        AtomicInteger metadataLookups = new AtomicInteger();
+        TimeSeriesNameResolver countingResolver = new TimeSeriesNameResolver() {
+
+            @Override
+            public List<TimeSeriesMetadata> getTimeSeriesMetadata(Set<String> timeSeriesNames) {
+                metadataLookups.incrementAndGet();
+                return List.of(ts.getMetadata());
+            }
+
+            @Override
+            public Set<Integer> getTimeSeriesDataVersions(String timeSeriesName) {
+                return Collections.singleton(1);
+            }
+
+            @Override
+            public List<DoubleTimeSeries> getDoubleTimeSeries(Set<String> timeSeriesNames) {
+                return List.of(ts);
+            }
+        };
+        CalculatedTimeSeries tsCalc = new CalculatedTimeSeries("ts_calc",
+                BinaryOperation.plus(new TimeSeriesNameNodeCalc("ts"), new IntegerNodeCalc(1)), countingResolver);
+
+        int threadCount = 8;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        try {
+            CountDownLatch startLine = new CountDownLatch(1);
+            List<Future<TimeSeriesIndex>> futures = new ArrayList<>();
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(executor.submit(() -> {
+                    startLine.await();
+                    return tsCalc.getIndex();
+                }));
+            }
+            startLine.countDown(); // release all readers at once, to actually contend on the lazy init
+
+            for (Future<TimeSeriesIndex> future : futures) {
+                assertSame(sharedIndex, future.get());
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals(1, metadataLookups.get());
     }
 }

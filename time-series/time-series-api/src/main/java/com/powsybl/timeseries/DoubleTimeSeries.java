@@ -30,10 +30,28 @@ public interface DoubleTimeSeries extends TimeSeries<DoublePoint, DoubleTimeSeri
         return toArray();
     }
 
+    /**
+     * Returns the value at {@code index}, for a one-off read.
+     *
+     * <p><b>Do not call this in a loop.</b> It is a convenience method, not a random accessor: it materializes the
+     * whole series on <b>every</b> call (through {@link #getDoubleTimeSeriesValues()}), so reading a series of n points
+     * this way costs O(n²) and allocates an array per call. To read more than one point, hold the values once and index
+     * them:
+     * <pre>{@code
+     *     DoubleTimeSeriesValues values = series.getDoubleTimeSeriesValues();
+     *     for (int i = 0; i < pointCount; i++) {
+     *         double v = values.get(i);
+     *     }
+     * }</pre>
+     */
     default double get(int index) {
         return getDoubleTimeSeriesValues().get(index);
     }
 
+    /**
+     * Reads the whole series into an indexable holder. This is the way to read many points: it materializes the values
+     * once, and the returned holder is an immutable snapshot that is cheap to index and safe to share between threads.
+     */
     default DoubleTimeSeriesValues getDoubleTimeSeriesValues() {
         return new DoubleTimeSeriesValues(toArray(), 0);
     }
