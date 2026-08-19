@@ -317,11 +317,11 @@ public class SwitchesFlow {
     }
 
     private static String getKey(int node) {
-        return String.format("N-%d", node);
+        return "N-" + node;
     }
 
     private static String getKey(Bus bus) {
-        return String.format("B-%s", bus.getId());
+        return "B-" + bus.getId();
     }
 
     private static String getKey(SwNode swNode) {
