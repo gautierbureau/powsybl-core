@@ -11,6 +11,8 @@ package com.powsybl.contingency.violations;
 import com.powsybl.commons.config.PlatformConfig;
 import com.powsybl.iidm.network.Country;
 import com.powsybl.iidm.network.Network;
+import com.powsybl.iidm.network.Substation;
+import com.powsybl.iidm.network.VoltageLevel;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -115,8 +117,14 @@ public class LimitViolationFilter {
 
         return violations.stream()
                 .filter(violation -> accept(violation.getLimitType()))
-                .filter(violation -> accept(LimitViolationHelper.getNominalVoltage(violation, network)))
-                .filter(violation -> accept(LimitViolationHelper.getCountry(violation, network).orElse(null)))
+                // resolve the voltage level once per violation instead of once for the nominal voltage
+                // check and again for the country check (each resolution is a getIdentifiable lookup +
+                // instanceof chain)
+                .filter(violation -> {
+                    VoltageLevel vl = LimitViolationHelper.getVoltageLevel(violation, network);
+                    return accept(vl.getNominalV())
+                            && accept(vl.getSubstation().flatMap(Substation::getCountry).orElse(null));
+                })
                 .collect(Collectors.toList());
     }
 

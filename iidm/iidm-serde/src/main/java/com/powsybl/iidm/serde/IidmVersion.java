@@ -43,14 +43,30 @@ public enum IidmVersion {
     private final String domain;
     private final List<Integer> versionArray;
 
+    // These values are constant for a given version and requested many times per serialized element:
+    // precompute them once instead of rebuilding strings on each call
+    private final String versionUnderscore;
+    private final String namespaceUri;
+    private final String equipmentNamespaceUri;
+
     IidmVersion(String domain, List<Integer> versionArray) {
         this.domain = domain;
         this.versionArray = versionArray;
+        this.versionUnderscore = joinVersion(versionArray, "_");
+        this.namespaceUri = "http://www." + domain + "/schema/iidm/" + versionUnderscore;
+        this.equipmentNamespaceUri = "http://www." + domain + "/schema/iidm/equipment/" + versionUnderscore;
+    }
+
+    private static String joinVersion(List<Integer> versionArray, String separator) {
+        return versionArray.stream().map(Object::toString).collect(Collectors.joining(separator));
     }
 
     public String toString(String separator) {
         Objects.requireNonNull(separator);
-        return versionArray.stream().map(Object::toString).collect(Collectors.joining(separator));
+        if ("_".equals(separator)) {
+            return versionUnderscore;
+        }
+        return joinVersion(versionArray, separator);
     }
 
     public boolean supportEquipmentValidationLevel() {
@@ -58,7 +74,7 @@ public enum IidmVersion {
     }
 
     public String getNamespaceURI() {
-        return "http://www." + domain + "/schema/iidm/" + toString("_");
+        return namespaceUri;
     }
 
     public String getNamespaceURI(boolean valid) {
@@ -68,7 +84,7 @@ public enum IidmVersion {
         if (this.compareTo(V_1_7) < 0) {
             throw new PowsyblException("Network in Equipment mode not supported for XIIDM version < 1.7");
         }
-        return "http://www." + domain + "/schema/iidm/equipment/" + toString("_");
+        return equipmentNamespaceUri;
     }
 
     public String getXsd() {
