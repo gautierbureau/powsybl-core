@@ -27,6 +27,15 @@ import static com.powsybl.psse.model.io.FileFormat.LEGACY_TEXT;
  */
 public class LegacyTextReader {
     private static final Logger LOG = LoggerFactory.getLogger(LegacyTextReader.class);
+
+    // Precompiled once instead of recompiling the regex on every record line via String.replaceAll.
+    // These use java.util.regex (not the re2j Pattern imported above) because processText relies on a
+    // look-behind, which RE2 does not support; the semantics therefore match the previous String.replaceAll.
+    private static final java.util.regex.Pattern REMOVE_COMMENT_PATTERN = java.util.regex.Pattern.compile(FileFormat.REMOVE_COMMENT_REGEX);
+    private static final java.util.regex.Pattern SPACE_BEFORE_COMMA_PATTERN = java.util.regex.Pattern.compile("(?<=\\S|^)\\s+,");
+    private static final java.util.regex.Pattern COMMA_SPACE_PATTERN = java.util.regex.Pattern.compile(",\\s+");
+    private static final java.util.regex.Pattern WHITESPACE_PATTERN = java.util.regex.Pattern.compile("\\s+");
+
     private final BufferedReader reader;
     private boolean qRecordFound;
 
@@ -128,7 +137,7 @@ public class LegacyTextReader {
     }
 
     private static String removeComment(String line) {
-        return line.replaceAll(FileFormat.REMOVE_COMMENT_REGEX, "$1$2");
+        return REMOVE_COMMENT_PATTERN.matcher(line).replaceAll("$1$2");
     }
 
     // Compact spaces, remove spaces before the comma, and replace space with comma outside quoted text
@@ -147,10 +156,10 @@ public class LegacyTextReader {
                 result.append(part);
             } else {
                 // Outside quotes: process the txt
-                // On the next line: "(?<=\S|^)" = backtracking protection. The previous char should be a non-white char or a line start.
-                result.append(part.replaceAll("(?<=\\S|^)\\s+,", ",") // see comment above
-                        .replaceAll(",\\s+", ",")
-                        .replaceAll("\\s+", ","));
+                // SPACE_BEFORE_COMMA_PATTERN "(?<=\S|^)" = backtracking protection. The previous char should be a non-white char or a line start.
+                String noSpaceBeforeComma = SPACE_BEFORE_COMMA_PATTERN.matcher(part).replaceAll(",");
+                String noSpaceAfterComma = COMMA_SPACE_PATTERN.matcher(noSpaceBeforeComma).replaceAll(",");
+                result.append(WHITESPACE_PATTERN.matcher(noSpaceAfterComma).replaceAll(","));
             }
         }
 
