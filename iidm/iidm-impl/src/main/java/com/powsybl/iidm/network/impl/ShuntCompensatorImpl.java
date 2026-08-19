@@ -9,10 +9,7 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 
@@ -32,17 +29,21 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     // attributes depending on the variant
 
-    /* the current number of section switched on */
-    private final ArrayList<Integer> sectionCount;
+    // variant-dependent targetV / targetDeadband and the current / solved section counts are all held
+    // columnarly (see NumericVariantStore). The section counts are nullable (unset); SECTION_NULL encodes
+    // that in the int columns, exactly as TAP_NULL does for tap positions.
+    private static final String STORE_KEY = "ShuntCompensator";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    static final int SECTION_NULL = Integer.MIN_VALUE;
+    private static final int[] INT_DEFAULTS = {SECTION_NULL, SECTION_NULL};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_TARGET_V = 0;
+    private static final int COL_TARGET_DEADBAND = 1;
+    private static final int COL_SECTION_COUNT = 0;
+    private static final int COL_SOLVED_SECTION_COUNT = 1;
 
-    /* the solved number of section switched on */
-    private final ArrayList<Integer> solvedSectionCount;
-
-    /* the target voltage value */
-    private final TDoubleArrayList targetV;
-
-    /* the target deadband */
-    private final TDoubleArrayList targetDeadband;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     ShuntCompensatorImpl(Ref<NetworkImpl> network,
                          String id, String name, boolean fictitious, ShuntCompensatorModelExt model,
@@ -50,19 +51,14 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
                          Boolean voltageRegulatorOn, double targetV, double targetDeadband) {
         super(network, id, name, fictitious);
         this.network = network;
-        int variantArraySize = this.network.get().getVariantManager().getVariantArraySize();
-        regulatingPoint = new RegulatingPoint(id, this::getTerminal, variantArraySize, voltageRegulatorOn, true);
+        regulatingPoint = new RegulatingPoint(id, this::getTerminal, network, voltageRegulatorOn, true);
         regulatingPoint.setRegulatingTerminal(regulatingTerminal);
-        this.sectionCount = new ArrayList<>(variantArraySize);
-        this.solvedSectionCount = new ArrayList<>(variantArraySize);
-        this.targetV = new TDoubleArrayList(variantArraySize);
-        this.targetDeadband = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.sectionCount.add(sectionCount);
-            this.solvedSectionCount.add(checkSolvedSectionCount(solvedSectionCount, model.getMaximumSectionCount()));
-            this.targetV.add(targetV);
-            this.targetDeadband.add(targetDeadband);
-        }
+        Integer checkedSolved = checkSolvedSectionCount(solvedSectionCount, model.getMaximumSectionCount());
+        this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {targetV, targetDeadband},
+                new int[] {toRaw(sectionCount), toRaw(checkedSolved)},
+                BOOLEAN_DEFAULTS);
         this.model = Objects.requireNonNull(model).attach(this);
     }
 
@@ -73,22 +69,34 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public int getSectionCount() {
-        Integer section = sectionCount.get(network.get().getVariantIndex());
-        if (section == null) {
+        int raw = rawSectionCount(COL_SECTION_COUNT);
+        if (raw == SECTION_NULL) {
             throw ValidationUtil.createUndefinedValueGetterException();
         }
-        return section;
+        return raw;
+    }
+
+    private int rawSectionCount(int column) {
+        return variantStore.getInt(network.get().getVariantIndex(), column, variantStoreRow);
+    }
+
+    private static int toRaw(Integer value) {
+        return value == null ? SECTION_NULL : value;
+    }
+
+    private static Integer fromRaw(int raw) {
+        return raw == SECTION_NULL ? null : raw;
     }
 
     @Override
     public Integer getSolvedSectionCount() {
-        return solvedSectionCount.get(network.get().getVariantIndex());
+        return fromRaw(rawSectionCount(COL_SOLVED_SECTION_COUNT));
     }
 
     @Override
     public OptionalInt findSectionCount() {
-        Integer section = sectionCount.get(network.get().getVariantIndex());
-        return section == null ? OptionalInt.empty() : OptionalInt.of(section);
+        int raw = rawSectionCount(COL_SECTION_COUNT);
+        return raw == SECTION_NULL ? OptionalInt.empty() : OptionalInt.of(raw);
     }
 
     @Override
@@ -105,7 +113,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
             throw new ValidationException(this, "unexpected section number (" + sectionCount + "): no existing associated section");
         }
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.sectionCount.set(variantIndex, sectionCount);
+        Integer oldValue = fromRaw(variantStore.setInt(variantIndex, COL_SECTION_COUNT, variantStoreRow, sectionCount));
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("sectionCount", variantId, oldValue, sectionCount);
@@ -117,7 +125,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         NetworkImpl n = getNetwork();
         ValidationUtil.throwExceptionOrIgnore(this, "count of sections in service has been unset", n.getMinValidationLevel());
         int variantIndex = network.get().getVariantIndex();
-        Integer oldValue = this.sectionCount.set(variantIndex, null);
+        Integer oldValue = fromRaw(variantStore.setInt(variantIndex, COL_SECTION_COUNT, variantStoreRow, SECTION_NULL));
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("sectionCount", variantId, oldValue, null);
@@ -128,7 +136,8 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensatorImpl setSolvedSectionCount(int solvedSectionCount) {
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.solvedSectionCount.set(variantIndex, checkSolvedSectionCount(solvedSectionCount, this.model.getMaximumSectionCount()));
+        Integer oldValue = fromRaw(variantStore.setInt(variantIndex, COL_SOLVED_SECTION_COUNT, variantStoreRow,
+                toRaw(checkSolvedSectionCount(solvedSectionCount, this.model.getMaximumSectionCount()))));
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("solvedSectionCount", variantId, oldValue, solvedSectionCount);
         return this;
@@ -138,7 +147,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensator unsetSolvedSectionCount() {
         NetworkImpl n = getNetwork();
         int variantIndex = n.getVariantIndex();
-        Integer oldValue = this.solvedSectionCount.set(variantIndex, null);
+        Integer oldValue = fromRaw(variantStore.setInt(variantIndex, COL_SOLVED_SECTION_COUNT, variantStoreRow, SECTION_NULL));
         String variantId = n.getVariantManager().getVariantId(variantIndex);
         notifyUpdate("solvedSectionCount", variantId, oldValue, null);
         return this;
@@ -146,12 +155,12 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public double getB() {
-        return model.getB(sectionCount.get(network.get().getVariantIndex()));
+        return model.getB(getSectionCount());
     }
 
     @Override
     public double getG() {
-        return model.getG(sectionCount.get(network.get().getVariantIndex()));
+        return model.getG(getSectionCount());
     }
 
     @Override
@@ -209,9 +218,9 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     public ShuntCompensatorImpl setVoltageRegulatorOn(boolean voltageRegulatorOn) {
         NetworkImpl n = getNetwork();
         int variantIndex = network.get().getVariantIndex();
-        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn, targetV.get(variantIndex),
+        ValidationUtil.checkVoltageControl(this, voltageRegulatorOn, variantStore.getDouble(variantIndex, COL_TARGET_V, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, voltageRegulatorOn, targetDeadband.get(variantIndex),
+        ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, voltageRegulatorOn, variantStore.getDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow),
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         boolean oldValue = regulatingPoint.setRegulating(variantIndex, voltageRegulatorOn);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
@@ -222,7 +231,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public double getTargetV() {
-        return targetV.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_TARGET_V, variantStoreRow);
     }
 
     @Override
@@ -231,7 +240,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         int variantIndex = network.get().getVariantIndex();
         ValidationUtil.checkVoltageControl(this, regulatingPoint.isRegulating(variantIndex), targetV,
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.targetV.set(variantIndex, targetV);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_V, variantStoreRow, targetV);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("targetV", variantId, oldValue, targetV);
@@ -240,7 +249,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
 
     @Override
     public double getTargetDeadband() {
-        return targetDeadband.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_TARGET_DEADBAND, variantStoreRow);
     }
 
     @Override
@@ -249,7 +258,7 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
         int variantIndex = network.get().getVariantIndex();
         ValidationUtil.checkTargetDeadband(this, SHUNT_COMPENSATOR, regulatingPoint.isRegulating(variantIndex), targetDeadband,
                 n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
-        double oldValue = this.targetDeadband.set(variantIndex, targetDeadband);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_DEADBAND, variantStoreRow, targetDeadband);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("targetDeadband", variantId, oldValue, targetDeadband);
@@ -265,30 +274,13 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        sectionCount.ensureCapacity(sectionCount.size() + number);
-        solvedSectionCount.ensureCapacity(solvedSectionCount.size() + number);
-        targetV.ensureCapacity(targetV.size() + number);
-        targetDeadband.ensureCapacity(targetDeadband.size() + number);
-        for (int i = 0; i < number; i++) {
-            sectionCount.add(sectionCount.get(sourceIndex));
-            solvedSectionCount.add(solvedSectionCount.get(sourceIndex));
-            targetV.add(targetV.get(sourceIndex));
-            targetDeadband.add(targetDeadband.get(sourceIndex));
-        }
+        // targetV / targetDeadband / section counts handled by NumericVariantStore
         regulatingPoint.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        List<Integer> tmpInt = new ArrayList<>(sectionCount.subList(0, sectionCount.size() - number));
-        sectionCount.clear();
-        sectionCount.addAll(tmpInt);
-        List<Integer> solvedSectionCountTmp = new ArrayList<>(solvedSectionCount.subList(0, solvedSectionCount.size() - number));
-        solvedSectionCount.clear();
-        solvedSectionCount.addAll(solvedSectionCountTmp);
-        targetV.remove(targetV.size() - number, number);
-        targetDeadband.remove(targetDeadband.size() - number, number);
         regulatingPoint.reduceVariantArraySize(number);
     }
 
@@ -301,13 +293,16 @@ class ShuntCompensatorImpl extends AbstractConnectable<ShuntCompensator> impleme
     @Override
     public void allocateVariantArrayElement(int[] indexes, final int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            sectionCount.set(index, sectionCount.get(sourceIndex));
-            solvedSectionCount.set(index, solvedSectionCount.get(sourceIndex));
-            targetV.set(index, targetV.get(sourceIndex));
-            targetDeadband.set(index, targetDeadband.get(sourceIndex));
-        }
         regulatingPoint.allocateVariantArrayElement(indexes, sourceIndex);
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
+        regulatingPoint.reHomeVariantStores(targetNetwork);
     }
 
     @Override

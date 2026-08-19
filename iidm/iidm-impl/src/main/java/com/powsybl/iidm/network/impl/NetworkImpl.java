@@ -38,7 +38,7 @@ import static com.powsybl.iidm.network.util.TieLineUtil.*;
 /**
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
  */
-public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder, MultiVariantObject {
+public class NetworkImpl extends AbstractNetwork implements VariantStoreHolder, MultiVariantObject {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NetworkImpl.class);
 
@@ -62,6 +62,17 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     private final Map<String, VoltageAngleLimit> voltageAngleLimitsIndex = new LinkedHashMap<>();
 
     private final VariantManagerImpl variantManager;
+
+    private final NumericVariantStore terminalVariantStore;
+
+    private final NumericVariantStore switchVariantStore;
+
+    // generic per-object-type numeric variant stores, created lazily and keyed by a type token so that adding
+    // a new columnar object type needs no change here (see getOrCreateNumericVariantStore)
+    private final Map<String, NumericVariantStore> numericVariantStores = new HashMap<>();
+
+    // all columnar variant stores, driven once per variant operation instead of once per object
+    private final List<VariantColumnStore> variantColumnStores = new ArrayList<>();
 
     private AbstractReportNodeContext reportNodeContext;
 
@@ -130,6 +141,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         ref.setRef(new RefObj<>(this));
         this.reportNodeContext = new SimpleReportNodeContext();
         variantManager = new VariantManagerImpl(this);
+        // registered like any other keyed store; kept in a field only so the hot terminal/switch accessors
+        // skip the map lookup
+        terminalVariantStore = getOrCreateNumericVariantStore(AbstractTerminal.STORE_KEY,
+                AbstractTerminal.DOUBLE_DEFAULTS, AbstractTerminal.INT_DEFAULTS, AbstractTerminal.BOOLEAN_DEFAULTS);
+        switchVariantStore = getOrCreateNumericVariantStore(SwitchImpl.STORE_KEY,
+                SwitchImpl.DOUBLE_DEFAULTS, SwitchImpl.INT_DEFAULTS, SwitchImpl.BOOLEAN_DEFAULTS);
         variants = new VariantArray<>(ref, VariantImpl::new);
         // add the network the object list as it is a multi variant object
         // and it needs to be notified when and extension or a reduction of
@@ -231,6 +248,35 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
     @Override
     public VariantManagerImpl getVariantManager() {
         return variantManager;
+    }
+
+    @Override
+    public NumericVariantStore getTerminalVariantStore() {
+        return terminalVariantStore;
+    }
+
+    @Override
+    public NumericVariantStore getSwitchVariantStore() {
+        return switchVariantStore;
+    }
+
+    @Override
+    public NumericVariantStore getOrCreateNumericVariantStore(String key, double[] doubleDefaults, int[] intDefaults,
+                                                              boolean[] booleanDefaults) {
+        NumericVariantStore store = numericVariantStores.get(key);
+        if (store == null) {
+            // created at the current variant array size (its bands hold the column defaults); registered so
+            // that subsequent variant operations drive it. Creation happens on the main thread during build.
+            store = new NumericVariantStore(key, variantManager, doubleDefaults, intDefaults,
+                    booleanDefaults);
+            numericVariantStores.put(key, store);
+            variantColumnStores.add(store);
+        } else {
+            // the store is addressed by column index, so every caller of a given key must describe the same
+            // columns; a colliding key would otherwise silently hand one type another type's columns
+            store.checkColumnLayout(doubleDefaults, intDefaults, booleanDefaults);
+        }
+        return store;
     }
 
     @Override
@@ -1202,6 +1248,12 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().extendVariantArraySize(initVariantArraySize, number, sourceIndex));
 
+        // columnar variant stores (terminal p/q, switch open/retained, node terminal, bus...):
+        // extended once for the whole network instead of once per object
+        for (VariantColumnStore store : variantColumnStores) {
+            store.extend(number, sourceIndex);
+        }
+
         variants.push(number, () -> variants.copy(sourceIndex));
     }
 
@@ -1210,6 +1262,10 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         super.reduceVariantArraySize(number);
         dcTopologyModel.reduceVariantArraySize(number);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().reduceVariantArraySize(number));
+
+        for (VariantColumnStore store : variantColumnStores) {
+            store.reduce(number);
+        }
 
         variants.pop(number);
     }
@@ -1220,6 +1276,10 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         dcTopologyModel.deleteVariantArrayElement(index);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().deleteVariantArrayElement(index));
 
+        for (VariantColumnStore store : variantColumnStores) {
+            store.delete(index);
+        }
+
         variants.delete(index);
     }
 
@@ -1228,6 +1288,10 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         super.allocateVariantArrayElement(indexes, sourceIndex);
         dcTopologyModel.allocateVariantArrayElement(indexes, sourceIndex);
         getSubnetworks().forEach(sn -> ((SubnetworkImpl) sn).getDcTopologyModel().allocateVariantArrayElement(indexes, sourceIndex));
+
+        for (VariantColumnStore store : variantColumnStores) {
+            store.allocate(indexes, sourceIndex);
+        }
 
         variants.allocate(indexes, () -> variants.copy(sourceIndex));
     }
@@ -1268,6 +1332,15 @@ public class NetworkImpl extends AbstractNetwork implements VariantManagerHolder
         }
         for (BoundaryLine dl2 : findCandidateBoundaryLines(other, dl1byPairingKey::containsKey)) {
             findAndAssociateBoundaryLines(dl2, dl1byPairingKey::get, (dll1, dll2) -> pairBoundaryLines(lines, dll1, dll2, dl1byPairingKey));
+        }
+
+        // re-home the merged network's columnar variant state into this (root) network's stores, before
+        // createSubnetwork redirects the merged elements' network references. Each object cascades to its
+        // children (terminals, extensions, ...), mirroring the extend cascade.
+        for (Identifiable<?> i : otherNetwork.getIdentifiables()) {
+            if (i instanceof MultiVariantObject multiVariantObject) {
+                multiVariantObject.reHomeVariantStores(this);
+            }
         }
 
         // create a subnetwork for the other network

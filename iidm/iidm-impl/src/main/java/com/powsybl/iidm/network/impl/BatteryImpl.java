@@ -9,7 +9,6 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
 
 /**
  * {@inheritDoc}
@@ -20,9 +19,16 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
 
     private final ReactiveLimitsHolderImpl reactiveLimits;
 
-    private final TDoubleArrayList targetP;
+    // variant-dependent targetP / targetQ held columnarly (see NumericVariantStore)
+    private static final String STORE_KEY = "Battery";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_TARGET_P = 0;
+    private static final int COL_TARGET_Q = 1;
 
-    private final TDoubleArrayList targetQ;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private double minP;
 
@@ -34,13 +40,8 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
         this.maxP = maxP;
         this.reactiveLimits = new ReactiveLimitsHolderImpl(this, new MinMaxReactiveLimitsImpl(-Double.MAX_VALUE, Double.MAX_VALUE));
 
-        int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
-        this.targetP = new TDoubleArrayList(variantArraySize);
-        this.targetQ = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.targetP.add(targetP);
-            this.targetQ.add(targetQ);
-        }
+        this.variantStore = ref.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetP, targetQ}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     /**
@@ -56,7 +57,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
      */
     @Override
     public double getTargetP() {
-        return targetP.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_TARGET_P, variantStoreRow);
     }
 
     /**
@@ -67,7 +68,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
         NetworkImpl network = getNetwork();
         ValidationUtil.checkP0(this, targetP, network.getMinValidationLevel(), network.getReportNodeContext().getReportNode());
         int variantIndex = network.getVariantIndex();
-        double oldValue = this.targetP.set(variantIndex, targetP);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_P, variantStoreRow, targetP);
         String variantId = network.getVariantManager().getVariantId(variantIndex);
         network.invalidateValidationLevel();
         notifyUpdate("targetP", variantId, oldValue, targetP);
@@ -79,7 +80,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
      */
     @Override
     public double getTargetQ() {
-        return targetQ.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_TARGET_Q, variantStoreRow);
     }
 
     /**
@@ -90,7 +91,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
         NetworkImpl network = getNetwork();
         ValidationUtil.checkQ0(this, targetQ, network.getMinValidationLevel(), network.getReportNodeContext().getReportNode());
         int variantIndex = network.getVariantIndex();
-        double oldValue = this.targetQ.set(variantIndex, targetQ);
+        double oldValue = variantStore.setDouble(variantIndex, COL_TARGET_Q, variantStoreRow, targetQ);
         String variantId = network.getVariantManager().getVariantId(variantIndex);
         network.invalidateValidationLevel();
         notifyUpdate("targetQ", variantId, oldValue, targetQ);
@@ -198,12 +199,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        targetP.ensureCapacity(targetP.size() + number);
-        targetQ.ensureCapacity(targetQ.size() + number);
-        for (int i = 0; i < number; i++) {
-            targetP.add(targetP.get(sourceIndex));
-            targetQ.add(targetQ.get(sourceIndex));
-        }
+        // targetP/targetQ handled columnarly by NumericVariantStore
     }
 
     /**
@@ -212,8 +208,7 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        targetP.remove(targetP.size() - number, number);
-        targetQ.remove(targetQ.size() - number, number);
+        // targetP/targetQ handled columnarly by NumericVariantStore
     }
 
     /**
@@ -222,9 +217,14 @@ public class BatteryImpl extends AbstractConnectable<Battery> implements Battery
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            targetP.set(index, targetP.get(sourceIndex));
-            targetQ.set(index, targetQ.get(sourceIndex));
-        }
+        // targetP/targetQ handled columnarly by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // terminals + extensions
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

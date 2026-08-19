@@ -363,13 +363,15 @@ class CalculatedBusImpl extends AbstractBus implements CalculatedBus {
 
     private List<TerminalExt> buildConnectableTerminalsCache() {
         List<TerminalExt> connectableTerminalsList = new ArrayList<>(terminals);
+        // use a set for O(1) duplicate detection instead of a linear scan of the list at each iteration
+        Set<TerminalExt> connectableTerminalsSet = new HashSet<>(connectableTerminalsList);
         int[] vlNodes = voltageLevel.getNodeBreakerView().getNodes();
         for (int n : vlNodes) {
             Terminal t = voltageLevel.getNodeBreakerView().getTerminal(n);
             if (t instanceof TerminalExt te) {
                 try {
                     Bus connectableBus = te.getBusView().getConnectableBus();
-                    if (this.equals(connectableBus) && !connectableTerminalsList.contains(te)) {
+                    if (this.equals(connectableBus) && connectableTerminalsSet.add(te)) {
                         connectableTerminalsList.add(te);
                     }
                 } catch (PowsyblException e) {

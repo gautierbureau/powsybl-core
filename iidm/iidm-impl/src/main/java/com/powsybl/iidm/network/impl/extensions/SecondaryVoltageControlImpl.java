@@ -13,6 +13,7 @@ import com.powsybl.iidm.network.NetworkListener;
 import com.powsybl.iidm.network.extensions.ControlZone;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControl;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
+import com.powsybl.iidm.network.impl.NetworkImpl;
 
 import java.util.*;
 
@@ -87,6 +88,13 @@ public class SecondaryVoltageControlImpl extends AbstractMultiVariantIdentifiabl
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         for (ControlZone controlZone : controlZones) {
             ((ControlZoneImpl) controlZone).allocateVariantArrayElement(indexes, sourceIndex);
+        }
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        for (ControlZone controlZone : controlZones) {
+            ((ControlZoneImpl) controlZone).reHomeVariantStores(targetNetwork);
         }
     }
 }

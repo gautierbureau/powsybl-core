@@ -9,11 +9,20 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
  * To easily manage an array of variant.
+ *
+ * <p>The variant list is published through a {@code volatile} reference and structural changes
+ * (push/pop/delete/allocate) rebuild a new list (copy-on-write) before publishing it. Reads
+ * ({@link #get()}, {@link #copy(int)}) are therefore lock-free: they read the {@code volatile}
+ * reference and index into a list that is never structurally modified after publication.
+ * This matches the {@link VariantManager} thread-safety contract, in which structural changes
+ * are performed on the main thread only (never concurrently with variant reads/writes), while
+ * different threads may read/write pre-allocated variants simultaneously (each thread on its own
+ * variant index). The {@code volatile} publication guarantees those threads observe the fully
+ * constructed variant list, without taking a lock on every read as {@code synchronizedList} did.
  *
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
  */
@@ -21,48 +30,63 @@ class VariantArray<S extends Variant> {
 
     private final Ref<? extends VariantManagerHolder> variantManagerHolder;
 
-    private final List<S> variants;
+    private volatile List<S> variants;
 
     VariantArray(Ref<? extends VariantManagerHolder> variantManagerHolder, VariantFactory<S> variantFactory) {
         this.variantManagerHolder = variantManagerHolder;
         VariantManagerImpl variantManager = variantManagerHolder.get().getVariantManager();
-        variants = Collections.synchronizedList(new ArrayList<S>(variantManager.getVariantArraySize()));
+        List<S> initialVariants = new ArrayList<>(variantManager.getVariantArraySize());
         for (int i = 0; i < variantManager.getVariantArraySize(); i++) {
-            variants.add(null);
+            initialVariants.add(null);
         }
         for (int i : variantManager.getVariantIndexes()) {
-            variants.set(i, variantFactory.newVariant());
+            initialVariants.set(i, variantFactory.newVariant());
         }
+        this.variants = initialVariants;
+    }
+
+    private int getVariantIndex() {
+        return variantManagerHolder.get().getVariantManager().getVariantContext().getVariantIndex();
     }
 
     S get() {
-        return variants.get(variantManagerHolder.get().getVariantManager().getVariantContext().getVariantIndex());
+        return variants.get(getVariantIndex());
     }
 
     void push(int number, VariantFactory<S> variantFactory) {
+        List<S> newVariants = new ArrayList<>(variants);
         for (int i = 0; i < number; i++) {
-            variants.add(variantFactory.newVariant());
+            newVariants.add(variantFactory.newVariant());
         }
+        variants = newVariants;
     }
 
     void push(VariantFactory<S> variantFactory) {
-        variants.add(variantFactory.newVariant());
+        List<S> newVariants = new ArrayList<>(variants);
+        newVariants.add(variantFactory.newVariant());
+        variants = newVariants;
     }
 
     void pop(int number) {
+        List<S> newVariants = new ArrayList<>(variants);
         for (int i = 0; i < number; i++) {
-            variants.remove(variants.size() - 1);
+            newVariants.remove(newVariants.size() - 1);
         }
+        variants = newVariants;
     }
 
     void delete(int index) {
-        variants.set(index, null);
+        List<S> newVariants = new ArrayList<>(variants);
+        newVariants.set(index, null);
+        variants = newVariants;
     }
 
     void allocate(int[] indexes, VariantFactory<S> variantFactory) {
+        List<S> newVariants = new ArrayList<>(variants);
         for (int index : indexes) {
-            variants.set(index, variantFactory.newVariant());
+            newVariants.set(index, variantFactory.newVariant());
         }
+        variants = newVariants;
     }
 
     S copy(int index) {

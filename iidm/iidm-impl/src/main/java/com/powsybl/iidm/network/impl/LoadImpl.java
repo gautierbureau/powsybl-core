@@ -12,7 +12,6 @@ import com.powsybl.iidm.network.Load;
 import com.powsybl.iidm.network.LoadModel;
 import com.powsybl.iidm.network.LoadType;
 import com.powsybl.iidm.network.ValidationUtil;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.Optional;
 
@@ -30,9 +29,16 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
 
     // attributes depending on the variant
 
-    private final TDoubleArrayList p0;
+    // variant-dependent p0 / q0 held columnarly (see NumericVariantStore)
+    private static final String STORE_KEY = "Load";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_P0 = 0;
+    private static final int COL_Q0 = 1;
 
-    private final TDoubleArrayList q0;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     LoadImpl(Ref<NetworkImpl> networkRef,
              String id, String name, boolean fictitious, LoadType loadType, LoadModel model,
@@ -41,13 +47,8 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
         this.network = networkRef;
         this.loadType = loadType;
         this.model = model;
-        int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        this.p0 = new TDoubleArrayList(variantArraySize);
-        this.q0 = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.p0.add(p0);
-            this.q0.add(q0);
-        }
+        this.variantStore = networkRef.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {p0, q0}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
@@ -76,7 +77,7 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
 
     @Override
     public double getP0() {
-        return p0.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_P0, variantStoreRow);
     }
 
     @Override
@@ -84,7 +85,7 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
         NetworkImpl n = getNetwork();
         ValidationUtil.checkP0(this, p0, n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.p0.set(variantIndex, p0);
+        double oldValue = variantStore.setDouble(variantIndex, COL_P0, variantStoreRow, p0);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("p0", variantId, oldValue, p0);
@@ -93,7 +94,7 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
 
     @Override
     public double getQ0() {
-        return q0.get(network.get().getVariantIndex());
+        return variantStore.getDouble(network.get().getVariantIndex(), COL_Q0, variantStoreRow);
     }
 
     @Override
@@ -101,7 +102,7 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
         NetworkImpl n = getNetwork();
         ValidationUtil.checkQ0(this, q0, n.getMinValidationLevel(), n.getReportNodeContext().getReportNode());
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.q0.set(variantIndex, q0);
+        double oldValue = variantStore.setDouble(variantIndex, COL_Q0, variantStoreRow, q0);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         n.invalidateValidationLevel();
         notifyUpdate("q0", variantId, oldValue, q0);
@@ -113,22 +114,18 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
         return Optional.ofNullable(model);
     }
 
+    // p0/q0 are maintained columnarly by the network-level store, driven once per variant operation
+    // by NetworkImpl; these hooks only cascade to super.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        p0.ensureCapacity(p0.size() + number);
-        q0.ensureCapacity(q0.size() + number);
-        for (int i = 0; i < number; i++) {
-            p0.add(p0.get(sourceIndex));
-            q0.add(q0.get(sourceIndex));
-        }
+        // p0/q0 handled columnarly by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
-        p0.remove(p0.size() - number, number);
-        q0.remove(q0.size() - number, number);
+        // p0/q0 handled columnarly by NumericVariantStore
     }
 
     @Override
@@ -140,10 +137,15 @@ class LoadImpl extends AbstractConnectable<Load> implements Load {
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
-        for (int index : indexes) {
-            p0.set(index, p0.get(sourceIndex));
-            q0.set(index, q0.get(sourceIndex));
-        }
+        // p0/q0 handled columnarly by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // terminals + extensions
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 
 }

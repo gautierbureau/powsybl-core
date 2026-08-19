@@ -10,81 +10,84 @@ package com.powsybl.iidm.network.impl.extensions;
 import com.powsybl.iidm.network.Load;
 import com.powsybl.iidm.network.extensions.LoadDetail;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
-import gnu.trove.list.array.TDoubleArrayList;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 
 /**
  * @author Miora Ralambotiana {@literal <miora.ralambotiana at rte-france.com>}
  */
 public class LoadDetailImpl extends AbstractMultiVariantIdentifiableExtension<Load> implements LoadDetail {
 
-    private final TDoubleArrayList fixedActivePower;
+    // fixed/variable active & reactive power (double), held columnarly
+    private static final String STORE_KEY = "LoadDetail";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_FIXED_ACTIVE_POWER = 0;
+    private static final int COL_FIXED_REACTIVE_POWER = 1;
+    private static final int COL_VARIABLE_ACTIVE_POWER = 2;
+    private static final int COL_VARIABLE_REACTIVE_POWER = 3;
 
-    private final TDoubleArrayList fixedReactivePower;
-
-    private final TDoubleArrayList variableActivePower;
-
-    private final TDoubleArrayList variableReactivePower;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     public LoadDetailImpl(Load load, double fixedActivePower, double fixedReactivePower,
                 double variableActivePower, double variableReactivePower) {
         super(load);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.fixedActivePower = new TDoubleArrayList(variantArraySize);
-        this.fixedReactivePower = new TDoubleArrayList(variantArraySize);
-        this.variableActivePower = new TDoubleArrayList(variantArraySize);
-        this.variableReactivePower = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.fixedActivePower.add(checkPower(fixedActivePower, "Invalid fixedActivePower", load));
-            this.fixedReactivePower.add(checkPower(fixedReactivePower, "Invalid fixedReactivePower", load));
-            this.variableActivePower.add(checkPower(variableActivePower, "Invalid variableActivePower", load));
-            this.variableReactivePower.add(checkPower(variableReactivePower, "Invalid variableReactivePower", load));
-        }
+        double checkedFixedActivePower = checkPower(fixedActivePower, "Invalid fixedActivePower", load);
+        double checkedFixedReactivePower = checkPower(fixedReactivePower, "Invalid fixedReactivePower", load);
+        double checkedVariableActivePower = checkPower(variableActivePower, "Invalid variableActivePower", load);
+        double checkedVariableReactivePower = checkPower(variableReactivePower, "Invalid variableReactivePower", load);
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {checkedFixedActivePower, checkedFixedReactivePower, checkedVariableActivePower, checkedVariableReactivePower},
+                INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     public double getFixedActivePower() {
-        return fixedActivePower.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_FIXED_ACTIVE_POWER, variantStoreRow);
     }
 
     @Override
     public LoadDetail setFixedActivePower(double fixedActivePower) {
         checkPower(fixedActivePower, "Invalid fixedActivePower", this.getExtendable());
-        this.fixedActivePower.set(getVariantIndex(), fixedActivePower);
+        variantStore.setDouble(getVariantIndex(), COL_FIXED_ACTIVE_POWER, variantStoreRow, fixedActivePower);
         return this;
     }
 
     @Override
     public double getFixedReactivePower() {
-        return fixedReactivePower.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_FIXED_REACTIVE_POWER, variantStoreRow);
     }
 
     @Override
     public LoadDetail setFixedReactivePower(double fixedReactivePower) {
         checkPower(fixedReactivePower, "Invalid fixedReactivePower", this.getExtendable());
-        this.fixedReactivePower.set(getVariantIndex(), fixedReactivePower);
+        variantStore.setDouble(getVariantIndex(), COL_FIXED_REACTIVE_POWER, variantStoreRow, fixedReactivePower);
         return this;
     }
 
     @Override
     public double getVariableActivePower() {
-        return variableActivePower.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_VARIABLE_ACTIVE_POWER, variantStoreRow);
     }
 
     @Override
     public LoadDetail setVariableActivePower(double variableActivePower) {
         checkPower(variableActivePower, "Invalid variableActivePower", this.getExtendable());
-        this.variableActivePower.set(getVariantIndex(), variableActivePower);
+        variantStore.setDouble(getVariantIndex(), COL_VARIABLE_ACTIVE_POWER, variantStoreRow, variableActivePower);
         return this;
     }
 
     @Override
     public double getVariableReactivePower() {
-        return variableReactivePower.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_VARIABLE_REACTIVE_POWER, variantStoreRow);
     }
 
     @Override
     public LoadDetail setVariableReactivePower(double variableReactivePower) {
         checkPower(variableReactivePower, "Invalid variableReactivePower", this.getExtendable());
-        this.variableReactivePower.set(getVariantIndex(), variableReactivePower);
+        variantStore.setDouble(getVariantIndex(), COL_VARIABLE_REACTIVE_POWER, variantStoreRow, variableReactivePower);
         return this;
     }
 
@@ -100,24 +103,12 @@ public class LoadDetailImpl extends AbstractMultiVariantIdentifiableExtension<Lo
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        fixedActivePower.ensureCapacity(fixedActivePower.size() + number);
-        fixedReactivePower.ensureCapacity(fixedReactivePower.size() + number);
-        variableActivePower.ensureCapacity(variableActivePower.size() + number);
-        variableReactivePower.ensureCapacity(variableReactivePower.size() + number);
-        for (int i = 0; i < number; ++i) {
-            fixedActivePower.add(fixedActivePower.get(sourceIndex));
-            fixedReactivePower.add(fixedReactivePower.get(sourceIndex));
-            variableActivePower.add(variableActivePower.get(sourceIndex));
-            variableReactivePower.add(variableReactivePower.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        fixedActivePower.remove(fixedActivePower.size() - number, number);
-        fixedReactivePower.remove(fixedReactivePower.size() - number, number);
-        variableActivePower.remove(variableActivePower.size() - number, number);
-        variableReactivePower.remove(variableReactivePower.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -128,11 +119,13 @@ public class LoadDetailImpl extends AbstractMultiVariantIdentifiableExtension<Lo
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            fixedActivePower.set(index, fixedActivePower.get(sourceIndex));
-            fixedReactivePower.set(index, fixedReactivePower.get(sourceIndex));
-            variableActivePower.set(index, variableActivePower.get(sourceIndex));
-            variableReactivePower.set(index, variableReactivePower.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

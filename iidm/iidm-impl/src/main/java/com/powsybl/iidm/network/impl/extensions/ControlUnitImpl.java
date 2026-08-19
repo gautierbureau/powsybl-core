@@ -7,9 +7,9 @@
  */
 package com.powsybl.iidm.network.impl.extensions;
 
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.extensions.ControlUnit;
 import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import com.powsybl.iidm.network.impl.VariantManagerHolder;
 
 import java.util.Objects;
@@ -19,19 +19,23 @@ import java.util.Objects;
  */
 class ControlUnitImpl implements ControlUnit {
 
+    private static final String STORE_KEY = "ControlUnit";
+    private static final double[] DOUBLE_DEFAULTS = {};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_PARTICIPATE = 0;
+
     private String id;
 
-    private final TBooleanArrayList participate;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private ControlZoneImpl controlZone;
 
     ControlUnitImpl(String id, boolean participate, VariantManagerHolder variantManagerHolder) {
         this.id = Objects.requireNonNull(id);
-        int variantArraySize = variantManagerHolder.getVariantManager().getVariantArraySize();
-        this.participate = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.participate.add(participate);
-        }
+        this.variantStore = variantManagerHolder.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {participate});
     }
 
     public void setControlZone(ControlZoneImpl controlZone) {
@@ -53,15 +57,15 @@ class ControlUnitImpl implements ControlUnit {
 
     @Override
     public boolean isParticipate() {
-        return participate.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_PARTICIPATE, variantStoreRow);
     }
 
     @Override
     public void setParticipate(boolean participate) {
         int variantIndex = getVariantIndex();
-        boolean oldParticipate = this.participate.get(variantIndex);
+        boolean oldParticipate = variantStore.getBoolean(variantIndex, COL_PARTICIPATE, variantStoreRow);
         if (participate != oldParticipate) {
-            this.participate.set(variantIndex, participate);
+            variantStore.setBoolean(variantIndex, COL_PARTICIPATE, variantStoreRow, participate);
             SecondaryVoltageControlImpl secondaryVoltageControl = controlZone.getSecondaryVoltageControl();
             NetworkImpl network = (NetworkImpl) secondaryVoltageControl.getExtendable();
             String variantId = network.getVariantManager().getVariantId(variantIndex);
@@ -71,19 +75,20 @@ class ControlUnitImpl implements ControlUnit {
     }
 
     void extendVariantArraySize(int number, int sourceIndex) {
-        participate.ensureCapacity(participate.size() + number);
-        for (int i = 0; i < number; ++i) {
-            participate.add(participate.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     void reduceVariantArraySize(int number) {
-        participate.remove(participate.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            participate.set(index, participate.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    void reHomeVariantStores(NetworkImpl targetNetwork) {
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

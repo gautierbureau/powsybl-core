@@ -9,8 +9,6 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
-import gnu.trove.list.array.TIntArrayList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -25,40 +23,39 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     private final Ref<NetworkImpl> network;
 
+    // per-variant list of connected terminals: not numeric, kept per-object
     private final ArrayList<List<BusTerminal>> terminals;
 
-    private final TDoubleArrayList v;
+    // v, angle, fictitiousP0, fictitiousQ0 (double) and connected/synchronous component number (int) are held
+    // columnarly in the network-level configured-bus store (see NumericVariantStore)
+    private static final String STORE_KEY = "ConfiguredBus";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN, 0.0, 0.0};
+    private static final int[] INT_DEFAULTS = {-1, -1};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_V = 0;
+    private static final int COL_ANGLE = 1;
+    private static final int COL_FIC_P0 = 2;
+    private static final int COL_FIC_Q0 = 3;
+    private static final int COL_CC = 0;
+    private static final int COL_SC = 1;
 
-    private final TDoubleArrayList angle;
-
-    private final TDoubleArrayList fictitiousP0;
-
-    private final TDoubleArrayList fictitiousQ0;
-
-    private final TIntArrayList connectedComponentNumber;
-
-    private final TIntArrayList synchronousComponentNumber;
+    private NumericVariantStore variantStore;
+    private int busVariantStoreRow;
 
     ConfiguredBusImpl(String id, String name, boolean fictitious, VoltageLevelExt voltageLevel) {
         super(id, name, fictitious, voltageLevel);
         network = voltageLevel.getNetworkRef();
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
         terminals = new ArrayList<>(variantArraySize);
-        v = new TDoubleArrayList(variantArraySize);
-        angle = new TDoubleArrayList(variantArraySize);
-        fictitiousP0 = new TDoubleArrayList(variantArraySize);
-        fictitiousQ0 = new TDoubleArrayList(variantArraySize);
-        connectedComponentNumber = new TIntArrayList(variantArraySize);
-        synchronousComponentNumber = new TIntArrayList(variantArraySize);
         for (int i = 0; i < variantArraySize; i++) {
             terminals.add(new ArrayList<>());
-            v.add(Double.NaN);
-            angle.add(Double.NaN);
-            fictitiousP0.add(0.0);
-            fictitiousQ0.add(0.0);
-            connectedComponentNumber.add(-1);
-            synchronousComponentNumber.add(-1);
         }
+        this.variantStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.busVariantStoreRow = variantStore.allocateRow();
+    }
+
+    private NumericVariantStore store() {
+        return variantStore;
     }
 
     @Override
@@ -104,7 +101,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public double getV() {
-        return v.get(network.get().getVariantIndex());
+        return store().getDouble(network.get().getVariantIndex(), COL_V, busVariantStoreRow);
     }
 
     @Override
@@ -113,7 +110,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
             throw new ValidationException(this, "voltage cannot be < 0");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.v.set(variantIndex, v);
+        double oldValue = store().setDouble(variantIndex, COL_V, busVariantStoreRow, v);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("v", variantId, oldValue, v);
         return this;
@@ -121,13 +118,13 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public double getAngle() {
-        return angle.get(network.get().getVariantIndex());
+        return store().getDouble(network.get().getVariantIndex(), COL_ANGLE, busVariantStoreRow);
     }
 
     @Override
     public BusExt setAngle(double angle) {
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.angle.set(variantIndex, angle);
+        double oldValue = store().setDouble(variantIndex, COL_ANGLE, busVariantStoreRow, angle);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("angle", variantId, oldValue, angle);
         return this;
@@ -135,7 +132,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public double getFictitiousP0() {
-        return fictitiousP0.get(network.get().getVariantIndex());
+        return store().getDouble(network.get().getVariantIndex(), COL_FIC_P0, busVariantStoreRow);
     }
 
     @Override
@@ -144,7 +141,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
             throw new ValidationException(this, "undefined value cannot be set as fictitious p0");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.fictitiousP0.set(variantIndex, p0);
+        double oldValue = store().setDouble(variantIndex, COL_FIC_P0, busVariantStoreRow, p0);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("fictitiousP0", variantId, oldValue, p0);
         return this;
@@ -152,7 +149,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
     @Override
     public double getFictitiousQ0() {
-        return fictitiousQ0.get(network.get().getVariantIndex());
+        return store().getDouble(network.get().getVariantIndex(), COL_FIC_Q0, busVariantStoreRow);
     }
 
     @Override
@@ -161,7 +158,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
             throw new ValidationException(this, "undefined value cannot be set as fictitious q0");
         }
         int variantIndex = network.get().getVariantIndex();
-        double oldValue = this.fictitiousQ0.set(variantIndex, q0);
+        double oldValue = store().setDouble(variantIndex, COL_FIC_Q0, busVariantStoreRow, q0);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("fictitiousQ0", variantId, oldValue, q0);
         return this;
@@ -170,7 +167,7 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     @Override
     public void setConnectedComponentNumber(int connectedComponentNumber) {
         int variantIndex = network.get().getVariantIndex();
-        int oldValue = this.connectedComponentNumber.set(variantIndex, connectedComponentNumber);
+        int oldValue = store().setInt(variantIndex, COL_CC, busVariantStoreRow, connectedComponentNumber);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("connectedComponentNumber", variantId, oldValue, connectedComponentNumber);
     }
@@ -179,13 +176,13 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     public Component getConnectedComponent() {
         NetworkImpl.ConnectedComponentsManager ccm = voltageLevel.getNetwork().getConnectedComponentsManager();
         ccm.update();
-        return ccm.getComponent(connectedComponentNumber.get(network.get().getVariantIndex()));
+        return ccm.getComponent(store().getInt(network.get().getVariantIndex(), COL_CC, busVariantStoreRow));
     }
 
     @Override
     public void setSynchronousComponentNumber(int componentNumber) {
         int variantIndex = network.get().getVariantIndex();
-        int oldValue = this.synchronousComponentNumber.set(variantIndex, componentNumber);
+        int oldValue = store().setInt(variantIndex, COL_SC, busVariantStoreRow, componentNumber);
         String variantId = network.get().getVariantManager().getVariantId(variantIndex);
         notifyUpdate("synchronousComponentNumber", variantId, oldValue, componentNumber);
     }
@@ -194,28 +191,18 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
     public Component getSynchronousComponent() {
         NetworkImpl.SynchronousComponentsManager scm = voltageLevel.getNetwork().getSynchronousComponentsManager();
         scm.update();
-        return scm.getComponent(synchronousComponentNumber.get(network.get().getVariantIndex()));
+        return scm.getComponent(store().getInt(network.get().getVariantIndex(), COL_SC, busVariantStoreRow));
     }
 
+    // v/angle/fictitious/component numbers are maintained columnarly by the network-level configured-bus store,
+    // driven once per variant operation by NetworkImpl; only the per-variant terminal list is handled here.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
 
         terminals.ensureCapacity(terminals.size() + number);
-        v.ensureCapacity(v.size() + number);
-        angle.ensureCapacity(angle.size() + number);
-        fictitiousP0.ensureCapacity(fictitiousP0.size() + number);
-        fictitiousQ0.ensureCapacity(fictitiousQ0.size() + number);
-        connectedComponentNumber.ensureCapacity(connectedComponentNumber.size() + number);
-        synchronousComponentNumber.ensureCapacity(synchronousComponentNumber.size() + number);
         for (int i = 0; i < number; i++) {
             terminals.add(new ArrayList<>(terminals.get(sourceIndex)));
-            v.add(v.get(sourceIndex));
-            angle.add(angle.get(sourceIndex));
-            fictitiousP0.add(fictitiousP0.get(sourceIndex));
-            fictitiousQ0.add(fictitiousQ0.get(sourceIndex));
-            connectedComponentNumber.add(connectedComponentNumber.get(sourceIndex));
-            synchronousComponentNumber.add(synchronousComponentNumber.get(sourceIndex));
         }
     }
 
@@ -226,12 +213,6 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
         for (int i = 0; i < number; i++) {
             terminals.remove(terminals.size() - 1);
         }
-        v.remove(v.size() - number, number);
-        angle.remove(angle.size() - number, number);
-        fictitiousP0.remove(fictitiousP0.size() - number, number);
-        fictitiousQ0.remove(fictitiousQ0.size() - number, number);
-        connectedComponentNumber.remove(connectedComponentNumber.size() - number, number);
-        synchronousComponentNumber.remove(synchronousComponentNumber.size() - number, number);
     }
 
     @Override
@@ -247,13 +228,15 @@ class ConfiguredBusImpl extends AbstractBus implements ConfiguredBus {
 
         for (int index : indexes) {
             terminals.set(index, new ArrayList<>(terminals.get(sourceIndex)));
-            v.set(index, v.get(sourceIndex));
-            angle.set(index, angle.get(sourceIndex));
-            fictitiousP0.set(index, fictitiousP0.get(sourceIndex));
-            fictitiousQ0.set(index, fictitiousQ0.get(sourceIndex));
-            connectedComponentNumber.set(index, connectedComponentNumber.get(sourceIndex));
-            synchronousComponentNumber.set(index, synchronousComponentNumber.get(sourceIndex));
         }
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // extensions
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.busVariantStoreRow = newStore.importRow(store(), busVariantStoreRow);
+        this.variantStore = newStore;
     }
 
 }

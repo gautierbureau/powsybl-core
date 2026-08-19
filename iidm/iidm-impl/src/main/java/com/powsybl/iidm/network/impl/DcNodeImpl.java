@@ -10,8 +10,6 @@ package com.powsybl.iidm.network.impl;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
 import com.powsybl.iidm.network.*;
-import gnu.trove.list.array.TDoubleArrayList;
-import gnu.trove.list.array.TIntArrayList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,27 +31,26 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
 
     private final List<DcTerminal> dcTerminals;
 
-    private final TDoubleArrayList v;
+    // v (double), connectedComponentNumber / dcComponentNumber (int) held columnarly
+    private static final String STORE_KEY = "DcNode";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {-1, -1};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_V = 0;
+    private static final int COL_CC = 0;
+    private static final int COL_DC = 1;
 
-    private final TIntArrayList connectedComponentNumber;
-
-    private final TIntArrayList dcComponentNumber;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     DcNodeImpl(Ref<NetworkImpl> ref, Ref<SubnetworkImpl> subnetworkRef, String id, String name, boolean fictitious, double nominalV) {
         super(id, name, fictitious);
         this.networkRef = Objects.requireNonNull(ref);
         this.subnetworkRef = subnetworkRef;
         this.nominalV = nominalV;
-        int variantArraySize = ref.get().getVariantManager().getVariantArraySize();
         dcTerminals = new ArrayList<>();
-        v = new TDoubleArrayList(variantArraySize);
-        connectedComponentNumber = new TIntArrayList(variantArraySize);
-        dcComponentNumber = new TIntArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            v.add(Double.NaN);
-            connectedComponentNumber.add(-1);
-            dcComponentNumber.add(-1);
-        }
+        this.variantStore = ref.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow();
     }
 
     @Override
@@ -98,14 +95,14 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
     @Override
     public double getV() {
         ValidationUtil.checkAccessOfRemovedEquipment(this.id, this.removed, "v");
-        return v.get(getNetwork().getVariantIndex());
+        return variantStore.getDouble(getNetwork().getVariantIndex(), COL_V, variantStoreRow);
     }
 
     @Override
     public DcNode setV(double v) {
         ValidationUtil.checkModifyOfRemovedEquipment(this.id, this.removed, "v");
         int variantIndex = getNetwork().getVariantIndex();
-        double oldValue = this.v.set(variantIndex, v);
+        double oldValue = variantStore.setDouble(variantIndex, COL_V, variantStoreRow, v);
         String variantId = getNetwork().getVariantManager().getVariantId(variantIndex);
         getNetwork().getListeners().notifyUpdate(this, "v", variantId, oldValue, v);
         return this;
@@ -123,7 +120,7 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
 
     public void setConnectedComponentNumber(int connectedComponentNumber) {
         int variantIndex = networkRef.get().getVariantIndex();
-        int oldValue = this.connectedComponentNumber.set(variantIndex, connectedComponentNumber);
+        int oldValue = variantStore.setInt(variantIndex, COL_CC, variantStoreRow, connectedComponentNumber);
         String variantId = networkRef.get().getVariantManager().getVariantId(variantIndex);
         networkRef.get().getListeners().notifyUpdate(this, "connectedComponentNumber", variantId, oldValue, connectedComponentNumber);
     }
@@ -131,20 +128,20 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
     public Component getConnectedComponent() {
         NetworkImpl.ConnectedComponentsManager ccm = networkRef.get().getConnectedComponentsManager();
         ccm.update();
-        return ccm.getComponent(connectedComponentNumber.get(networkRef.get().getVariantIndex()));
+        return ccm.getComponent(variantStore.getInt(networkRef.get().getVariantIndex(), COL_CC, variantStoreRow));
     }
 
     public void setDcComponentNumber(int componentNumber) {
         int variantIndex = networkRef.get().getVariantIndex();
-        int oldValue = this.dcComponentNumber.set(variantIndex, componentNumber);
+        int oldValue = variantStore.setInt(variantIndex, COL_DC, variantStoreRow, componentNumber);
         String variantId = networkRef.get().getVariantManager().getVariantId(variantIndex);
-        networkRef.get().getListeners().notifyUpdate(this, "dcComponentNumber", variantId, oldValue, dcComponentNumber);
+        networkRef.get().getListeners().notifyUpdate(this, "dcComponentNumber", variantId, oldValue, componentNumber);
     }
 
     public Component getDcComponent() {
         NetworkImpl.DcComponentsManager dcm = networkRef.get().getDcComponentsManager();
         dcm.update();
-        return dcm.getComponent(dcComponentNumber.get(networkRef.get().getVariantIndex()));
+        return dcm.getComponent(variantStore.getInt(networkRef.get().getVariantIndex(), COL_DC, variantStoreRow));
     }
 
     @Override
@@ -231,25 +228,15 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
         removed = true;
     }
 
+    // v / component numbers maintained columnarly by the network-level store, driven once per variant op
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        v.ensureCapacity(v.size() + number);
-        connectedComponentNumber.ensureCapacity(connectedComponentNumber.size() + number);
-        dcComponentNumber.ensureCapacity(dcComponentNumber.size() + number);
-        for (int i = 0; i < number; i++) {
-            v.add(v.get(sourceIndex));
-            connectedComponentNumber.add(connectedComponentNumber.get(sourceIndex));
-            dcComponentNumber.add(dcComponentNumber.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        for (int i = 0; i < number; i++) {
-            v.removeAt(v.size() - 1);
-            connectedComponentNumber.removeAt(connectedComponentNumber.size() - 1);
-            dcComponentNumber.removeAt(dcComponentNumber.size() - 1);
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -259,10 +246,14 @@ public class DcNodeImpl extends AbstractDcTopologyVisitable<DcNode> implements D
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            v.set(index, v.get(sourceIndex));
-            connectedComponentNumber.set(index, connectedComponentNumber.get(sourceIndex));
-            dcComponentNumber.set(index, dcComponentNumber.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork);
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

@@ -11,7 +11,8 @@ import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.Generator;
 import com.powsybl.iidm.network.extensions.CoordinatedReactiveControl;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
-import gnu.trove.list.array.TDoubleArrayList;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,25 +22,30 @@ import org.slf4j.LoggerFactory;
 public class CoordinatedReactiveControlImpl extends AbstractMultiVariantIdentifiableExtension<Generator> implements CoordinatedReactiveControl {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CoordinatedReactiveControlImpl.class);
-    private TDoubleArrayList qPercent;
+
+    private static final String STORE_KEY = "CoordinatedReactiveControl";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_Q_PERCENT = 0;
+
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     public CoordinatedReactiveControlImpl(Generator generator, double qPercent) {
         super(generator);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.qPercent = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.qPercent.add(checkQPercent(generator, qPercent));
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {checkQPercent(generator, qPercent)}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     @Override
     public double getQPercent() {
-        return qPercent.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_Q_PERCENT, variantStoreRow);
     }
 
     @Override
     public void setQPercent(double qPercent) {
-        this.qPercent.set(getVariantIndex(), checkQPercent(getExtendable(), qPercent));
+        variantStore.setDouble(getVariantIndex(), COL_Q_PERCENT, variantStoreRow, checkQPercent(getExtendable(), qPercent));
     }
 
     private static double checkQPercent(Generator generator, double qPercent) {
@@ -55,15 +61,12 @@ public class CoordinatedReactiveControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        qPercent.ensureCapacity(qPercent.size() + number);
-        for (int i = 0; i < number; ++i) {
-            qPercent.add(qPercent.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        qPercent.remove(qPercent.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -73,8 +76,13 @@ public class CoordinatedReactiveControlImpl extends AbstractMultiVariantIdentifi
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            qPercent.set(index, qPercent.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

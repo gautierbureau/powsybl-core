@@ -8,11 +8,11 @@
 
 package com.powsybl.iidm.network.impl.extensions;
 
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.HvdcLine;
 import com.powsybl.iidm.network.extensions.HvdcAngleDroopActivePowerControl;
 import com.powsybl.iidm.network.impl.AbstractMultiVariantIdentifiableExtension;
-import gnu.trove.list.array.TFloatArrayList;
+import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 
 import java.util.Objects;
 
@@ -25,65 +25,55 @@ import java.util.Objects;
  */
 public class HvdcAngleDroopActivePowerControlImpl extends AbstractMultiVariantIdentifiableExtension<HvdcLine> implements HvdcAngleDroopActivePowerControl {
 
-    /**
-     * Active power offset in MW
-     */
-    private TFloatArrayList p0;
+    // p0 (active power offset in MW) and droop (in MW/degree) held as double columns; enabled held as boolean column
+    private static final String STORE_KEY = "HvdcAngleDroopActivePowerControl";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN, Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_P0 = 0;
+    private static final int COL_DROOP = 1;
+    private static final int COL_ENABLED = 0;
 
-    /**
-     * Droop in MW/degree
-     */
-    private TFloatArrayList droop;
-
-    /**
-     * Enables or disables this active power control mode.
-     * If this active power control mode is disabled, use the setpoint mode by default.
-     */
-    private TBooleanArrayList enabled;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     public HvdcAngleDroopActivePowerControlImpl(HvdcLine hvdcLine, float p0, float droop, boolean enabled) {
         super(hvdcLine);
-        int variantArraySize = getVariantManagerHolder().getVariantManager().getVariantArraySize();
-        this.p0 = new TFloatArrayList(variantArraySize);
-        this.droop = new TFloatArrayList(variantArraySize);
-        this.enabled = new TBooleanArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.p0.add(checkP0(p0, hvdcLine));
-            this.droop.add(checkDroop(droop, hvdcLine));
-            this.enabled.add(enabled);
-        }
+        this.variantStore = getVariantManagerHolder().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(
+                new double[] {checkP0(p0, hvdcLine), checkDroop(droop, hvdcLine)}, INT_DEFAULTS, new boolean[] {enabled});
     }
 
     @Override
     public float getP0() {
-        return p0.get(getVariantIndex());
+        return (float) variantStore.getDouble(getVariantIndex(), COL_P0, variantStoreRow);
     }
 
     @Override
     public float getDroop() {
-        return droop.get(getVariantIndex());
+        return (float) variantStore.getDouble(getVariantIndex(), COL_DROOP, variantStoreRow);
     }
 
     @Override
     public boolean isEnabled() {
-        return enabled.get(getVariantIndex());
+        return variantStore.getBoolean(getVariantIndex(), COL_ENABLED, variantStoreRow);
     }
 
     @Override
     public HvdcAngleDroopActivePowerControl setP0(float p0) {
-        this.p0.set(getVariantIndex(), checkP0(p0, this.getExtendable()));
+        variantStore.setDouble(getVariantIndex(), COL_P0, variantStoreRow, checkP0(p0, this.getExtendable()));
         return this;
     }
 
     @Override
     public HvdcAngleDroopActivePowerControl setDroop(float droop) {
-        this.droop.set(getVariantIndex(), checkDroop(droop, this.getExtendable()));
+        variantStore.setDouble(getVariantIndex(), COL_DROOP, variantStoreRow, checkDroop(droop, this.getExtendable()));
         return this;
     }
 
     @Override
     public HvdcAngleDroopActivePowerControl setEnabled(boolean enabled) {
-        this.enabled.set(getVariantIndex(), enabled);
+        variantStore.setBoolean(getVariantIndex(), COL_ENABLED, variantStoreRow, enabled);
         return this;
     }
 
@@ -128,21 +118,12 @@ public class HvdcAngleDroopActivePowerControlImpl extends AbstractMultiVariantId
 
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
-        p0.ensureCapacity(p0.size() + number);
-        droop.ensureCapacity(droop.size() + number);
-        enabled.ensureCapacity(enabled.size() + number);
-        for (int i = 0; i < number; ++i) {
-            p0.add(p0.get(sourceIndex));
-            droop.add(droop.get(sourceIndex));
-            enabled.add(enabled.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     @Override
     public void reduceVariantArraySize(int number) {
-        p0.remove(p0.size() - number, number);
-        droop.remove(droop.size() - number, number);
-        enabled.remove(enabled.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     @Override
@@ -152,10 +133,13 @@ public class HvdcAngleDroopActivePowerControlImpl extends AbstractMultiVariantId
 
     @Override
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            p0.set(index, p0.get(sourceIndex));
-            droop.set(index, droop.get(sourceIndex));
-            enabled.set(index, enabled.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

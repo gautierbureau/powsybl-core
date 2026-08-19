@@ -10,8 +10,8 @@ package com.powsybl.iidm.network.impl.extensions;
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.extensions.PilotPoint;
 import com.powsybl.iidm.network.impl.NetworkImpl;
+import com.powsybl.iidm.network.impl.NumericVariantStore;
 import com.powsybl.iidm.network.impl.VariantManagerHolder;
-import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -25,19 +25,23 @@ import java.util.function.UnaryOperator;
  */
 class PilotPointImpl implements PilotPoint {
 
+    private static final String STORE_KEY = "PilotPoint";
+    private static final double[] DOUBLE_DEFAULTS = {Double.NaN};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {};
+    private static final int COL_TARGET_V = 0;
+
     private final List<String> busbarSectionsOrBusesIds;
 
-    private final TDoubleArrayList targetV;
+    private NumericVariantStore variantStore;
+    private int variantStoreRow;
 
     private ControlZoneImpl controlZone;
 
     PilotPointImpl(List<String> busbarSectionsOrBusesIds, double targetV, VariantManagerHolder variantManagerHolder) {
         this.busbarSectionsOrBusesIds = new ArrayList<>(Objects.requireNonNull(busbarSectionsOrBusesIds));
-        int variantArraySize = variantManagerHolder.getVariantManager().getVariantArraySize();
-        this.targetV = new TDoubleArrayList(variantArraySize);
-        for (int i = 0; i < variantArraySize; i++) {
-            this.targetV.add(targetV);
-        }
+        this.variantStore = variantManagerHolder.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = variantStore.allocateRow(new double[] {targetV}, INT_DEFAULTS, BOOLEAN_DEFAULTS);
     }
 
     public void setControlZone(ControlZoneImpl controlZone) {
@@ -66,7 +70,7 @@ class PilotPointImpl implements PilotPoint {
 
     @Override
     public double getTargetV() {
-        return targetV.get(getVariantIndex());
+        return variantStore.getDouble(getVariantIndex(), COL_TARGET_V, variantStoreRow);
     }
 
     @Override
@@ -75,9 +79,9 @@ class PilotPointImpl implements PilotPoint {
             throw new PowsyblException("Invalid pilot point target voltage for zone '" + controlZone.getName() + "'");
         }
         int variantIndex = getVariantIndex();
-        double oldTargetV = this.targetV.get(variantIndex);
+        double oldTargetV = variantStore.getDouble(variantIndex, COL_TARGET_V, variantStoreRow);
         if (targetV != oldTargetV) {
-            this.targetV.set(variantIndex, targetV);
+            variantStore.setDouble(variantIndex, COL_TARGET_V, variantStoreRow, targetV);
             SecondaryVoltageControlImpl secondaryVoltageControl = controlZone.getSecondaryVoltageControl();
             NetworkImpl network = (NetworkImpl) secondaryVoltageControl.getExtendable();
             String variantId = network.getVariantManager().getVariantId(variantIndex);
@@ -87,19 +91,20 @@ class PilotPointImpl implements PilotPoint {
     }
 
     void extendVariantArraySize(int number, int sourceIndex) {
-        targetV.ensureCapacity(targetV.size() + number);
-        for (int i = 0; i < number; ++i) {
-            targetV.add(targetV.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
     }
 
     void reduceVariantArraySize(int number) {
-        targetV.remove(targetV.size() - number, number);
+        // handled by NumericVariantStore
     }
 
     void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
-        for (int index : indexes) {
-            targetV.set(index, targetV.get(sourceIndex));
-        }
+        // handled by NumericVariantStore
+    }
+
+    void reHomeVariantStores(NetworkImpl targetNetwork) {
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.variantStoreRow = newStore.importRow(variantStore, variantStoreRow);
+        this.variantStore = newStore;
     }
 }

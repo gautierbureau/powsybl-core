@@ -8,7 +8,6 @@
 package com.powsybl.iidm.network.impl;
 
 import com.google.common.collect.BiMap;
-import com.google.common.collect.FluentIterable;
 import com.google.common.collect.HashBiMap;
 import com.google.common.primitives.Ints;
 import com.powsybl.commons.PowsyblException;
@@ -30,6 +29,11 @@ public class VariantManagerImpl implements VariantManager {
     private static final int INITIAL_VARIANT_INDEX = 0;
 
     private VariantContext variantContext;
+
+    // The thread that opened the current multi-threaded phase, i.e. the one the VariantManager contract calls
+    // "main": while that phase is open it is the only thread allowed to structurally modify the network. Null
+    // when multi-thread access is off. Volatile because worker threads read it to check themselves.
+    private volatile Thread multiThreadAccessOwner;
 
     private final NetworkIndex networkIndex;
 
@@ -101,8 +105,10 @@ public class VariantManagerImpl implements VariantManager {
         variantContext.setVariantIndex(index);
     }
 
-    private Iterable<MultiVariantObject> getStafulObjects() {
-        return FluentIterable.from(networkIndex.getAll()).filter(MultiVariantObject.class);
+    private List<MultiVariantObject> getStafulObjects() {
+        // the list is cached and incrementally invalidated by the network index, so repeated variant
+        // operations do not re-scan and re-filter all the network identifiables each time
+        return networkIndex.getStatefulObjects();
     }
 
     @Override
@@ -156,10 +162,13 @@ public class VariantManagerImpl implements VariantManager {
             }
         }
 
-        allocateVariantArrayElements(sourceIndex, recycled, overwritten);
+        // compute the stateful objects list only once for the whole clone operation
+        List<MultiVariantObject> statefulObjects = getStafulObjects();
+
+        allocateVariantArrayElements(sourceIndex, recycled, overwritten, statefulObjects);
 
         if (extendedCount > 0) {
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.extendVariantArraySize(initVariantArraySize, extendedCount, sourceIndex);
             }
             LOGGER.trace("Extending variant array size to {} (+{})", variantArraySize, extendedCount);
@@ -176,10 +185,11 @@ public class VariantManagerImpl implements VariantManager {
         }
     }
 
-    private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten) {
+    private void allocateVariantArrayElements(Integer sourceIndex, List<Integer> recycled, List<Integer> overwritten,
+                                              List<MultiVariantObject> statefulObjects) {
         if (!recycled.isEmpty()) {
             int[] indexes = Ints.toArray(recycled);
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
@@ -188,7 +198,7 @@ public class VariantManagerImpl implements VariantManager {
         }
         if (!overwritten.isEmpty()) {
             int[] indexes = Ints.toArray(overwritten);
-            for (MultiVariantObject obj : getStafulObjects()) {
+            for (MultiVariantObject obj : statefulObjects) {
                 obj.allocateVariantArrayElement(indexes, sourceIndex);
             }
             if (LOGGER.isTraceEnabled()) {
@@ -249,6 +259,9 @@ public class VariantManagerImpl implements VariantManager {
                 newVariantContext.setVariantIndex(variantContext.getVariantIndex());
             }
             variantContext = newVariantContext;
+            // Only on the off -> on transition, so that a redundant allow(true) from a worker thread does not
+            // steal ownership from the thread that actually opened the multi-threaded phase.
+            multiThreadAccessOwner = Thread.currentThread();
         } else if (!allow && !(variantContext instanceof MultiVariantContext)) {
             if (variantContext.isIndexSet()) {
                 variantContext = new MultiVariantContext(variantContext.getVariantIndex());
@@ -257,6 +270,47 @@ public class VariantManagerImpl implements VariantManager {
                 // if it is not set, because missing initialization error are rare.
                 variantContext = new MultiVariantContext(INITIAL_VARIANT_INDEX);
             }
+            multiThreadAccessOwner = null;
+        }
+    }
+
+    /**
+     * Fail if the calling thread is not allowed to structurally modify the columnar variant stores
+     * (see {@link NumericVariantStore}) right now.
+     *
+     * <p>The {@link VariantManager} contract is that variants are pre-allocated, multi-thread access is enabled
+     * from the main thread, worker threads then only read and write pre-allocated variants — each on its own
+     * variant index — and structural changes resume on the main thread once that phase is over. A structural
+     * store operation from a worker thread during that phase can resize a store (reassigning the backing array
+     * and the row stride together) underneath a concurrent reader, which then indexes into the wrong variant or
+     * out of bounds. Because the store is shared by every object of a type, that corrupts all of them at once
+     * and usually surfaces as a plausible but wrong value rather than an exception.</p>
+     *
+     * <p>The check is therefore limited to exactly that window: it is inert while multi-thread access is off
+     * (structural changes are then unconstrained, including after handing the network to another thread), and
+     * it accepts structural changes from the thread that enabled multi-thread access, which the contract
+     * explicitly allows.</p>
+     *
+     * <p>Not every store operation driven by a variant operation is checked, only those that can actually
+     * corrupt a concurrent reader: the ones that reallocate the backing arrays, change the row stride or the
+     * variant capacity, mutate the row bookkeeping, or write bands other threads own — {@code allocateRow},
+     * {@code freeRow}, {@code fillInt}/{@code fillBoolean}, {@code extend} and {@code allocate}. The two
+     * operations {@link #removeVariant(String)} drives are deliberately left unchecked: {@code reduce} only
+     * decrements the live band count and {@code delete} is a no-op, neither touches geometry, and no getter or
+     * per-variant setter reads the band count. Removing a variant from a worker thread is a supported pattern
+     * (see {@code AbstractExceptionIsThrownWhenRemoveVariantAndWorkingVariantIsNotSetTest} in the TCK) and must
+     * keep working.</p>
+     */
+    void checkStructuralModification(String store, String operation) {
+        Thread owner = multiThreadAccessOwner;
+        Thread current = Thread.currentThread();
+        if (owner != null && owner != current) {
+            throw new PowsyblException("Structural modification (" + operation + ") of the columnar variant store '"
+                    + store + "' from thread '" + current.getName() + "' while multi-thread variant access is enabled"
+                    + " and owned by thread '" + owner.getName() + "'. The VariantManager contract only allows"
+                    + " worker threads to read and write pre-allocated variants; structural changes must happen on"
+                    + " the thread that enabled multi-thread access. Doing this concurrently can resize the store"
+                    + " under a reader and silently corrupt every object of this type.");
         }
     }
 

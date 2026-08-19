@@ -9,7 +9,6 @@ package com.powsybl.iidm.network.impl;
 
 import com.powsybl.commons.PowsyblException;
 import com.powsybl.commons.ref.Ref;
-import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.Terminal;
 import com.powsybl.iidm.network.TerminalNumber;
 import com.powsybl.iidm.network.ThreeSides;
@@ -121,18 +120,26 @@ class BusTerminal extends AbstractTerminal {
 
     // attributes depending on the variant
 
-    private final TBooleanArrayList connected;
+    // connected is held columnarly (boolean column); connectableBusId is an object (String) list, kept per-object
+    private static final String STORE_KEY = "BusTerminal";
+    private static final double[] DOUBLE_DEFAULTS = {};
+    private static final int[] INT_DEFAULTS = {};
+    private static final boolean[] BOOLEAN_DEFAULTS = {false};
+    private static final int COL_CONNECTED = 0;
+
+    private NumericVariantStore connectedStore;
+    private int connectedStoreRow;
 
     private final ArrayList<String> connectableBusId;
 
-    BusTerminal(Ref<? extends VariantManagerHolder> network, ThreeSides side, TerminalNumber terminalNumber, String connectableBusId, boolean connected) {
+    BusTerminal(Ref<? extends VariantStoreHolder> network, ThreeSides side, TerminalNumber terminalNumber, String connectableBusId, boolean connected) {
         super(network, side, terminalNumber);
         Objects.requireNonNull(connectableBusId);
         int variantArraySize = network.get().getVariantManager().getVariantArraySize();
-        this.connected = new TBooleanArrayList(variantArraySize);
+        this.connectedStore = network.get().getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.connectedStoreRow = connectedStore.allocateRow(DOUBLE_DEFAULTS, INT_DEFAULTS, new boolean[] {connected});
         this.connectableBusId = new ArrayList<>(variantArraySize);
         for (int i = 0; i < variantArraySize; i++) {
-            this.connected.add(connected);
             this.connectableBusId.add(connectableBusId);
         }
     }
@@ -157,7 +164,7 @@ class BusTerminal extends AbstractTerminal {
             throw new PowsyblException(UNMODIFIABLE_REMOVED_EQUIPMENT + connectable.id);
         }
         int variantIndex = getVariantManagerHolder().getVariantIndex();
-        boolean oldValue = this.connected.set(variantIndex, connected);
+        boolean oldValue = connectedStore.setBoolean(variantIndex, COL_CONNECTED, connectedStoreRow, connected);
         String variantId = getVariantManagerHolder().getVariantManager().getVariantId(variantIndex);
         getConnectable().notifyUpdate("connected" + getAttributeSideOrNumberSuffix(), variantId, oldValue, connected);
     }
@@ -167,7 +174,7 @@ class BusTerminal extends AbstractTerminal {
         if (removed) {
             throw new PowsyblException("Cannot access connectivity status of removed equipment " + connectable.id);
         }
-        return this.connected.get(getVariantManagerHolder().getVariantIndex());
+        return connectedStore.getBoolean(getVariantManagerHolder().getVariantIndex(), COL_CONNECTED, connectedStoreRow);
     }
 
     @Override
@@ -189,6 +196,15 @@ class BusTerminal extends AbstractTerminal {
             throw new PowsyblException(String.format("Associated equipment %s is removed", connectable.id));
         }
         getTopologyModel().traverse(this, traverser, traversalType);
+    }
+
+    @Override
+    public void remove() {
+        boolean wasRemoved = removed;
+        super.remove(); // frees the p/q store row (and sets removed)
+        if (!wasRemoved) {
+            connectedStore.freeRow(connectedStoreRow);
+        }
     }
 
     @Override
@@ -219,13 +235,12 @@ class BusTerminal extends AbstractTerminal {
         return getClass().getSimpleName() + "[" + getConnectableBusId() + "]";
     }
 
+    // connected is maintained columnarly by the network-level store; only the connectableBusId list is here.
     @Override
     public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         super.extendVariantArraySize(initVariantArraySize, number, sourceIndex);
-        connected.ensureCapacity(connected.size() + number);
         connectableBusId.ensureCapacity(connectableBusId.size() + number);
         for (int i = 0; i < number; i++) {
-            connected.add(connected.get(sourceIndex));
             connectableBusId.add(connectableBusId.get(sourceIndex));
         }
     }
@@ -234,7 +249,6 @@ class BusTerminal extends AbstractTerminal {
     public void reduceVariantArraySize(int number) {
         super.reduceVariantArraySize(number);
         for (int i = 0; i < number; i++) {
-            connected.removeAt(connected.size() - 1);
             connectableBusId.remove(connectableBusId.size() - 1);
         }
     }
@@ -249,8 +263,15 @@ class BusTerminal extends AbstractTerminal {
     public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         super.allocateVariantArrayElement(indexes, sourceIndex);
         for (int index : indexes) {
-            connected.set(index, connected.get(sourceIndex));
             connectableBusId.set(index, connectableBusId.get(sourceIndex));
         }
+    }
+
+    @Override
+    public void reHomeVariantStores(NetworkImpl targetNetwork) {
+        super.reHomeVariantStores(targetNetwork); // p/q
+        NumericVariantStore newStore = targetNetwork.getOrCreateNumericVariantStore(STORE_KEY, DOUBLE_DEFAULTS, INT_DEFAULTS, BOOLEAN_DEFAULTS);
+        this.connectedStoreRow = newStore.importRow(connectedStore, connectedStoreRow);
+        this.connectedStore = newStore;
     }
 }

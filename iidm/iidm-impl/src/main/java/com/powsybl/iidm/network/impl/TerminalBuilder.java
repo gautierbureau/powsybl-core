@@ -22,7 +22,7 @@ import java.util.Objects;
  */
 class TerminalBuilder {
 
-    private final Ref<? extends VariantManagerHolder> network;
+    private final Ref<? extends VariantStoreHolder> network;
 
     private final Validable validable;
 
@@ -38,7 +38,7 @@ class TerminalBuilder {
 
     private String connectableBus;
 
-    TerminalBuilder(Ref<? extends VariantManagerHolder> network, TopologyKind topologyKind, Validable validable, ThreeSides side, TerminalNumber terminalNumber) {
+    TerminalBuilder(Ref<? extends VariantStoreHolder> network, TopologyKind topologyKind, Validable validable, ThreeSides side, TerminalNumber terminalNumber) {
         this.network = Objects.requireNonNull(network);
         this.validable = Objects.requireNonNull(validable);
         this.topologyKind = Objects.requireNonNull(topologyKind);
