@@ -220,7 +220,7 @@ public class PropertyBag extends HashMap<String, String> {
     }
 
     public boolean isResource(String name) {
-        return RESOURCE_NAMES.contains(name) || resourceNames.contains(name);
+        return RESOURCE_NAMES.contains(name) || resourceNames != null && resourceNames.contains(name);
     }
 
     public String namespacePrefix(String name) {
@@ -229,34 +229,55 @@ public class PropertyBag extends HashMap<String, String> {
     }
 
     public void setResourceNames(List<String> resourceNames) {
-        this.resourceNames.clear();
-        this.resourceNames.addAll(Objects.requireNonNull(resourceNames));
+        Objects.requireNonNull(resourceNames);
+        if (this.resourceNames == null) {
+            this.resourceNames = new ArrayList<>();
+        } else {
+            this.resourceNames.clear();
+        }
+        this.resourceNames.addAll(resourceNames);
     }
 
     public void setClassPropertyNames(List<String> classPropertyNames) {
-        this.classPropertyNames.clear();
-        this.classPropertyNames.addAll(Objects.requireNonNull(classPropertyNames));
+        Objects.requireNonNull(classPropertyNames);
+        if (this.classPropertyNames == null) {
+            this.classPropertyNames = new ArrayList<>();
+        } else {
+            this.classPropertyNames.clear();
+        }
+        this.classPropertyNames.addAll(classPropertyNames);
     }
 
     public boolean isClassProperty(String name) {
-        return classPropertyNames.contains(name);
+        return classPropertyNames != null && classPropertyNames.contains(name);
     }
 
     public void setMultivaluedProperty(List<String> multiValuedPropertyNames) {
-        this.multiValuedPropertyNames.clear();
-        this.multiValuedPropertyNames.addAll(Objects.requireNonNull(multiValuedPropertyNames));
+        Objects.requireNonNull(multiValuedPropertyNames);
+        if (this.multiValuedPropertyNames == null) {
+            this.multiValuedPropertyNames = new ArrayList<>();
+        } else {
+            this.multiValuedPropertyNames.clear();
+        }
+        this.multiValuedPropertyNames.addAll(multiValuedPropertyNames);
     }
 
     public boolean isMultivaluedProperty(String name) {
-        return multiValuedPropertyNames.contains(name);
+        return multiValuedPropertyNames != null && multiValuedPropertyNames.contains(name);
     }
 
     public PropertyBag copy() {
         // Create just a shallow copy of this property bag
         PropertyBag pb1 = new PropertyBag(propertyNames, removeInitialUnderscoreForIdentifiers, decodeEscapedIdentifiers);
-        pb1.setResourceNames(resourceNames);
-        pb1.setClassPropertyNames(classPropertyNames);
-        pb1.setMultivaluedProperty(multiValuedPropertyNames);
+        if (resourceNames != null) {
+            pb1.setResourceNames(resourceNames);
+        }
+        if (classPropertyNames != null) {
+            pb1.setClassPropertyNames(classPropertyNames);
+        }
+        if (multiValuedPropertyNames != null) {
+            pb1.setMultivaluedProperty(multiValuedPropertyNames);
+        }
         pb1.putAll(this);
         return pb1;
     }
@@ -264,9 +285,11 @@ public class PropertyBag extends HashMap<String, String> {
     private final List<String> propertyNames;
     private final boolean removeInitialUnderscoreForIdentifiers;
     private final boolean decodeEscapedIdentifiers;
-    private final List<String> resourceNames = new ArrayList<>();
-    private final List<String> classPropertyNames = new ArrayList<>();
-    private final List<String> multiValuedPropertyNames = new ArrayList<>();
+    // Lazily allocated: empty for the vast majority of materialized PropertyBags, so a null saves three
+    // empty lists per bag (one per result row of every query during a CGMES import).
+    private List<String> resourceNames;
+    private List<String> classPropertyNames;
+    private List<String> multiValuedPropertyNames;
 
     private static final String NAMESPACE_PREFIX = "data";
     private static final String INDENTATION = "    ";
