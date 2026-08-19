@@ -80,6 +80,11 @@ public class LineCouplingsImpl extends AbstractExtension<Network> implements Lin
         unsubscribeListener();
         super.setExtendable(network);
 
+        // The extension is detached from its holder (e.g. when removed or replaced): nothing to subscribe to
+        if (network == null) {
+            return;
+        }
+
         listener = new NetworkListener() {
             @Override
             public void beforeRemoval(Identifiable<?> identifiable) {
@@ -100,5 +105,6 @@ public class LineCouplingsImpl extends AbstractExtension<Network> implements Lin
         if (this.getExtendable() != null && listener != null) {
             this.getExtendable().removeListener(listener);
         }
+        listener = null;
     }
 }
