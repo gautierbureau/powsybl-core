@@ -18,6 +18,13 @@ import com.powsybl.iidm.network.impl.TerminalExt;
 import java.util.*;
 
 /**
+ * The reference terminals of all the variants share one list, and every terminal is reference counted by
+ * scanning the sets of all the variants, so working on one variant is not independent from working on
+ * another one. Every method touching {@code terminalsPerVariant} is therefore synchronized: without it,
+ * two threads running a load flow on two variants of the same network - which
+ * {@code allowVariantMultiThreadAccess} is meant to support - can have one scanning a set while the other
+ * adds to it, and the scan fails with a ConcurrentModificationException.
+ *
  * @author Damien Jeandemange {@literal <damien.jeandemange at artelys.com>}
  */
 class ReferenceTerminalsImpl extends AbstractMultiVariantIdentifiableExtension<Network> implements ReferenceTerminals {
@@ -77,25 +84,25 @@ class ReferenceTerminalsImpl extends AbstractMultiVariantIdentifiableExtension<N
     }
 
     @Override
-    public Set<Terminal> getReferenceTerminals() {
+    public synchronized Set<Terminal> getReferenceTerminals() {
         return ImmutableSet.copyOf(terminalsPerVariant.get(getVariantIndex()));
     }
 
     @Override
-    public void setReferenceTerminals(Set<Terminal> terminals) {
+    public synchronized void setReferenceTerminals(Set<Terminal> terminals) {
         Objects.requireNonNull(terminals);
         terminals.forEach(t -> checkTerminalInNetwork(t, getExtendable()));
         setTerminalsAndUpdateReferences(getVariantIndex(), terminals);
     }
 
     @Override
-    public ReferenceTerminals reset() {
+    public synchronized ReferenceTerminals reset() {
         setTerminalsAndUpdateReferences(getVariantIndex(), Collections.emptySet());
         return this;
     }
 
     @Override
-    public ReferenceTerminals addReferenceTerminal(Terminal terminal) {
+    public synchronized ReferenceTerminals addReferenceTerminal(Terminal terminal) {
         Objects.requireNonNull(terminal);
         checkTerminalInNetwork(terminal, getExtendable());
         updateTerminalsAndUpdateReferences(getVariantIndex(), terminal);
@@ -103,7 +110,7 @@ class ReferenceTerminalsImpl extends AbstractMultiVariantIdentifiableExtension<N
     }
 
     @Override
-    public void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
+    public synchronized void extendVariantArraySize(int initVariantArraySize, int number, int sourceIndex) {
         terminalsPerVariant.ensureCapacity(terminalsPerVariant.size() + number);
         Set<Terminal> sourceTerminals = terminalsPerVariant.get(sourceIndex);
         for (int i = 0; i < number; ++i) {
@@ -112,19 +119,19 @@ class ReferenceTerminalsImpl extends AbstractMultiVariantIdentifiableExtension<N
     }
 
     @Override
-    public void reduceVariantArraySize(int number) {
+    public synchronized void reduceVariantArraySize(int number) {
         for (int i = 0; i < number; i++) {
             removeTerminalsAndUpdateReferences(terminalsPerVariant.size() - 1); // remove elements from the top to avoid moves inside the array
         }
     }
 
     @Override
-    public void deleteVariantArrayElement(int index) {
+    public synchronized void deleteVariantArrayElement(int index) {
         setTerminalsAndUpdateReferences(index, Collections.emptySet());
     }
 
     @Override
-    public void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
+    public synchronized void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         Set<Terminal> sourceTerminals = terminalsPerVariant.get(sourceIndex);
         for (int index : indexes) {
             setTerminalsAndUpdateReferences(index, sourceTerminals);
@@ -149,14 +156,14 @@ class ReferenceTerminalsImpl extends AbstractMultiVariantIdentifiableExtension<N
     }
 
     @Override
-    public void onReferencedRemoval(Terminal removedTerminal) {
+    public synchronized void onReferencedRemoval(Terminal removedTerminal) {
         for (Set<Terminal> terminals : terminalsPerVariant) {
             terminals.remove(removedTerminal);
         }
     }
 
     @Override
-    public void cleanup() {
+    public synchronized void cleanup() {
         for (Set<Terminal> terminals : terminalsPerVariant) {
             for (Terminal terminal : terminals) {
                 ((TerminalExt) terminal).getReferrerManager().unregister(this);
