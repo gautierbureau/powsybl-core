@@ -29,7 +29,9 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
@@ -131,6 +133,10 @@ public class TimeSeriesTable {
 
     private final List<Integer> versions;
 
+    // version -> index in the sorted versions list, so per-cell accessors do not linearly scan (and box) the
+    // versions list on every getVersionIndex / checkVersionIsInList call.
+    private final Map<Integer, Integer> versionIndexes;
+
     private List<TimeSeriesMetadata> timeSeriesMetadata;
 
     private final TimeSeriesIndex tableIndex;
@@ -173,6 +179,11 @@ public class TimeSeriesTable {
         }
 
         this.versions = versions.stream().sorted().toList();
+        Map<Integer, Integer> versionIndexesTmp = new HashMap<>();
+        for (int i = 0; i < this.versions.size(); i++) {
+            versionIndexesTmp.put(this.versions.get(i), i);
+        }
+        this.versionIndexes = versionIndexesTmp;
         this.tableIndex = Objects.requireNonNull(tableIndex);
         this.byteBufferAllocator = Objects.requireNonNull(byteBufferAllocator);
     }
@@ -276,11 +287,12 @@ public class TimeSeriesTable {
     }
 
     private int getVersionIndex(int version) {
-        return versions.indexOf(version);
+        Integer index = versionIndexes.get(version);
+        return index != null ? index : -1;
     }
 
     private void checkVersionIsInList(int version) {
-        if (!versions.contains(version)) {
+        if (!versionIndexes.containsKey(version)) {
             throw new IllegalArgumentException("Version is out of the list " + versions);
         }
     }
