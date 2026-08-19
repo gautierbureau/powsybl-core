@@ -14,7 +14,6 @@ import com.powsybl.powerfactory.model.DataAttributeType;
 import com.powsybl.powerfactory.model.DataObjectRefKey;
 import com.powsybl.powerfactory.model.PowerFactoryException;
 import org.apache.commons.io.input.BOMInputStream;
-import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.math3.linear.BlockRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.slf4j.Logger;
@@ -286,19 +285,19 @@ public class DgsParser {
 
     private static String[] splitConsideringQuotedText(String line) {
         Objects.requireNonNull(line);
-        String[] tokens = new String[] {};
+        List<String> tokens = new ArrayList<>();
         Matcher m = QUOTED_TEXT_PATTERN.matcher(line);
         int start = 0;
         while (m.find()) {
-            tokens = ArrayUtils.addAll(tokens, line.substring(start, m.start() - 1).split(";"));
-            tokens = ArrayUtils.add(tokens, line.substring(m.start() + 1, m.end() - 1));
+            Collections.addAll(tokens, line.substring(start, m.start() - 1).split(";"));
+            tokens.add(line.substring(m.start() + 1, m.end() - 1));
             // Skip the delimiter
             start = m.end() + 1;
         }
         if (start < line.length()) {
-            tokens = ArrayUtils.addAll(tokens, line.substring(start).split(";"));
+            Collections.addAll(tokens, line.substring(start).split(";"));
         }
-        return tokens;
+        return tokens.toArray(new String[0]);
     }
 
     private static DataAttributeType getVectorAttributeType(DataAttributeType attributeType) {
