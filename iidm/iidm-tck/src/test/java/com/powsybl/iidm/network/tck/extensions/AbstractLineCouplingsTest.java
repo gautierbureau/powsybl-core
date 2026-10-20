@@ -18,6 +18,8 @@ import java.time.ZonedDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -293,5 +295,50 @@ public abstract class AbstractLineCouplingsTest {
 
         l2Copy.remove();
         assertEquals(1, lc.getMutualCouplings().size());
+    }
+
+    @Test
+    void testRemoveExtension() {
+        Network network = EurostagTutorialExample1Factory.create();
+        network.newExtension(LineCouplingsAdder.class).add();
+
+        assertTrue(network.removeExtension(LineCouplings.class));
+        assertNull(network.getExtension(LineCouplings.class));
+        assertNull(network.getExtensionByName("lineCouplings"));
+
+        // The listener must have been unsubscribed: removing a line should not fail
+        network.getLine("NHV1_NHV2_1").remove();
+    }
+
+    @Test
+    void testAddExtensionTwice() {
+        Network network = EurostagTutorialExample1Factory.create();
+        Line l1 = network.getLine("NHV1_NHV2_1");
+        Line l2 = network.getLine("NHV1_NHV2_2");
+
+        network.newExtension(LineCouplingsAdder.class).add();
+        network.getExtension(LineCouplings.class)
+                .newMutualCoupling()
+                .withLine1(l1)
+                .withLine2(l2)
+                .withR(0.1)
+                .withX(0.2)
+                .add();
+
+        // Adding the extension again replaces the previous one
+        network.newExtension(LineCouplingsAdder.class).add();
+        LineCouplings lc = network.getExtension(LineCouplings.class);
+        assertNotNull(lc);
+        assertEquals(0, lc.getMutualCouplings().size());
+
+        // Only the new extension is subscribed: the removal is taken into account exactly once
+        lc.newMutualCoupling()
+                .withLine1(l1)
+                .withLine2(l2)
+                .withR(0.1)
+                .withX(0.2)
+                .add();
+        l1.remove();
+        assertEquals(0, lc.getMutualCouplings().size());
     }
 }
