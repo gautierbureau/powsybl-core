@@ -39,8 +39,6 @@ class ReferenceTerminalsConcurrencyTest {
     void oneVariantPerThread() throws Exception {
         Network network = EurostagTutorialExample1Factory.create();
         network.getVariantManager().allowVariantMultiThreadAccess(true);
-        // the extension is lazily created by ReferenceTerminals, which is not atomic: create it before the threads start
-        ReferenceTerminals.reset(network);
         List<Terminal> terminals = network.getGeneratorStream().map(Generator::getTerminal).toList();
 
         List<String> variantIds = new ArrayList<>();
