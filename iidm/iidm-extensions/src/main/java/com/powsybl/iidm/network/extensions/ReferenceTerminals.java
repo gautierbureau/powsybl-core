@@ -44,12 +44,7 @@ public interface ReferenceTerminals extends Extension<Network> {
      */
     static void reset(Network network) {
         Objects.requireNonNull(network);
-        ReferenceTerminals ext = network.getExtension(ReferenceTerminals.class);
-        if (ext == null) {
-            ext = network.newExtension(ReferenceTerminalsAdder.class)
-                    .withTerminals(Set.of())
-                    .add();
-        }
+        ReferenceTerminals ext = getOrCreate(network);
         ext.reset();
         // reset also all subnetworks
         network.getSubnetworks().forEach(ReferenceTerminals::reset);
@@ -63,12 +58,7 @@ public interface ReferenceTerminals extends Extension<Network> {
     static void addTerminal(Terminal terminal) {
         Objects.requireNonNull(terminal);
         Network network = terminal.getVoltageLevel().getNetwork();
-        ReferenceTerminals ext = network.getExtension(ReferenceTerminals.class);
-        if (ext == null) {
-            ext = network.newExtension(ReferenceTerminalsAdder.class)
-                    .withTerminals(Set.of())
-                    .add();
-        }
+        ReferenceTerminals ext = getOrCreate(network);
         ext.addReferenceTerminal(terminal);
     }
 
@@ -81,10 +71,31 @@ public interface ReferenceTerminals extends Extension<Network> {
      */
     static Set<Terminal> getTerminals(Network network) {
         Objects.requireNonNull(network);
-        ReferenceTerminals ext = network.getExtension(ReferenceTerminals.class);
+        ReferenceTerminals ext;
+        synchronized (network) {
+            ext = network.getExtension(ReferenceTerminals.class);
+        }
         if (ext == null) {
             return Collections.emptySet();
         }
         return ext.getReferenceTerminals();
+    }
+
+    /**
+     * Gets the extension of the network, creating it if needed.
+     * <p>Load flows on different variants of the same network can run concurrently and each of them can be the first
+     * to write reference terminals: the check and the creation are done under the network lock, so that two threads
+     * cannot both create the extension, the second one replacing (and detaching) the one the first thread works on.</p>
+     */
+    private static ReferenceTerminals getOrCreate(Network network) {
+        synchronized (network) {
+            ReferenceTerminals ext = network.getExtension(ReferenceTerminals.class);
+            if (ext == null) {
+                ext = network.newExtension(ReferenceTerminalsAdder.class)
+                        .withTerminals(Set.of())
+                        .add();
+            }
+            return ext;
+        }
     }
 }
