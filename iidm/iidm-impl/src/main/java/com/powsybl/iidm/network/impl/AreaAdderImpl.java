@@ -35,9 +35,11 @@ public class AreaAdderImpl extends AbstractIdentifiableAdder<AreaAdderImpl> impl
     AreaAdderImpl(Ref<NetworkImpl> networkRef, final RefChain<SubnetworkImpl> subnetworkRef) {
         this.networkRef = networkRef;
         this.subnetworkRef = subnetworkRef;
-        this.terminalAreaBoundaries = new HashMap<>();
-        this.boundaryAreaBoundaries = new HashMap<>();
-        this.voltageLevels = new HashSet<>();
+        // Linked, so that the area gets each of them in the order they were added, rather than in an
+        // order that changes from one run to the next (identity hash codes)
+        this.terminalAreaBoundaries = new LinkedHashMap<>();
+        this.boundaryAreaBoundaries = new LinkedHashMap<>();
+        this.voltageLevels = new LinkedHashSet<>();
         this.interchangeTarget = Double.NaN;
     }
 
