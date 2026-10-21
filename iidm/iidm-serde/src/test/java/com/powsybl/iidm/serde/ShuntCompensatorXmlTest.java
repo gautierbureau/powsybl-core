@@ -12,6 +12,7 @@ import com.powsybl.commons.io.TreeDataFormat;
 import com.powsybl.iidm.network.Network;
 import com.powsybl.iidm.network.ShuntCompensator;
 import com.powsybl.iidm.network.ShuntCompensatorLinearModel;
+import com.powsybl.iidm.network.ShuntCompensatorNonLinearModel;
 import com.powsybl.iidm.network.test.ShuntTestCaseFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -66,6 +67,15 @@ class ShuntCompensatorXmlTest extends AbstractIidmSerDeTest {
         // check that it doesn't fail for versions previous to 1.2 when log error is the IIDM version incompatibility behavior
         var options = new ExportOptions().setIidmVersionIncompatibilityBehavior(ExportOptions.IidmVersionIncompatibilityBehavior.LOG_ERROR);
         testWriteXmlAllPreviousVersions(network, options, "nonLinearShuntRoundTripRef.xml", IidmVersion.V_1_3);
+    }
+
+    @Test
+    void nonLinearShuntPropertiesTest() throws IOException {
+        Network network = ShuntTestCaseFactory.createNonLinear();
+        ShuntCompensatorNonLinearModel model = network.getShuntCompensator("SHUNT").getModel(ShuntCompensatorNonLinearModel.class);
+        model.setProperty("model", "value");
+        model.getAllSections().get(0).setProperty("section", "first");
+        allFormatsRoundTripTest(network, "nonLinearShuntPropertiesRoundTripRef.xml", CURRENT_IIDM_VERSION);
     }
 
     @Test

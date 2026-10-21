@@ -159,7 +159,9 @@ class ShuntCompensatorAdderImpl extends AbstractInjectionAdder<ShuntCompensatorA
         public ShuntCompensatorModelExt build() {
             List<ShuntCompensatorNonLinearModelImpl.SectionImpl> sections = IntStream.range(0, sectionAdders.size()).mapToObj(s -> {
                 SectionAdderImpl adder = sectionAdders.get(s);
-                return new ShuntCompensatorNonLinearModelImpl.SectionImpl(s + 1, adder.b, adder.g);
+                ShuntCompensatorNonLinearModelImpl.SectionImpl section = new ShuntCompensatorNonLinearModelImpl.SectionImpl(s + 1, adder.b, adder.g);
+                adder.copyPropertiesTo(section);
+                return section;
             }).toList();
             ShuntCompensatorNonLinearModelImpl nonLinearModel = new ShuntCompensatorNonLinearModelImpl(sections);
             this.copyPropertiesTo(nonLinearModel);
