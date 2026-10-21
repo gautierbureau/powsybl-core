@@ -257,6 +257,43 @@ public abstract class AbstractAreaTest {
     }
 
     @Test
+    public void areaAdderKeepsOrder() {
+        // Ten voltage levels and terminals, so that a hash order is very unlikely to match by chance
+        Substation substation = vlhv1.getNullableSubstation();
+        List<VoltageLevel> voltageLevels = new ArrayList<>();
+        List<Terminal> terminals = new ArrayList<>();
+        for (int i : new int[] {3, 7, 0, 9, 1, 5, 8, 2, 6, 4}) {
+            VoltageLevel voltageLevel = substation.newVoltageLevel()
+                    .setId("ORDER_VL" + i)
+                    .setNominalV(400.0)
+                    .setTopologyKind(TopologyKind.BUS_BREAKER)
+                    .add();
+            voltageLevel.getBusBreakerView().newBus().setId("ORDER_BUS" + i).add();
+            Load load = voltageLevel.newLoad()
+                    .setId("ORDER_LOAD" + i)
+                    .setBus("ORDER_BUS" + i)
+                    .setConnectableBus("ORDER_BUS" + i)
+                    .setP0(0.0)
+                    .setQ0(0.0)
+                    .add();
+            voltageLevels.add(voltageLevel);
+            terminals.add(load.getTerminal());
+        }
+        List<Boundary> boundaries = List.of(dlXnode2B.getBoundary(), dlXnode1A.getBoundary(), dlXnode2A.getBoundary(), dlXnode1B.getBoundary());
+
+        AreaAdder adder = network.newArea().setId("Ordered").setAreaType("OrderedType");
+        voltageLevels.forEach(adder::addVoltageLevel);
+        terminals.forEach(terminal -> adder.addAreaBoundary(terminal, true));
+        boundaries.forEach(boundary -> adder.addAreaBoundary(boundary, true));
+        Area area = adder.add();
+
+        // The area lists them in the order they were added
+        assertEquals(voltageLevels, area.getVoltageLevelStream().toList());
+        assertEquals(terminals, area.getAreaBoundaryStream().flatMap(areaBoundary -> areaBoundary.getTerminal().stream()).toList());
+        assertEquals(boundaries, area.getAreaBoundaryStream().flatMap(areaBoundary -> areaBoundary.getBoundary().stream()).toList());
+    }
+
+    @Test
     public void testWithTerminals() {
         TwoWindingsTransformer ngenNhv1 = network.getTwoWindingsTransformer("NGEN_NHV1");
 
