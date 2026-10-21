@@ -332,6 +332,34 @@ public abstract class AbstractShuntCompensatorTest {
     }
 
     @Test
+    public void nonLinearModelProperties() {
+        ShuntCompensatorAdder adder = createShuntAdder(SHUNT, "shuntName", 1, terminal, true, 200, 10);
+        ShuntCompensatorNonLinearModelAdder modelAdder = adder.newNonLinearModel();
+        modelAdder.setProperty("model", "value");
+        ShuntCompensatorNonLinearModelAdder.SectionAdder sectionAdder1 = modelAdder.beginSection().setB(5.0).setG(2.0);
+        sectionAdder1.setProperty("section", "first");
+        sectionAdder1.endSection();
+        ShuntCompensatorNonLinearModelAdder.SectionAdder sectionAdder2 = modelAdder.beginSection().setB(6.0);
+        sectionAdder2.setProperty("section", "second");
+        sectionAdder2.endSection();
+        modelAdder.add();
+        ShuntCompensator shuntCompensator = adder.add();
+
+        ShuntCompensatorNonLinearModel model = shuntCompensator.getModel(ShuntCompensatorNonLinearModel.class);
+        assertEquals("value", model.getProperty("model"));
+        List<ShuntCompensatorNonLinearModel.Section> sections = model.getAllSections();
+        assertEquals("first", sections.get(0).getProperty("section"));
+        assertEquals("second", sections.get(1).getProperty("section"));
+
+        // A shunt compensator added again from the same adder gets its own copy of the properties
+        ShuntCompensator shuntCompensator2 = adder.setId(SHUNT + "_2").add();
+        ShuntCompensatorNonLinearModel.Section section = shuntCompensator2.getModel(ShuntCompensatorNonLinearModel.class).getAllSections().get(0);
+        assertEquals("first", section.getProperty("section"));
+        section.setProperty("section", "changed");
+        assertEquals("first", sections.get(0).getProperty("section"));
+    }
+
+    @Test
     public void invalidEmptyNonLinearModel() {
         ShuntCompensatorAdder adder = createShuntAdder(INVALID, INVALID, 6, terminal, true, 200, 10);
         ValidationException e = assertThrows(ValidationException.class, () -> adder.newNonLinearModel().add());
