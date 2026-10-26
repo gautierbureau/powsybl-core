@@ -728,12 +728,100 @@ class VoltageLevelImpl extends AbstractIdentifiable<VoltageLevel> implements Vol
         notifyUpdate("topologyKind", oldTopologyKind, TopologyKind.BUS_BREAKER);
     }
 
+    private void convertToNodeBreakerModel() {
+        NodeBreakerTopologyModel newTopologyModel = new NodeBreakerTopologyModel(this);
+
+        // one busbar section per configured bus, on the first nodes
+        List<Bus> oldBuses = topologyModel.getBusBreakerView().getBusStream().toList();
+        Map<String, Integer> busbarSectionNodes = new HashMap<>();
+        int node = 0;
+        for (Bus bus : oldBuses) {
+            busbarSectionNodes.put(bus.getId(), node++);
+        }
+
+        // first store all bus/breaker topological infos associated to this terminal because we will start moving
+        // terminal from old mode to new one, it will modify the old topology model. Each feeder gets a bay of its
+        // own: a node for the disconnector to the busbar section, and a node for the feeder itself.
+        record TopologyModelInfos(TerminalExt terminal, String connectableId, String connectableBusId,
+                                  boolean connected, int middleNode, int feederNode) {
+        }
+
+        List<TopologyModelInfos> oldTopologyModelInfos = new ArrayList<>();
+        for (Terminal oldTerminal : topologyModel.getTerminals()) {
+            oldTopologyModelInfos.add(new TopologyModelInfos((TerminalExt) oldTerminal,
+                    oldTerminal.getConnectable().getId(),
+                    oldTerminal.getBusBreakerView().getConnectableBus().getId(),
+                    oldTerminal.isConnected(), node++, node++));
+        }
+
+        // transfer the switches between configured buses, they now join the busbar section nodes
+        for (Switch sw : topologyModel.getBusBreakerView().getSwitchStream().toList()) {
+            int node1 = busbarSectionNodes.get(topologyModel.getBusBreakerView().getBus1(sw.getId()).getId());
+            int node2 = busbarSectionNodes.get(topologyModel.getBusBreakerView().getBus2(sw.getId()).getId());
+            // no notification, this is just a transfer
+            ((BusBreakerTopologyModel) topologyModel).removeSwitchFromTopology(sw.getId(), false);
+            newTopologyModel.addSwitchToTopology((SwitchImpl) sw, node1, node2);
+        }
+
+        // reconnect all connectable to new topology model
+        for (var infos : oldTopologyModelInfos) {
+            TerminalExt oldTerminalExt = infos.terminal();
+
+            // create the new terminal with new type
+            TerminalExt newTerminalExt = new TerminalBuilder(networkRef, TopologyKind.NODE_BREAKER, this, oldTerminalExt.getSide(), oldTerminalExt.getTerminalNumber())
+                    .setNode(infos.feederNode())
+                    .build();
+
+            oldTerminalExt.getConnectable().replaceTerminal(oldTerminalExt, newTopologyModel, newTerminalExt, false);
+        }
+
+        // also here keep the notification for configured buses removal
+        topologyModel.removeTopology();
+
+        TopologyKind oldTopologyKind = topologyModel.getTopologyKind();
+        topologyModel = newTopologyModel;
+
+        // the configured bus ids are free now, so each busbar section takes the id of the bus it stands for
+        for (Bus bus : oldBuses) {
+            getNodeBreakerView().newBusbarSection()
+                    .setId(bus.getId())
+                    .setName(bus.getOptionalName().orElse(null))
+                    .setFictitious(bus.isFictitious())
+                    .setEnsureIdUnicity(true)
+                    .setNode(busbarSectionNodes.get(bus.getId()))
+                    .add();
+        }
+
+        // the disconnector is always closed, the breaker carries the connection state the terminal used to hold
+        for (var infos : oldTopologyModelInfos) {
+            getNodeBreakerView().newSwitch()
+                    .setId(infos.connectableBusId() + "_" + infos.connectableId() + "_DISCONNECTOR")
+                    .setEnsureIdUnicity(true)
+                    .setKind(SwitchKind.DISCONNECTOR)
+                    .setOpen(false)
+                    .setNode1(busbarSectionNodes.get(infos.connectableBusId()))
+                    .setNode2(infos.middleNode())
+                    .add();
+            getNodeBreakerView().newSwitch()
+                    .setId(getId() + "_" + infos.connectableId() + "_BREAKER")
+                    .setEnsureIdUnicity(true)
+                    .setKind(SwitchKind.BREAKER)
+                    .setRetained(true)
+                    .setOpen(!infos.connected())
+                    .setNode1(infos.middleNode())
+                    .setNode2(infos.feederNode())
+                    .add();
+        }
+
+        notifyUpdate("topologyKind", oldTopologyKind, TopologyKind.NODE_BREAKER);
+    }
+
     @Override
     public void convertToTopology(TopologyKind newTopologyKind) {
         Objects.requireNonNull(newTopologyKind);
         if (newTopologyKind != topologyModel.getTopologyKind()) {
             if (newTopologyKind == TopologyKind.NODE_BREAKER) {
-                throw new PowsyblException("Topology model conversion from bus/breaker to node/breaker not yet supported");
+                convertToNodeBreakerModel();
             } else if (newTopologyKind == TopologyKind.BUS_BREAKER) {
                 convertToBusBreakerModel();
             }

@@ -829,6 +829,20 @@ class BusBreakerTopologyModel extends AbstractTopologyModel {
         removedBusesIds.forEach(id -> network.getListeners().notifyAfterRemoval(id));
     }
 
+    /**
+     * Take a switch out of this topology without removing it from the network, so that it can be handed
+     * over to another topology model. Isolated buses are deliberately left in the graph: they are removed,
+     * with their notifications, by {@link #removeTopology()}.
+     */
+    void removeSwitchFromTopology(String switchId, boolean notify) {
+        Integer e = switches.remove(switchId);
+        if (e == null) {
+            throw new PowsyblException("Switch '" + switchId
+                    + "' not found in voltage level '" + voltageLevel.getId() + "'");
+        }
+        graph.removeEdge(e, notify);
+    }
+
     void addSwitchToTopology(SwitchImpl aSwitch, String busId1, String busId2) {
         int v1 = getVertex(busId1, true);
         int v2 = getVertex(busId2, true);

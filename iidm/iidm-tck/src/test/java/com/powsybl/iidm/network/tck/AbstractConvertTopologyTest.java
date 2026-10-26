@@ -7,7 +7,6 @@
  */
 package com.powsybl.iidm.network.tck;
 
-import com.powsybl.commons.PowsyblException;
 import com.powsybl.iidm.network.*;
 import com.powsybl.iidm.network.events.RemovalNetworkEvent;
 import com.powsybl.iidm.network.events.UpdateNetworkEvent;
@@ -47,8 +46,97 @@ public abstract class AbstractConvertTopologyTest {
     public void testBusBreakerToNodeBreaker() {
         Network busBreakerNetwork = EurostagTutorialExample1Factory.create();
         VoltageLevel vlgen = busBreakerNetwork.getVoltageLevel("VLGEN");
-        var e = assertThrows(PowsyblException.class, () -> vlgen.convertToTopology(TopologyKind.NODE_BREAKER));
-        assertEquals("Topology model conversion from bus/breaker to node/breaker not yet supported", e.getMessage());
+        NetworkEventRecorder recorder = new NetworkEventRecorder();
+        busBreakerNetwork.addListener(recorder);
+        assertEquals(List.of("NGEN"), vlgen.getBusBreakerView().getBusStream().map(Identifiable::getId).toList());
+
+        vlgen.convertToTopology(TopologyKind.NODE_BREAKER);
+
+        assertEquals(TopologyKind.NODE_BREAKER, vlgen.getTopologyKind());
+        // one busbar section per configured bus, on the first node, keeping the bus id
+        assertEquals(List.of("NGEN"), vlgen.getNodeBreakerView().getBusbarSectionStream().map(Identifiable::getId).toList());
+        assertEquals(0, vlgen.getNodeBreakerView().getBusbarSection("NGEN").getTerminal().getNodeBreakerView().getNode());
+        // one bay per feeder, closed since nothing was disconnected
+        assertThat(vlgen.getNodeBreakerView().getSwitchStream().map(Identifiable::getId).toList())
+            .containsExactlyInAnyOrder("NGEN_GEN_DISCONNECTOR", "VLGEN_GEN_BREAKER",
+                                       "NGEN_NGEN_NHV1_DISCONNECTOR", "VLGEN_NGEN_NHV1_BREAKER");
+        assertThat(vlgen.getNodeBreakerView().getSwitchStream()).noneMatch(Switch::isOpen);
+        assertEquals(SwitchKind.DISCONNECTOR, vlgen.getNodeBreakerView().getSwitch("NGEN_GEN_DISCONNECTOR").getKind());
+        assertEquals(SwitchKind.BREAKER, vlgen.getNodeBreakerView().getSwitch("VLGEN_GEN_BREAKER").getKind());
+        // same connectables, same bus view
+        assertEquals(1, vlgen.getBusView().getBusStream().count());
+        assertThat(vlgen.getBusView().getBusStream().findFirst().orElseThrow()
+            .getConnectedTerminalStream().map(t -> t.getConnectable().getId()).toList())
+            .containsExactlyInAnyOrder("NGEN", "GEN", "NGEN_NHV1");
+        assertThat(recorder.getEvents()).contains(
+            new UpdateNetworkEvent("VLGEN", "topologyKind", null, TopologyKind.BUS_BREAKER, TopologyKind.NODE_BREAKER));
+    }
+
+    @Test
+    public void testBusBreakerToNodeBreakerWithDisconnectedTerminal() {
+        Network busBreakerNetwork = EurostagTutorialExample1Factory.create();
+        VoltageLevel vlgen = busBreakerNetwork.getVoltageLevel("VLGEN");
+        Generator gen = busBreakerNetwork.getGenerator("GEN");
+        gen.getTerminal().disconnect();
+
+        vlgen.convertToTopology(TopologyKind.NODE_BREAKER);
+
+        // the breaker holds the state the terminal used to carry, the disconnector stays closed
+        assertTrue(vlgen.getNodeBreakerView().getSwitch("VLGEN_GEN_BREAKER").isOpen());
+        assertFalse(vlgen.getNodeBreakerView().getSwitch("NGEN_GEN_DISCONNECTOR").isOpen());
+        assertFalse(gen.getTerminal().isConnected());
+        assertFalse(vlgen.getNodeBreakerView().getSwitch("VLGEN_NGEN_NHV1_BREAKER").isOpen());
+        assertTrue(busBreakerNetwork.getTwoWindingsTransformer("NGEN_NHV1").getTerminal1().isConnected());
+
+        assertTrue(gen.getTerminal().connect());
+        assertFalse(vlgen.getNodeBreakerView().getSwitch("VLGEN_GEN_BREAKER").isOpen());
+        assertTrue(gen.getTerminal().isConnected());
+    }
+
+    @Test
+    public void testNodeBreakerToBusBreakerAndBack() {
+        vl.convertToTopology(TopologyKind.BUS_BREAKER);
+        vl.convertToTopology(TopologyKind.NODE_BREAKER);
+
+        assertEquals(TopologyKind.NODE_BREAKER, vl.getTopologyKind());
+        assertThat(vl.getNodeBreakerView().getBusbarSectionStream().map(Identifiable::getId).toList())
+            .containsExactlyInAnyOrder("S1VL2_0", "S1VL2_1");
+        // the coupler was transferred, not rebuilt: same id and state, now between the busbar section nodes
+        assertNotNull(vl.getNodeBreakerView().getSwitch("S1VL2_COUPLER"));
+        assertFalse(vl.getNodeBreakerView().getSwitch("S1VL2_COUPLER").isOpen());
+        assertThat(List.of(vl.getNodeBreakerView().getNode1("S1VL2_COUPLER"),
+                           vl.getNodeBreakerView().getNode2("S1VL2_COUPLER")))
+            .containsExactlyInAnyOrder(
+                vl.getNodeBreakerView().getBusbarSection("S1VL2_0").getTerminal().getNodeBreakerView().getNode(),
+                vl.getNodeBreakerView().getBusbarSection("S1VL2_1").getTerminal().getNodeBreakerView().getNode());
+        // every feeder kept its id, its bay breaker and its connection
+        assertNotNull(vl.getNodeBreakerView().getSwitch("S1VL2_TWT_BREAKER"));
+        for (Connectable<?> connectable : vl.getConnectables()) {
+            for (Terminal terminal : connectable.getTerminals()) {
+                if (terminal.getVoltageLevel() == vl) {
+                    assertTrue(terminal.isConnected(), connectable.getId() + " should still be connected");
+                }
+            }
+        }
+        // the coupler being closed, they share one bus as they did to begin with
+        assertEquals(1, vl.getBusView().getBusStream().count());
+        assertThat(vl.getBusView().getBusStream().findFirst().orElseThrow()
+            .getConnectedTerminalStream().map(t -> t.getConnectable().getId()).toList())
+            .containsExactlyInAnyOrder("S1VL2_0", "S1VL2_1",
+                "TWT", "VSC1", "GH1", "GH2", "GH3", "LD2", "LD3", "LD4", "SHUNT", "LCC1");
+    }
+
+    @Test
+    public void testConvertToSameTopologyKind() {
+        Network busBreakerNetwork = EurostagTutorialExample1Factory.create();
+        VoltageLevel vlgen = busBreakerNetwork.getVoltageLevel("VLGEN");
+        NetworkEventRecorder recorder = new NetworkEventRecorder();
+        busBreakerNetwork.addListener(recorder);
+
+        vlgen.convertToTopology(TopologyKind.BUS_BREAKER);
+
+        assertEquals(TopologyKind.BUS_BREAKER, vlgen.getTopologyKind());
+        assertEquals(Collections.emptyList(), recorder.getEvents());
     }
 
     @Test
