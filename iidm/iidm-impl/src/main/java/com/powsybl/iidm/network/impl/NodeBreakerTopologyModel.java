@@ -620,6 +620,19 @@ class NodeBreakerTopologyModel extends AbstractTopologyModel {
         return variants.get().calculatedBusTopology;
     }
 
+    /**
+     * Put a switch that already belongs to the network into this topology, between two nodes, as
+     * {@code removeSwitchFromTopology} took it out of another one. No notification and no index
+     * registration: this is a transfer of an existing switch, not the creation of a new one.
+     */
+    void addSwitchToTopology(SwitchImpl aSwitch, int node1, int node2) {
+        graph.addVertexIfNotPresent(node1);
+        graph.addVertexIfNotPresent(node2);
+        int e = graph.addEdge(node1, node2, aSwitch, false);
+        switches.put(aSwitch.getId(), e);
+        invalidateCache();
+    }
+
     void removeSwitchFromTopology(String switchId, boolean notify) {
         Integer e = switches.get(switchId);
         if (e == null) {
