@@ -23,6 +23,6 @@ public class LineCouplingsAdderImpl extends AbstractExtensionAdder<Network, Line
 
     @Override
     protected LineCouplingsImpl createExtension(Network network) {
-        return new LineCouplingsImpl();
+        return new LineCouplingsImpl(network);
     }
 }

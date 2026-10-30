@@ -22,7 +22,19 @@ import java.util.*;
 public class LineCouplingsImpl extends AbstractExtension<Network> implements LineCouplings {
 
     private final List<MutualCoupling> mutualCouplings = new LinkedList<>();
-    private NetworkListener listener;
+    private final NetworkListener listener = new NetworkListener() {
+        @Override
+        public void beforeRemoval(Identifiable<?> identifiable) {
+            if (identifiable instanceof Line line) {
+                mutualCouplings.removeIf(mc -> mc.getLine1() == line || mc.getLine2() == line);
+            }
+        }
+    };
+
+    LineCouplingsImpl(Network network) {
+        super(network);
+        network.addListener(listener);
+    }
 
     @Override
     public List<MutualCoupling> getMutualCouplings() {
@@ -75,30 +87,7 @@ public class LineCouplingsImpl extends AbstractExtension<Network> implements Lin
     }
 
     @Override
-    public void setExtendable(Network network) {
-        // Clean potential previous subscription
-        unsubscribeListener();
-        super.setExtendable(network);
-
-        listener = new NetworkListener() {
-            @Override
-            public void beforeRemoval(Identifiable<?> identifiable) {
-                if (identifiable instanceof Line line) {
-                    mutualCouplings.removeIf(mc -> mc.getLine1() == line || mc.getLine2() == line);
-                }
-            }
-        };
-        network.addListener(listener);
-    }
-
-    @Override
     public void cleanup() {
-        unsubscribeListener();
-    }
-
-    private void unsubscribeListener() {
-        if (this.getExtendable() != null && listener != null) {
-            this.getExtendable().removeListener(listener);
-        }
+        getExtendable().removeListener(listener);
     }
 }
