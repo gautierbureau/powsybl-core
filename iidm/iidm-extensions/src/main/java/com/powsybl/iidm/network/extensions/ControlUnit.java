@@ -15,9 +15,21 @@ public interface ControlUnit {
     record ParticipateEvent(String controlZoneName, String controlUnitId, boolean value) {
     }
 
+    record ParticipationFactorEvent(String controlZoneName, String controlUnitId, double value) {
+    }
+
     String getId();
 
     boolean isParticipate();
 
     void setParticipate(boolean participate);
+
+    /**
+     * Participation factor of the unit in the reactive power sharing of its zone, in MVar (the reactive power the
+     * unit provides when the zone level is 1, often noted Qr). NaN when not defined: the tools then use their own
+     * default, for instance half of the reactive diagram range.
+     */
+    double getParticipationFactor();
+
+    void setParticipationFactor(double participationFactor);
 }

@@ -11,6 +11,7 @@ import com.powsybl.commons.util.trove.TBooleanArrayList;
 import com.powsybl.iidm.network.extensions.ControlUnit;
 import com.powsybl.iidm.network.impl.NetworkImpl;
 import com.powsybl.iidm.network.impl.VariantManagerHolder;
+import gnu.trove.list.array.TDoubleArrayList;
 
 import java.util.Objects;
 
@@ -23,14 +24,18 @@ class ControlUnitImpl implements ControlUnit {
 
     private final TBooleanArrayList participate;
 
+    private final TDoubleArrayList participationFactor;
+
     private ControlZoneImpl controlZone;
 
-    ControlUnitImpl(String id, boolean participate, VariantManagerHolder variantManagerHolder) {
+    ControlUnitImpl(String id, boolean participate, double participationFactor, VariantManagerHolder variantManagerHolder) {
         this.id = Objects.requireNonNull(id);
         int variantArraySize = variantManagerHolder.getVariantManager().getVariantArraySize();
         this.participate = new TBooleanArrayList(variantArraySize);
+        this.participationFactor = new TDoubleArrayList(variantArraySize);
         for (int i = 0; i < variantArraySize; i++) {
             this.participate.add(participate);
+            this.participationFactor.add(participationFactor);
         }
     }
 
@@ -70,20 +75,47 @@ class ControlUnitImpl implements ControlUnit {
         }
     }
 
+    @Override
+    public double getParticipationFactor() {
+        return participationFactor.get(getVariantIndex());
+    }
+
+    @Override
+    public void setParticipationFactor(double participationFactor) {
+        if (!Double.isNaN(participationFactor) && participationFactor <= 0) {
+            throw new IllegalArgumentException("Control unit '" + id + "' participation factor must be positive: " + participationFactor);
+        }
+        int variantIndex = getVariantIndex();
+        double oldParticipationFactor = this.participationFactor.get(variantIndex);
+        if (Double.compare(participationFactor, oldParticipationFactor) != 0) {
+            this.participationFactor.set(variantIndex, participationFactor);
+            SecondaryVoltageControlImpl secondaryVoltageControl = controlZone.getSecondaryVoltageControl();
+            NetworkImpl network = (NetworkImpl) secondaryVoltageControl.getExtendable();
+            String variantId = network.getVariantManager().getVariantId(variantIndex);
+            network.getListeners().notifyExtensionUpdate(secondaryVoltageControl, "controlUnitParticipationFactor", variantId,
+                    new ParticipationFactorEvent(controlZone.getName(), id, oldParticipationFactor),
+                    new ParticipationFactorEvent(controlZone.getName(), id, participationFactor));
+        }
+    }
+
     void extendVariantArraySize(int number, int sourceIndex) {
         participate.ensureCapacity(participate.size() + number);
+        participationFactor.ensureCapacity(participationFactor.size() + number);
         for (int i = 0; i < number; ++i) {
             participate.add(participate.get(sourceIndex));
+            participationFactor.add(participationFactor.get(sourceIndex));
         }
     }
 
     void reduceVariantArraySize(int number) {
         participate.remove(participate.size() - number, number);
+        participationFactor.remove(participationFactor.size() - number, number);
     }
 
     void allocateVariantArrayElement(int[] indexes, int sourceIndex) {
         for (int index : indexes) {
             participate.set(index, participate.get(sourceIndex));
+            participationFactor.set(index, participationFactor.get(sourceIndex));
         }
     }
 }

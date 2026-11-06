@@ -12,6 +12,8 @@ import com.powsybl.iidm.network.extensions.SecondaryVoltageControl;
 import com.powsybl.iidm.network.extensions.SecondaryVoltageControlAdder;
 import com.powsybl.iidm.network.test.EurostagTutorialExample1Factory;
 import com.powsybl.iidm.serde.AbstractIidmSerDeTest;
+import com.powsybl.iidm.serde.ExportOptions;
+import com.powsybl.iidm.serde.IidmVersion;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -21,6 +23,7 @@ import java.util.List;
 import static com.powsybl.iidm.serde.IidmSerDeConstants.CURRENT_IIDM_VERSION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Geoffroy Jamgotchian {@literal <geoffroy.jamgotchian at rte-france.com>}
@@ -45,6 +48,7 @@ class SecondaryVoltageControlXmlTest extends AbstractIidmSerDeTest {
                     .add()
                     .newControlUnit()
                         .withId("GEN2")
+                        .withParticipationFactor(150d)
                         .add()
                     .add()
                 .add();
@@ -69,5 +73,51 @@ class SecondaryVoltageControlXmlTest extends AbstractIidmSerDeTest {
                      control2.getControlZones().get(0).getControlUnits().get(1).getId());
         assertEquals(control.getControlZones().get(0).getControlUnits().get(1).isParticipate(),
                      control2.getControlZones().get(0).getControlUnits().get(1).isParticipate());
+    }
+
+    @Test
+    void testParticipationFactor() throws IOException {
+        Network network = createNetworkWithParticipationFactor();
+        Network network2 = allFormatsRoundTripTest(network, "/secondaryVoltageControlRoundTripRef.xml", CURRENT_IIDM_VERSION);
+        SecondaryVoltageControl control2 = network2.getExtension(SecondaryVoltageControl.class);
+        assertNotNull(control2);
+        assertTrue(Double.isNaN(control2.getControlZones().get(0).getControlUnits().get(0).getParticipationFactor()));
+        assertEquals(150d, control2.getControlZones().get(0).getControlUnits().get(1).getParticipationFactor(), 0d);
+    }
+
+    @Test
+    void testV10() throws IOException {
+        // extension version 1.0 has no participation factor: it is not written and is read back as NaN
+        Network network = createNetworkWithParticipationFactor();
+        Network network2 = allFormatsRoundTripTest(network, "/secondaryVoltageControlRoundTripRef_V1_0.xml",
+                new ExportOptions()
+                        .addExtensionVersion(SecondaryVoltageControl.NAME, "1.0")
+                        .setVersion(IidmVersion.V_1_17.toString(".")));
+        SecondaryVoltageControl control2 = network2.getExtension(SecondaryVoltageControl.class);
+        assertNotNull(control2);
+        assertTrue(Double.isNaN(control2.getControlZones().get(0).getControlUnits().get(1).getParticipationFactor()));
+    }
+
+    private static Network createNetworkWithParticipationFactor() {
+        Network network = EurostagTutorialExample1Factory.createWithMoreGenerators();
+        network.setCaseDate(ZonedDateTime.parse("2023-01-07T20:43:11.819+01:00"));
+        network.newExtension(SecondaryVoltageControlAdder.class)
+                .newControlZone()
+                    .withName("z1")
+                    .newPilotPoint()
+                        .withBusbarSectionsOrBusesIds(List.of("NLOAD"))
+                        .withTargetV(15d)
+                    .add()
+                    .newControlUnit()
+                        .withId("GEN")
+                        .withParticipate(false)
+                    .add()
+                    .newControlUnit()
+                        .withId("GEN2")
+                        .withParticipationFactor(150d)
+                    .add()
+                .add()
+            .add();
+        return network;
     }
 }

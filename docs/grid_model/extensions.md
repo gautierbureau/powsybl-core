@@ -770,8 +770,9 @@ A control zone groups a pilot point with the generators that regulate its voltag
 |-------------|---------|------|----------|---------------|-----------------------------------------------------------|
 | id          | String  | -    | yes      | -             | The ID of the generator used as a control unit            |
 | participate | boolean | -    | no       | true          | Whether the generator participates in the voltage control |
+| participationFactor | double | MVar | no | -   | The participation factor of the generator in the reactive power sharing of the zone (the reactive power it provides when the zone level is 1, often noted $Q_r$). When not defined, the tools use their own default, for instance half of the reactive diagram range. |
 
-The `targetV` and `participate` attributes are multi-variants: they can vary from one variant to another.
+The `targetV`, `participate` and `participationFactor` attributes are multi-variants: they can vary from one variant to another.
 
 Here is how to add a secondary voltage control extension to a network:
 ```java

@@ -16,5 +16,7 @@ public interface ControlUnitAdder {
 
     ControlUnitAdder withParticipate(boolean participate);
 
+    ControlUnitAdder withParticipationFactor(double participationFactor);
+
     ControlZoneAdder add();
 }

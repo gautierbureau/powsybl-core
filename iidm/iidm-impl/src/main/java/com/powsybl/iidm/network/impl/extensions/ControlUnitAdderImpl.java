@@ -23,6 +23,8 @@ public class ControlUnitAdderImpl implements ControlUnitAdder {
 
     private boolean participate = true;
 
+    private double participationFactor = Double.NaN;
+
     ControlUnitAdderImpl(ControlZoneAdderImpl parent) {
         this.parent = Objects.requireNonNull(parent);
     }
@@ -40,11 +42,20 @@ public class ControlUnitAdderImpl implements ControlUnitAdder {
     }
 
     @Override
+    public ControlUnitAdderImpl withParticipationFactor(double participationFactor) {
+        this.participationFactor = participationFactor;
+        return this;
+    }
+
+    @Override
     public ControlZoneAdderImpl add() {
         if (id == null) {
             throw new PowsyblException("Control unit ID is not set");
         }
-        parent.addControlUnit(new ControlUnitImpl(id, participate, parent.getParent().getNetwork()));
+        if (!Double.isNaN(participationFactor) && participationFactor <= 0) {
+            throw new PowsyblException("Control unit '" + id + "' participation factor must be positive: " + participationFactor);
+        }
+        parent.addControlUnit(new ControlUnitImpl(id, participate, participationFactor, parent.getParent().getNetwork()));
         return parent;
     }
 }
