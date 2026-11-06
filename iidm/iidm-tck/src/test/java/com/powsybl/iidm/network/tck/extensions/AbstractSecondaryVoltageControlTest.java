@@ -47,6 +47,7 @@ public abstract class AbstractSecondaryVoltageControlTest {
                         .add()
                         .newControlUnit()
                             .withId("GEN2")
+                            .withParticipationFactor(150d)
                         .add()
                     .add()
                 .add();
@@ -66,6 +67,8 @@ public abstract class AbstractSecondaryVoltageControlTest {
         assertFalse(z1.getControlUnits().get(0).isParticipate());
         assertEquals("GEN2", z1.getControlUnits().get(1).getId());
         assertTrue(z1.getControlUnits().get(1).isParticipate());
+        assertTrue(Double.isNaN(z1.getControlUnits().get(0).getParticipationFactor()));
+        assertEquals(150d, z1.getControlUnits().get(1).getParticipationFactor(), 0d);
         z1.getPilotPoint().setTargetV(16);
         assertEquals(16d, z1.getPilotPoint().getTargetV(), 0d);
         assertTrue(z1.getControlUnit("GEN").isPresent());
@@ -92,6 +95,20 @@ public abstract class AbstractSecondaryVoltageControlTest {
         assertEquals(List.of(new ExtensionUpdateNetworkEvent("sim1", "secondaryVoltageControl", "controlUnitParticipate", "InitialState",
                         new ControlUnit.ParticipateEvent("z1", "GEN", false), new ControlUnit.ParticipateEvent("z1", "GEN", true))),
                 eventRecorder.getEvents());
+    }
+
+    @Test
+    public void controlUnitParticipationFactorNotificationTest() {
+        NetworkEventRecorder eventRecorder = new NetworkEventRecorder();
+        network.addListener(eventRecorder);
+        ControlUnit controlUnit = control.getControlZone("z1").orElseThrow().getControlUnit("GEN").orElseThrow();
+        controlUnit.setParticipationFactor(80d);
+        assertEquals(80d, controlUnit.getParticipationFactor(), 0d);
+        assertEquals(List.of(new ExtensionUpdateNetworkEvent("sim1", "secondaryVoltageControl", "controlUnitParticipationFactor", "InitialState",
+                        new ControlUnit.ParticipationFactorEvent("z1", "GEN", Double.NaN),
+                        new ControlUnit.ParticipationFactorEvent("z1", "GEN", 80d))),
+                eventRecorder.getEvents());
+        assertThrows(IllegalArgumentException.class, () -> controlUnit.setParticipationFactor(-1d));
     }
 
     @Test
